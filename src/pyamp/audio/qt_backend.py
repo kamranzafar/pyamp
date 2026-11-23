@@ -40,6 +40,7 @@ from PySide6.QtMultimedia import (
 )
 
 from pyamp.audio.backend import AudioBackend
+from pyamp.audio.qt_audio_env import avoid_incomplete_pipewire
 from pyamp.core.models import PlaybackState
 
 _STATE_MAP = {
@@ -75,6 +76,8 @@ class QtAudioBackend(AudioBackend):
 
     def __init__(self) -> None:
         super().__init__()
+        # Must happen before Qt initialises its audio backend (first player/output).
+        avoid_incomplete_pipewire()
         self._player = QMediaPlayer()
         self._output = QAudioOutput()
         self._tap = QAudioBufferOutput()

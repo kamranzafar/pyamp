@@ -57,6 +57,7 @@ from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.plugins import PluginContext, PluginManager
 from pyamp.ui.background_loader import BackgroundTrackLoader
+from pyamp.ui.icons import app_icon
 from pyamp.ui.main_window import MainWindow, UiServices
 from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import DEFAULT_SKIN
@@ -240,6 +241,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0 if run_self_test() else 1
     qt_app = QApplication(sys.argv[:1])
     qt_app.setApplicationName(APP_NAME)
+    qt_app.setWindowIcon(app_icon())  # window, Dock (when run from source) and taskbar
     qt_app.setApplicationVersion(__version__)
 
     app = Application(args)

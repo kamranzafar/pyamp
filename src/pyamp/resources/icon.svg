@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later
+     PyAmp app icon: a green LCD with a play mark and a three-band analyser.
+     Drawn on Apple's 1024 icon grid (824 px body, 100 px margins); the artwork
+     inside is designed on a 100-unit grid and scaled up. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <g transform="translate(100 100) scale(8.956522) translate(-4 -4)">
+    <rect x="4" y="4" width="92" height="92" rx="22" fill="#2a2c3a"/>
+    <rect x="30" y="12" width="40" height="3" rx="1.5" fill="#d4ac4a"/>
+    <rect x="12" y="21" width="76" height="62" rx="12" fill="#08090b"/>
+    <path d="M23 37 L23 67 L45 52 Z" fill="#22e06b" stroke="#22e06b" stroke-width="5" stroke-linejoin="round"/>
+    <rect x="54" y="52" width="8" height="18" rx="2" fill="#22e06b"/>
+    <rect x="66" y="36" width="8" height="34" rx="2" fill="#22e06b"/>
+    <rect x="66" y="36" width="8" height="9" rx="2" fill="#e8d23a"/>
+    <rect x="78" y="44" width="8" height="26" rx="2" fill="#22e06b"/>
+    <rect x="78" y="44" width="8" height="7" rx="2" fill="#e8452f"/>
+  </g>
+</svg>

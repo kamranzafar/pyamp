@@ -24,7 +24,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QCoreApplication
+from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtWidgets import QApplication
 
 from pyamp.app import Application
@@ -35,7 +35,7 @@ from pyamp.core.models import PlaybackState, RepeatMode, Track
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 from pyamp.library.saved_playlists import SavedPlaylists
-from pyamp.ui import menu_bar
+from pyamp.ui import main_window, menu_bar
 from pyamp.ui.menu_bar import MenuBarIcon
 from tests.conftest import FakeBackend, make_tracks
 from tests.test_background_loader import wait_until
@@ -177,28 +177,51 @@ def app(
     application.window.close()
 
 
-def test_icon_is_shown_and_can_be_hidden(app: Application) -> None:
+@pytest.fixture(params=[True, False], ids=["macos", "other"])
+def on_macos(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> bool:
+    monkeypatch.setattr(main_window, "IS_MACOS", request.param)
+    return bool(request.param)
+
+
+def test_icon_is_shown_and_can_be_hidden(app: Application, on_macos: bool) -> None:
     window = app.window
     assert window.menu_bar_icon.visible
-    assert window.keep_running_action.isEnabled()
     window.show_icon_action.trigger()
     assert not window.menu_bar_icon.visible
     assert app.settings.show_in_menu_bar is False
-    assert not window.keep_running_action.isEnabled()  # no icon, no way back
+    # Without the icon, only macOS (the Dock) has a way back to a hidden window.
+    assert window.keep_running_action.isEnabled() is on_macos
+    assert window.keeps_running_when_closed is on_macos
 
 
-def test_closing_hides_the_window_only_when_asked(app: Application) -> None:
+def test_closing_hides_the_window_by_default(app: Application, on_macos: bool) -> None:
     window = app.window
-    window.close()
-    assert not window.isVisible()  # default: closing closes
-    window.show()
-    window.keep_running_action.trigger()
-    assert app.settings.keep_running_in_menu_bar
+    assert app.settings.keep_running_when_closed
     window.close()
     assert not window.isVisible()
-    assert window.menu_bar_icon.visible  # still there, still playing
+    assert window.menu_bar_icon.visible  # still running, still playing
     window.show_and_raise()
     assert window.isVisible()
+
+
+def test_closing_can_quit_instead(app: Application) -> None:
+    window = app.window
+    window.keep_running_action.trigger()
+    assert app.settings.keep_running_when_closed is False
+    assert not window.keeps_running_when_closed
+
+
+def test_dock_click_brings_a_closed_window_back(app: Application) -> None:
+    window = app.window
+    active = Qt.ApplicationState.ApplicationActive
+    window.close()
+    window._on_app_state(Qt.ApplicationState.ApplicationInactive)
+    assert not window.isVisible()
+    window._on_app_state(active)  # what macOS reports for a Dock icon click
+    assert window.isVisible()
+    window.hide()  # hidden some other way: activation doesn't force it open
+    window._on_app_state(active)
+    assert not window.isVisible()
 
 
 def test_quit_quits_even_when_closing_would_hide(
@@ -206,7 +229,6 @@ def test_quit_quits_even_when_closing_would_hide(
 ) -> None:
     quits: list[bool] = []
     monkeypatch.setattr(QApplication, "quit", staticmethod(lambda: quits.append(True)))
-    app.window.keep_running_action.trigger()
     app.window.quit()
     assert quits == [True]
     assert not app.window.isVisible()

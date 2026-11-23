@@ -52,8 +52,9 @@ class Settings:
     show_remaining_time: bool = False
     #: Show PyAmp's icon in the menu bar (macOS) or system tray.
     show_in_menu_bar: bool = True
-    #: Closing the window hides it; PyAmp keeps playing in the menu bar until Quit.
-    keep_running_in_menu_bar: bool = False
+    #: Closing the window only hides it and the music keeps playing, until Quit (the
+    #: usual behaviour for macOS apps; elsewhere it needs the tray icon to get back).
+    keep_running_when_closed: bool = True
 
 
 class SettingsStore:

@@ -56,6 +56,7 @@ from pyamp.core.playlist import Playlist, SortKey
 from pyamp.library.metadata import AUDIO_EXTENSIONS
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.library.saved_playlists import PlaylistNameError
+from pyamp.ui.about_dialog import AboutDialog
 from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
 from pyamp.ui.equalizer_window import EqualizerWindow
@@ -102,6 +103,7 @@ class MainWindow(QMainWindow):
         self._skin = skin
         self._equalizer_window: EqualizerWindow | None = None
         self._jump_dialog: JumpDialog | None = None
+        self._about_dialog: AboutDialog | None = None
         self.setWindowTitle(APP_NAME)
         self.setStyleSheet(skin.stylesheet())
         self.setAcceptDrops(True)
@@ -263,6 +265,19 @@ class MainWindow(QMainWindow):
             self.show_icon_action.setEnabled(False)
             self.show_icon_action.setToolTip(f"This desktop has no {PLACE.lower()}")
         self._sync_view_menu()
+
+        help_menu = menu_bar.addMenu("&Help")
+        self.about_action = self._add_menu_action(help_menu, f"&About {APP_NAME}", self.show_about)
+        # macOS shows it as "About PyAmp" in the application menu, where users look for it.
+        self.about_action.setMenuRole(QAction.MenuRole.AboutRole)
+
+    def show_about(self) -> AboutDialog:
+        if self._about_dialog is None:
+            self._about_dialog = AboutDialog(self._skin, parent=self)
+        self._about_dialog.show()
+        self._about_dialog.raise_()
+        self._about_dialog.activateWindow()
+        return self._about_dialog
 
     def _set_menu_bar_icon(self, shown: bool) -> None:
         self._s.settings.show_in_menu_bar = shown

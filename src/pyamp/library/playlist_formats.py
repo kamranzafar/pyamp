@@ -33,7 +33,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import ClassVar
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from pyamp.core.models import Track
 
@@ -57,7 +58,8 @@ class PlaylistFormat(ABC):
     def _resolve(entry: str, base: Path) -> Path | None:
         entry = entry.strip()
         if entry.startswith("file://"):
-            entry = unquote(urlparse(entry).path)
+            # url2pathname decodes %20 etc. and, on Windows, turns /C:/x into C:\x.
+            entry = url2pathname(urlparse(entry).path)
         if not entry or "://" in entry:  # skip blanks and stream URLs for now
             return None
         candidate = Path(entry).expanduser()

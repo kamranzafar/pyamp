@@ -164,7 +164,7 @@ def test_import_retries_once_with_system_libass(tmp_path: Path) -> None:
 
     def import_mpv() -> ModuleType:
         attempts.append(1)
-        if "/sys/libass.dylib" not in loaded:
+        if str(Path("/sys/libass.dylib")) not in loaded:
             raise LIBASS_ERROR
         return module
 
@@ -177,7 +177,7 @@ def test_import_retries_once_with_system_libass(tmp_path: Path) -> None:
     )
     assert result is module
     assert len(attempts) == 2
-    assert loaded == ["/sys/libass.dylib"]
+    assert loaded == [str(Path("/sys/libass.dylib"))]
 
 
 def test_missing_libass_gives_a_helpful_error(tmp_path: Path) -> None:

@@ -53,6 +53,7 @@ from pyamp.library.metadata import AUDIO_EXTENSIONS
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
+from pyamp.ui.equalizer_window import EqualizerWindow
 from pyamp.ui.playlist_model import PlaylistModel
 from pyamp.ui.skin import Skin
 from pyamp.ui.widgets.lcd import LcdPanel
@@ -80,6 +81,8 @@ class MainWindow(QMainWindow):
     def __init__(self, services: UiServices, skin: Skin) -> None:
         super().__init__()
         self._s = services
+        self._skin = skin
+        self._equalizer_window: EqualizerWindow | None = None
         self.setWindowTitle(APP_NAME)
         self.setStyleSheet(skin.stylesheet())
         self.setAcceptDrops(True)
@@ -175,10 +178,22 @@ class MainWindow(QMainWindow):
         play_menu.addActions([self._actions.shuffle, self._actions.repeat])
         replay_gain_menu = play_menu.addMenu("Replay&Gain")
         replay_gain_menu.addActions(list(self._actions.replay_gain.values()))
+        self._add_menu_action(play_menu, "&Equaliser…", self.show_equalizer, "G")
 
         list_menu = menu_bar.addMenu("P&laylist")
         self._add_menu_action(list_menu, "&Remove Selected", self._remove_selected)
         self._add_menu_action(list_menu, "&Clear", self._clear_playlist)
+
+    def show_equalizer(self) -> EqualizerWindow:
+        """Open the equaliser window (one instance, reused)."""
+        if self._equalizer_window is None:
+            self._equalizer_window = EqualizerWindow(
+                self._s.player, self._s.bus, self._skin, parent=self
+            )
+        self._equalizer_window.show()
+        self._equalizer_window.raise_()
+        self._equalizer_window.activateWindow()
+        return self._equalizer_window
 
     def _add_menu_action(
         self,

@@ -44,6 +44,7 @@ from pyamp.audio.registry import (
     create_backend,
 )
 from pyamp.config import Settings, SettingsStore
+from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import EventBus
 from pyamp.core.models import RepeatMode, ReplayGainMode
 from pyamp.core.player import Player
@@ -123,6 +124,10 @@ class Application:
         self.settings.shuffle = self.player.shuffle
         self.settings.repeat = self.player.repeat.value
         self.settings.replay_gain = self.player.replay_gain.value
+        eq = self.player.equalizer
+        self.settings.equalizer_enabled = eq.enabled
+        self.settings.equalizer_preamp = eq.preamp_db
+        self.settings.equalizer_gains = list(eq.gains_db)
         try:
             self._store.save(self.settings)
             if restore_incomplete:
@@ -160,6 +165,16 @@ class Application:
             self.player.set_replay_gain(ReplayGainMode(settings.replay_gain))
         except ValueError:
             self.player.set_replay_gain(ReplayGainMode.OFF)
+        try:
+            equalizer = Equalizer(
+                enabled=bool(settings.equalizer_enabled),
+                preamp_db=float(settings.equalizer_preamp),
+                gains_db=tuple(float(g) for g in settings.equalizer_gains),
+            )
+        except (TypeError, ValueError):
+            log.warning("Ignoring malformed equaliser settings")
+            equalizer = Equalizer()
+        self.player.set_equalizer(equalizer)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

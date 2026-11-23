@@ -33,6 +33,7 @@ from typing import ClassVar, Protocol
 import numpy as np
 from numpy.typing import NDArray
 
+from pyamp.core.equalizer import Equalizer
 from pyamp.core.models import PlaybackState, ReplayGainMode
 
 
@@ -92,6 +93,9 @@ class AudioBackend(ABC):
     #: If not, the player computes each track's gain and calls :meth:`set_track_gain`.
     applies_replay_gain: ClassVar[bool] = False
 
+    #: Whether :meth:`set_equalizer` has any effect.
+    supports_equalizer: ClassVar[bool] = False
+
     def __init__(self) -> None:
         self._listener: BackendListener = _NullListener()
 
@@ -134,6 +138,10 @@ class AudioBackend(ABC):
 
     def set_track_gain(self, factor: float) -> None:
         """Scale the output by ``factor`` (linear) on top of the user's volume."""
+        return None
+
+    def set_equalizer(self, equalizer: Equalizer) -> None:
+        """Filter the output through ``equalizer``. Only for :attr:`supports_equalizer`."""
         return None
 
     def close(self) -> None:

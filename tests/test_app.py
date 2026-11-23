@@ -24,12 +24,14 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QCoreApplication
+from PySide6.QtGui import QAction
 
 from pyamp import app as app_module
 from pyamp.app import Application, parse_args
 from pyamp.audio import registry
 from pyamp.audio.registry import BackendUnavailableError
 from pyamp.config import Settings, SettingsStore
+from pyamp.core.equalizer import Equalizer
 from pyamp.core.models import RepeatMode, ReplayGainMode, Track
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.ui.background_loader import LoadJob
@@ -109,6 +111,49 @@ def test_invalid_replay_gain_setting_falls_back_to_off(
     application = build(store)
     cleanup.append(application)
     assert application.player.replay_gain is ReplayGainMode.OFF
+
+
+def test_equalizer_setting_is_restored_and_saved(
+    store: SettingsStore, cleanup: list[Application]
+) -> None:
+    gains = [3.0, 2.0, 1.0, 0.0, -1.0, -2.0, 0.0, 1.0, 2.0, 3.0]
+    store.save(
+        Settings(
+            equalizer_enabled=True, equalizer_preamp=-3.0, equalizer_gains=gains, backend="fake"
+        )
+    )
+    application = build(store)
+    cleanup.append(application)
+    assert application.player.equalizer == Equalizer(True, -3.0, tuple(gains))
+
+    application.player.set_equalizer(Equalizer().with_preset("Vocal"))
+    application.shutdown()
+    saved = store.load()
+    assert saved.equalizer_enabled is False
+    assert tuple(saved.equalizer_gains) == Equalizer().with_preset("Vocal").gains_db
+
+
+@pytest.mark.parametrize("gains", [[1.0, 2.0], ["loud"] * 10, None])
+def test_malformed_equalizer_setting_falls_back_to_flat(
+    store: SettingsStore, cleanup: list[Application], gains: object
+) -> None:
+    store.save(Settings(equalizer_enabled=True, equalizer_gains=gains, backend="fake"))  # type: ignore[arg-type]
+    application = build(store)
+    cleanup.append(application)
+    assert application.player.equalizer == Equalizer()
+
+
+def test_equalizer_window_is_opened_from_the_menu_and_reused(
+    store: SettingsStore, cleanup: list[Application]
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    titles = [a.text() for a in application.window.findChildren(QAction)]
+    assert "&Equaliser\u2026" in titles
+    first = application.window.show_equalizer()
+    assert application.window.show_equalizer() is first
+    assert first.isVisible()
+    first.close()
 
 
 def test_invalid_repeat_setting_falls_back_to_off(

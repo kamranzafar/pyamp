@@ -23,7 +23,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +40,9 @@ class Settings:
     shuffle: bool = False
     repeat: str = "off"
     replay_gain: str = "off"
+    equalizer_enabled: bool = False
+    equalizer_preamp: float = 0.0
+    equalizer_gains: list[float] = field(default_factory=lambda: [0.0] * 10)
     backend: str = "qt"
     last_directory: str = ""
     show_remaining_time: bool = False

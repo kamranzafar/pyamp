@@ -63,7 +63,10 @@ ignore = ["PLR0913", "PLR2004"]
 
 [tool.ruff.lint.pep8-naming]
 # Qt event handlers (mousePressEvent, paintEvent, ...) are camelCase by necessity.
-ignore-names = ["*Event", "sizeHint", "minimumSizeHint", "rowCount", "columnCount", "headerData"]
+ignore-names = [
+    "*Event", "sizeHint", "minimumSizeHint", "rowCount", "columnCount", "headerData",
+    "eventFilter", "mimeTypes", "mimeData", "dropMimeData", "supportedDropActions", "canDropMimeData",
+]
 
 [tool.mypy]
 strict = true

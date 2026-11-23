@@ -19,12 +19,14 @@
 from __future__ import annotations
 
 import random
+from pathlib import Path
 
 import pytest
 
 from pyamp.core.events import EventBus, PlaylistChanged
+from pyamp.core.models import Track
 from pyamp.core.play_order import SequentialOrder, ShuffleOrder
-from pyamp.core.playlist import Playlist
+from pyamp.core.playlist import Playlist, SortKey
 from tests.conftest import make_tracks
 
 
@@ -105,3 +107,111 @@ def test_add_reports_where_tracks_were_appended(playlist: Playlist, bus: EventBu
     playlist.add(make_tracks(3))
     playlist.remove([0])
     assert [c.appended_from for c in changes] == [0, 2, None]
+
+
+# -- Editing: move, sort, reverse, duplicates, replace -------------------------------- #
+
+
+def titles(playlist: Playlist) -> list[str]:
+    return [t.title for t in playlist]
+
+
+def named(*names: str, **durations: int) -> list[Track]:
+    return [
+        Track(path=Path(f"/m/{n}.mp3"), title=n, duration_ms=durations.get(n, 0)) for n in names
+    ]
+
+
+def test_move_block_down_and_up(playlist: Playlist) -> None:
+    playlist.add(named("a", "b", "c", "d", "e"))
+    assert playlist.move([0, 1], 4) == [2, 3]  # before "e"
+    assert titles(playlist) == ["c", "d", "a", "b", "e"]
+    assert playlist.move([3, 4], 0) == [0, 1]
+    assert titles(playlist) == ["b", "e", "c", "d", "a"]
+
+
+def test_move_to_end_and_ignores_bad_rows(playlist: Playlist) -> None:
+    playlist.add(named("a", "b", "c"))
+    assert playlist.move([0, 99], 3) == [2]
+    assert titles(playlist) == ["b", "c", "a"]
+    assert playlist.move([], 0) == []
+    assert playlist.move([1], 1) == [1]  # moving onto itself changes nothing
+
+
+def test_move_keeps_the_playing_track(playlist: Playlist) -> None:
+    playlist.add(named("a", "b", "c", "d"))
+    playlist.set_current(1)  # "b"
+    playlist.move([0], 4)
+    assert playlist.current_track is not None
+    assert playlist.current_track.title == "b"
+    assert playlist.current_index == 0
+
+
+def test_move_publishes_one_change(playlist: Playlist, bus: EventBus) -> None:
+    playlist.add(named("a", "b"))
+    events: list[PlaylistChanged] = []
+    bus.subscribe(PlaylistChanged, events.append)
+    playlist.move([0], 2)
+    assert events == [PlaylistChanged()]
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [
+        (SortKey.TITLE, ["apple", "Banana", "cherry"]),
+        (SortKey.ARTIST, ["Banana", "apple", "cherry"]),
+        (SortKey.FILENAME, ["Banana", "apple", "cherry"]),
+        (SortKey.DURATION, ["cherry", "Banana", "apple"]),
+    ],
+)
+def test_sort(playlist: Playlist, key: SortKey, expected: list[str]) -> None:
+    playlist.add(
+        [
+            Track(path=Path("/m/b.mp3"), title="apple", artist="Zed", duration_ms=300),
+            Track(path=Path("/m/a.mp3"), title="Banana", artist="alpha", duration_ms=200),
+            Track(path=Path("/m/c.mp3"), title="cherry", artist="Zed", duration_ms=100),
+        ]
+    )
+    playlist.sort(key)
+    assert titles(playlist) == expected
+
+
+def test_sort_descending_and_stable(playlist: Playlist) -> None:
+    playlist.add(named("x", "y", "z", x=1, y=1, z=2))
+    playlist.sort(SortKey.DURATION, descending=True)
+    assert titles(playlist) == ["z", "x", "y"]  # x and y tie: original order kept
+
+
+def test_sort_and_reverse_keep_the_playing_track(playlist: Playlist) -> None:
+    playlist.add(named("c", "a", "b"))
+    playlist.set_current(0)  # "c"
+    playlist.sort(SortKey.TITLE)
+    assert playlist.current_index == 2
+    playlist.reverse()
+    assert titles(playlist) == ["c", "b", "a"]
+    assert playlist.current_index == 0
+
+
+def test_already_sorted_publishes_nothing(playlist: Playlist, bus: EventBus) -> None:
+    playlist.add(named("a", "b"))
+    events: list[PlaylistChanged] = []
+    bus.subscribe(PlaylistChanged, events.append)
+    playlist.sort(SortKey.TITLE)
+    assert events == []
+
+
+def test_remove_duplicates_keeps_the_playing_copy(playlist: Playlist) -> None:
+    a, b = named("a", "b")
+    playlist.add([a, b, a, b, a])
+    playlist.set_current(2)  # the second "a"
+    assert playlist.remove_duplicates() == 3
+    assert titles(playlist) == ["b", "a"]
+    assert playlist.current_index == 1
+
+
+def test_replace_swaps_the_list_and_clears_the_cursor(playlist: Playlist) -> None:
+    playlist.add(named("a", "b"))
+    playlist.set_current(1)
+    playlist.replace(named("x"))
+    assert titles(playlist) == ["x"]
+    assert playlist.current_index is None

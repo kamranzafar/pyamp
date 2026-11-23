@@ -46,6 +46,8 @@ class Settings:
     backend: str = "qt"
     #: Which libmpv the mpv backend prefers: "auto", "system" or "bundled".
     libmpv: str = "auto"
+    #: The saved playlist that was open last.
+    active_playlist: str = ""
     last_directory: str = ""
     show_remaining_time: bool = False
 

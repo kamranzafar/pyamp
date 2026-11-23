@@ -75,6 +75,14 @@ class Skin:
             border: 1px solid {self.border}; outline: 0;
         }}
         QStatusBar {{ color: {self.text_dim}; }}
+        QComboBox {{
+            background: {self.panel}; color: {self.playlist_text};
+            border: 1px solid {self.border}; padding: 1px 6px;
+        }}
+        QComboBox QAbstractItemView {{
+            background: {self.panel}; color: {self.playlist_text};
+            selection-background-color: {self.selection};
+        }}
         QMenu {{ background: {self.window}; color: {self.text}; }}
         QMenu::item:selected {{ background: {self.selection}; }}
         """

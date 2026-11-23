@@ -124,6 +124,15 @@ def make_tracks(n: int) -> list[Track]:
     ]
 
 
+@pytest.fixture(autouse=True)
+def isolated_playlists(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No test may touch the user's real saved playlists."""
+    folder = tmp_path_factory.mktemp("saved-playlists")
+    monkeypatch.setattr("pyamp.library.saved_playlists.default_directory", lambda: folder)
+
+
 @pytest.fixture
 def bus() -> EventBus:
     return EventBus()

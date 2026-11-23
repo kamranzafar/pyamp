@@ -31,9 +31,31 @@ uv run pyamp --log-level INFO     # see plugin activity, e.g. "Now playing: ..."
 | `S` / `R`      | Shuffle / cycle repeat (off → all → one) |
 | `Enter`, double-click | Play selected track |
 | `Delete`       | Remove selected tracks     |
+| `J`            | Jump to track              |
+| `Ctrl+N` / `F2` | New / rename playlist     |
 | Click the time | Toggle elapsed / remaining |
 
 Drag and drop files or folders onto the window to add them.
+
+### Playlists
+
+Keep as many playlists as you like and switch between them with the selector above
+the list. **Changes are saved automatically**: there's no Save button. New, Rename
+and Delete are in the **Playlist** menu. The playlist that was open last comes back
+on the next start. Playlists are stored as `.m3u8` files in PyAmp's data folder
+(`~/Library/Application Support/pyamp/playlists` on macOS); **File → Import/Export
+Playlist** reads and writes playlist files anywhere else.
+
+Editing the open playlist:
+
+| | |
+|---|---|
+| Drag tracks | Reorder (drop files from Finder/Explorer to add them) |
+| **Playlist → Sort by** | Title, Artist, Album, File name, Duration, or Reverse order |
+| **Playlist → Remove Duplicates** | Drop repeated files (keeps the one playing) |
+| `J` | **Jump to Track**: type part of a title or file name, Enter plays it |
+| `Delete` | Remove the selected tracks |
+| Right-click | All of the above |
 
 ### Audio backends
 
@@ -157,6 +179,7 @@ src/pyamp/
 ├── library/            Getting tracks in
 │   ├── metadata.py     Tag reading via mutagen
 │   ├── playlist_formats.py  M3U / PLS read & write
+│   ├── saved_playlists.py   Named playlists stored as .m3u8 files
 │   └── loader.py       Files/folders/playlists → Tracks
 ├── media_session/      OS media controls (used by the media-session plugin)
 │   ├── session.py      Player ⇄ NowPlaying snapshots and OS commands (pure)
@@ -168,6 +191,8 @@ src/pyamp/
     ├── actions.py      Playback commands as QActions
     ├── equalizer_window.py  The equaliser window
     ├── background_loader.py  Non-blocking track loading (worker thread)
+    ├── playlist_session.py   Which saved playlist is open; auto-save
+    ├── jump_dialog.py        Jump to Track (J)
     ├── playlist_model.py  Playlist → QAbstractTableModel adapter
     ├── main_window.py
     └── widgets/        LCD panel, marquee, spectrum, sliders, playlist view

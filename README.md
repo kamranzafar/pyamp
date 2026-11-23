@@ -297,13 +297,23 @@ my-scrobbler = "my_package:MyScrobbler"
 
 See `src/pyamp/plugins/now_playing.py` for a working example.
 
-## Roadmap ideas
+## Roadmap
 
-- Process-pool tag reading for very large libraries (mutagen is pure Python, so the
-  worker thread still competes for the GIL)
-- Frameless, pixel-skinned window + classic `.wsz` skin loader
-- Windows media controls (SMTC) and album artwork in system media widgets
-- Internet radio (playlist formats currently skip URLs)
+PyAmp aims to stay small: a fast player for local files, not a media centre.
+
+- **Windows**: an installer, with the system media controls (SMTC) so media keys
+  and the volume flyout work as they do on macOS and Linux.
+- **Last.fm scrobbling**, as an optional plugin.
+- **Internet radio** (maybe): add a stream URL, keep URLs in playlist files (they're
+  currently skipped) and show the station's current song.
+
+Not planned, to keep PyAmp lightweight:
+
+- Classic `.wsz` skins and a frameless, pixel-skinned window. Colours live in
+  `ui/skin.py` if you want to theme it.
+- Album artwork in the system's media widgets.
+- A process pool for reading tags. Tags are read on a background thread, so the
+  window stays responsive even while very large folders load.
 
 ## License
 

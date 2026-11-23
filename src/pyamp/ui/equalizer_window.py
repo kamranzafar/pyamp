@@ -41,8 +41,9 @@ from pyamp.ui.skin import Skin
 
 #: Slider positions per dB (sliders are integer, gains move in 0.5 dB steps).
 STEPS_PER_DB = 2
-#: While dragging, the player is updated at most this often.
-THROTTLE_MS = 40
+#: Slider changes are sent once a slider has been still this long (or is released).
+#: The mpv backend rebuilds its filter chain on each change, so not continuously.
+DEBOUNCE_MS = 150
 CUSTOM = "Custom"
 UNSUPPORTED_NOTE = (
     "The equaliser needs the mpv backend. Start PyAmp with <b>--backend mpv</b> to use it."
@@ -72,10 +73,10 @@ class EqualizerWindow(QDialog):
         self.preamp = _gain_slider("Preamp")
         self.bands = [_gain_slider(f"{band_label(hz)} Hz") for hz in BANDS_HZ]
 
-        self._throttle = QTimer(self)
-        self._throttle.setSingleShot(True)
-        self._throttle.setInterval(THROTTLE_MS)
-        self._throttle.timeout.connect(self._push)
+        self._debounce = QTimer(self)
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(DEBOUNCE_MS)
+        self._debounce.timeout.connect(self._push)
 
         self._layout()
         self._show(player.equalizer)
@@ -86,6 +87,7 @@ class EqualizerWindow(QDialog):
         self.flat.clicked.connect(lambda: self._on_preset("Flat", reset_preamp=True))
         for slider in (self.preamp, *self.bands):
             slider.valueChanged.connect(self._on_slider)
+            slider.sliderReleased.connect(self.flush)
         bus.subscribe(EqualizerChanged, lambda e: self._show(e.equalizer))
 
     # -- Widgets -> player ---------------------------------------------------- #
@@ -99,15 +101,14 @@ class EqualizerWindow(QDialog):
         )
 
     def flush(self) -> None:
-        """Send a pending throttled change now."""
-        if self._throttle.isActive():
-            self._throttle.stop()
+        """Send a pending slider change now."""
+        if self._debounce.isActive():
+            self._debounce.stop()
             self._push()
 
     def _on_slider(self) -> None:
         self._update_labels()
-        if not self._throttle.isActive():
-            self._throttle.start()
+        self._debounce.start()  # restarts while the slider keeps moving
 
     def _on_preset(self, name: str, *, reset_preamp: bool = False) -> None:
         if name not in PRESETS:

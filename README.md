@@ -58,7 +58,8 @@ track boundaries.
 **Playback → Equaliser…** (`G`) opens a 10-band graphic equaliser (60 Hz – 16 kHz,
 ±12 dB) with a preamp and presets. It needs the `mpv` backend: QtMultimedia gives
 no access to the audio stream, so with `qt` the window is shown but disabled.
-Sliders retune the running filter live, without dropouts, and the settings are
+Changes apply when you release or pause a slider (mpv rebuilds its filter chain
+for each change, which can cause a tiny audible blip), and the settings are
 remembered. Boosting bands can clip loud tracks; lower the preamp if you hear
 distortion.
 

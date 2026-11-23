@@ -77,15 +77,15 @@ def test_switch_and_sliders_drive_the_player(
     window.bands[0].setValue(6 * STEPS_PER_DB)
     window.bands[0].setValue(8 * STEPS_PER_DB)  # a drag: several moves...
     window.preamp.setValue(-3 * STEPS_PER_DB)
-    assert eq_player.equalizer.gains_db[0] == 0.0  # ...throttled, not sent yet
-    window.flush()
+    assert eq_player.equalizer.gains_db[0] == 0.0  # ...not sent while still moving
+    window.bands[0].sliderReleased.emit()  # releasing sends it at once
     assert eq_player.equalizer.gains_db[0] == 8.0
     assert eq_player.equalizer.preamp_db == -3.0
     assert len(eq_backend.equalizers) == 2  # the switch, then one batched update
     assert window.presets.currentText() == CUSTOM
 
 
-def test_throttle_timer_sends_the_change(
+def test_change_is_sent_once_the_slider_rests(
     window: EqualizerWindow, eq_player: Player, qt_app: QCoreApplication
 ) -> None:
     window.bands[4].setValue(3 * STEPS_PER_DB)

@@ -81,8 +81,8 @@ EQ_Q = 1.41
 def equalizer_graph(equalizer: Equalizer) -> str:
     """The lavfi graph for ``equalizer``: a preamp, then one peaking filter per band.
 
-    Each filter instance is named (``volume@pre``, ``equalizer@b0``..``equalizer@b9``) so
-    ``af-command`` can retune it live.
+    Filter instances are named (``volume@pre``, ``equalizer@b0``..``equalizer@b9``) to
+    make the graph readable in mpv's logs.
     """
     bands = ",".join(
         f"equalizer@b{i}=f={hz}:t=q:w={EQ_Q}:g={gain}"
@@ -214,36 +214,17 @@ class MpvAudioBackend(AudioBackend):
         self._mpv.replaygain = _REPLAYGAIN[mode]
 
     def set_equalizer(self, equalizer: Equalizer) -> None:
-        applied = self._equalizer
-        if not equalizer.active:
-            if applied is not None:
-                self._mpv.command("af", "remove", f"@{EQ_LABEL}")
-                self._equalizer = None
+        if equalizer == self._equalizer:
             return
-        if applied is not None and self._retune(applied, equalizer):
-            self._equalizer = equalizer
-            return
-        # Switching on, or retuning wasn't possible (e.g. no file loaded): (re)build the filter.
-        if applied is not None:
+        if self._equalizer is not None:
             self._mpv.command("af", "remove", f"@{EQ_LABEL}")
-        self._mpv.command("af", "add", f"@{EQ_LABEL}:lavfi=[{equalizer_graph(equalizer)}]")
-        self._equalizer = equalizer
-
-    def _retune(self, old: Equalizer, new: Equalizer) -> bool:
-        """Change gains in the running filter without rebuilding it (no audible dropout)."""
-        try:
-            if new.preamp_db != old.preamp_db:
-                self._mpv.command(
-                    "af-command", EQ_LABEL, "volume", f"{new.preamp_db}dB", "volume@pre"
-                )
-            for i, (was, now) in enumerate(zip(old.gains_db, new.gains_db, strict=True)):
-                if now != was:
-                    # ffmpeg matches the instance's full name, "equalizer@b<i>".
-                    self._mpv.command("af-command", EQ_LABEL, "g", str(now), f"equalizer@b{i}")
-        except (SystemError, ValueError) as exc:
-            log.debug("Live equaliser update failed (%s); rebuilding the filter", exc)
-            return False
-        return True
+            self._equalizer = None
+        if equalizer.active:
+            # The chain is rebuilt on every change. Retuning it live with af-command
+            # crashes libmpv (seen with mpv 0.37 and 0.42), so the window only sends
+            # changes once a slider stops moving.
+            self._mpv.command("af", "add", f"@{EQ_LABEL}:lavfi=[{equalizer_graph(equalizer)}]")
+            self._equalizer = equalizer
 
     def close(self) -> None:
         self._mpv.terminate()

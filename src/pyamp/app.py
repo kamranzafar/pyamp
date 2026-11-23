@@ -44,6 +44,7 @@ from pyamp.audio.registry import (
     available_backends,
     create_backend,
 )
+from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import EventBus
@@ -134,6 +135,15 @@ class Application:
         self.playlist = Playlist(self.bus)
         self.player = Player(self._create_backend(args.backend), self.playlist, self.bus)
         self.spectrum = SpectrumService(self.bus)
+        # Backends that can't report the audio they play (mpv) get their visualiser
+        # levels from analysing the file separately.
+        self.track_analyser: TrackAnalyser | None = None
+        self.analysed_spectrum: AnalysedSpectrum | None = None
+        if not self.player.provides_audio_frames:
+            self.track_analyser = TrackAnalyser(self.spectrum.band_count)
+            self.analysed_spectrum = AnalysedSpectrum(
+                self.bus, self.track_analyser, self.spectrum.band_count
+            )
         self.playlist_formats = PlaylistFormatRegistry.default()
         self.loader = BackgroundTrackLoader(
             TrackLoader(MutagenMetadataReader(), self.playlist_formats)
@@ -189,6 +199,9 @@ class Application:
         except OSError:
             log.exception("Could not save session")
         self.plugins.shutdown()
+        if self.analysed_spectrum is not None and self.track_analyser is not None:
+            self.analysed_spectrum.shutdown()
+            self.track_analyser.shutdown()
         self.player.shutdown()
 
     def _create_backend(self, requested: str | None) -> AudioBackend:

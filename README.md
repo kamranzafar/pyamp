@@ -62,14 +62,18 @@ Editing the open playlist:
 | Backend | Default | Gapless | Equaliser | Visualiser | Needs |
 |---|---|---|---|---|---|
 | `qt` (QtMultimedia) | yes | no | no | yes | nothing extra |
-| `mpv` (libmpv) | | **yes** | **yes** | flat | `brew install mpv` or `apt install libmpv2` |
+| `mpv` (libmpv) | | **yes** | **yes** | yes (analysed) | `brew install mpv` or `apt install libmpv2` |
 
 ```bash
 uv run pyamp --backend mpv   # remembered for next time; --backend qt switches back
 ```
 
 mpv plays more formats and moves between tracks without a gap. It doesn't expose
-the decoded audio, so the spectrum visualiser stays flat with it. If libmpv isn't
+the audio it plays, so for the visualiser PyAmp decodes the track a second time,
+silently and in the background (Qt's decoder on a low-priority thread, much faster
+than real time), and shows the analysed levels for mpv's current position. That
+costs a short burst of CPU when a track starts and almost nothing while it plays;
+the bars also show the equaliser's curve. If libmpv isn't
 installed, PyAmp warns and uses `qt`.
 
 #### Using a libmpv that isn't installed system-wide
@@ -179,7 +183,8 @@ src/pyamp/
 │   ├── backend.py      AudioBackend ABC + BackendListener protocol
 │   ├── registry.py     Backend factory with lazy imports
 │   ├── qt_backend.py   QtMultimedia adapter (+ PCM tap for the visualiser)
-│   └── mpv_backend.py  libmpv adapter with gapless playback
+│   ├── mpv_backend.py  libmpv adapter with gapless playback
+│   └── track_analysis.py  Visualiser levels for backends without PCM (mpv)
 ├── dsp/spectrum.py     FFT analyser (pure) + SpectrumService (bus adapter)
 ├── library/            Getting tracks in
 │   ├── metadata.py     Tag reading via mutagen
@@ -279,7 +284,6 @@ See `src/pyamp/plugins/now_playing.py` for a working example.
 
 - Process-pool tag reading for very large libraries (mutagen is pure Python, so the
   worker thread still competes for the GIL)
-- Feed the visualiser when using the `mpv` backend
 - Frameless, pixel-skinned window + classic `.wsz` skin loader
 - Windows media controls (SMTC) and album artwork in system media widgets
 - Internet radio (playlist formats currently skip URLs)

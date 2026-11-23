@@ -160,6 +160,24 @@ PyAmp works with your keyboard's media keys, headphone buttons and the system's
 
 This is the `media-session` plugin; `--no-plugins` turns it off.
 
+### Menu bar
+
+PyAmp puts an icon in the macOS menu bar (the system tray on Linux and Windows).
+Its menu shows what's playing and has Play/Pause, Next, Previous, Stop, Shuffle,
+Repeat, your saved playlists, Show PyAmp and Quit. On Linux and Windows, clicking
+the icon brings the window back.
+
+Like other music players, **closing the window doesn't stop PyAmp**: the window
+hides and the music keeps playing. Bring it back with the Dock icon (macOS) or the
+menu bar/tray icon. **Quit** (⌘Q, File → Quit, the icon's menu or the Dock) ends it.
+
+Two settings in the **View** menu:
+
+- **Show Icon in Menu Bar** (on by default).
+- **Keep Running When Window Is Closed** (on by default; turn it off to have
+  closing the window quit). On Linux and Windows this needs the tray icon, as
+  it's the only way back to a hidden window.
+
 ## Development
 
 ```bash
@@ -220,6 +238,7 @@ src/pyamp/
     ├── background_loader.py  Non-blocking track loading (worker thread)
     ├── playlist_session.py   Which saved playlist is open; auto-save
     ├── jump_dialog.py        Jump to Track (J)
+    ├── menu_bar.py           Menu bar / system tray icon and its menu
     ├── playlist_model.py  Playlist → QAbstractTableModel adapter
     ├── main_window.py
     └── widgets/        LCD panel, marquee, spectrum, sliders, playlist view

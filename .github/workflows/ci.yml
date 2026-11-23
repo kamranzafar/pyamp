@@ -38,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0 libpulse0 \
-            dbus playerctl libmpv2
+            dbus playerctl libmpv2 pipewire-bin
       - name: Install libmpv
         if: runner.os == 'macOS'
         run: brew install mpv
@@ -56,6 +56,15 @@ jobs:
           else
             uv run pytest -q -rs --cov
           fi
+      - name: Survive an incomplete PipeWire install
+        # libpipewire without its client.conf crashes Qt's PipeWire audio backend;
+        # PyAmp must detect it and fall back to PulseAudio (see qt_audio_env.py).
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get remove -y -qq pipewire-bin >/dev/null
+          test ! -e /usr/share/pipewire/client.conf
+          uv run pyamp --self-test 2>&1 | tee selftest.txt
+          grep -q "client.conf" selftest.txt
       - name: Load libmpv from a folder (PYAMP_LIBMPV)
         shell: bash
         run: |

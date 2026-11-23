@@ -322,12 +322,12 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
 
 - **Windows**: an installer, with the system media controls (SMTC) so media keys
   and the volume flyout work as they do on macOS and Linux.
-- **Last.fm scrobbling**, as an optional plugin.
 - **Internet radio** (maybe): add a stream URL, keep URLs in playlist files (they're
   currently skipped) and show the station's current song.
 
 Not planned, to keep PyAmp lightweight:
 
+- Scrobbling (Last.fm, ListenBrainz). A plugin can add it; see below.
 - Classic `.wsz` skins and a frameless, pixel-skinned window. Colours live in
   `ui/skin.py` if you want to theme it.
 - Album artwork in the system's media widgets.

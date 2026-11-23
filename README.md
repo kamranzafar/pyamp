@@ -18,10 +18,6 @@
   <a href="https://pre-commit.com/"><img src="https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit" alt="pre-commit"></a>
 </p>
 
-# PyAmp
-
-A lightweight, Winamp-inspired music player for local files, written in Python.
-
 ## Installing on macOS
 
 Download `PyAmp-<version>-macos-<arch>.dmg` from the

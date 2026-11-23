@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms apply under GPLv3 section 7; see ADDITIONAL-TERMS.md.
 #
 # Build PyAmp.app (with libmpv bundled) and a .dmg for this Mac's architecture.
 #

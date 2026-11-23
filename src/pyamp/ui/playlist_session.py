@@ -15,6 +15,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 """Which saved playlist is open, and keeping it saved (auto-save).
 
 Every edit to the open playlist is written back to its file shortly afterwards

@@ -30,7 +30,8 @@ from pyamp.plugins.base import PluginContext
 
 log = logging.getLogger(__name__)
 
-type AdapterFactory = Callable[[MediaCommands], MediaSessionAdapter | None]
+type AdapterFactory = Callable[..., MediaSessionAdapter | None]
+"""Called as ``factory(commands, window_handle=...)`` (see ``create_adapter``)."""
 
 
 class MediaSessionPlugin:
@@ -46,7 +47,9 @@ class MediaSessionPlugin:
         return self._session is not None
 
     def activate(self, context: PluginContext) -> None:
-        adapter = self._adapter_factory(MediaCommands(context.player))
+        adapter = self._adapter_factory(
+            MediaCommands(context.player), window_handle=context.window_handle
+        )
         if adapter is None:
             return
         self._session = MediaSession(context.bus, context.player, context.playlist, adapter)

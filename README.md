@@ -327,7 +327,7 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
 
 Not planned, to keep PyAmp lightweight:
 
-- Scrobbling (Last.fm, ListenBrainz). A plugin can add it; see below.
+- Scrobbling (Last.fm, ListenBrainz). A plugin can add it (see [Writing a plugin](#writing-a-plugin)).
 - Classic `.wsz` skins and a frameless, pixel-skinned window. Colours live in
   `ui/skin.py` if you want to theme it.
 - Album artwork in the system's media widgets.

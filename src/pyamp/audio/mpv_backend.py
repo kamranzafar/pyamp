@@ -18,7 +18,8 @@
 
 """Audio backend built on libmpv (Adapter pattern), with gapless playback.
 
-Needs libmpv on the system (``brew install mpv`` / ``apt install libmpv2``).
+Needs libmpv: from the system (``brew install mpv`` / ``apt install libmpv2``), bundled
+with the app, or in a folder (see :mod:`pyamp.audio.libmpv_loader`).
 Importing this module without it raises ``OSError``, which the registry
 reports as an unavailable backend.
 
@@ -36,18 +37,21 @@ import threading
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pyamp.audio.libmpv_path import prepare_libmpv_lookup
+from PySide6.QtCore import QObject, Signal, Slot
 
-prepare_libmpv_lookup()  # must run before python-mpv looks for libmpv
-
-import mpv  # noqa: E402  (needs prepare_libmpv_lookup first)
-from PySide6.QtCore import QObject, Signal, Slot  # noqa: E402
-
-from pyamp.audio.backend import AudioBackend  # noqa: E402
-from pyamp.core.equalizer import BANDS_HZ, Equalizer  # noqa: E402
-from pyamp.core.models import PlaybackState, ReplayGainMode  # noqa: E402
+from pyamp.audio.backend import AudioBackend
+from pyamp.audio.libmpv_loader import LibmpvSource, import_mpv
+from pyamp.core.equalizer import BANDS_HZ, Equalizer
+from pyamp.core.models import PlaybackState, ReplayGainMode
 
 log = logging.getLogger(__name__)
+
+#: python-mpv, bound to the best libmpv available (see libmpv_loader).
+mpv: Any
+#: Which libmpv that is, e.g. for ``pyamp --version``.
+LIBMPV_SOURCE: LibmpvSource
+mpv, LIBMPV_SOURCE = import_mpv()
+log.info("Using libmpv: %s", LIBMPV_SOURCE)
 
 #: Position updates closer together than this are dropped (mpv reports very often).
 POSITION_INTERVAL_S = 0.1

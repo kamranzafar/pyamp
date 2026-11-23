@@ -44,6 +44,8 @@ class Settings:
     equalizer_preamp: float = 0.0
     equalizer_gains: list[float] = field(default_factory=lambda: [0.0] * 10)
     backend: str = "qt"
+    #: Which libmpv the mpv backend prefers: "auto", "system" or "bundled".
+    libmpv: str = "auto"
     last_directory: str = ""
     show_remaining_time: bool = False
 

@@ -28,7 +28,7 @@ from PySide6.QtGui import QAction
 
 from pyamp import app as app_module
 from pyamp.app import Application, parse_args
-from pyamp.audio import registry
+from pyamp.audio import libmpv_loader, registry
 from pyamp.audio.registry import BackendUnavailableError
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.equalizer import Equalizer
@@ -51,7 +51,9 @@ def store(tmp_path: Path) -> SettingsStore:
 
 
 def build(store: SettingsStore, **overrides: object) -> Application:
-    args = argparse.Namespace(paths=[], backend="fake", no_plugins=True, log_level="WARNING")
+    args = argparse.Namespace(
+        paths=[], backend="fake", no_plugins=True, log_level="WARNING", libmpv=None
+    )
     for key, value in overrides.items():
         setattr(args, key, value)
     return Application(args, store)
@@ -182,6 +184,28 @@ def test_equalizer_window_is_opened_from_the_menu_and_reused(
     assert application.window.show_equalizer() is first
     assert first.isVisible()
     first.close()
+
+
+def test_libmpv_preference_from_flag_is_remembered(
+    store: SettingsStore, cleanup: list[Application], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(libmpv_loader, "_state", {"preference": "auto"})
+    application = build(store, libmpv="system")
+    cleanup.append(application)
+    assert libmpv_loader.get_preference() == "system"
+    application.shutdown()
+    assert store.load().libmpv == "system"
+
+
+def test_invalid_libmpv_setting_falls_back_to_auto(
+    store: SettingsStore, cleanup: list[Application], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(libmpv_loader, "_state", {"preference": "auto"})
+    store.save(Settings(libmpv="newest", backend="fake"))
+    application = build(store)
+    cleanup.append(application)
+    assert libmpv_loader.get_preference() == "auto"
+    assert application.settings.libmpv == "auto"
 
 
 def test_invalid_repeat_setting_falls_back_to_off(

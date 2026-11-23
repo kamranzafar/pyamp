@@ -36,6 +36,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from pyamp import APP_NAME, __version__
+from pyamp.audio import libmpv_loader
 from pyamp.audio.backend import AudioBackend
 from pyamp.audio.registry import (
     BackendUnavailableError,
@@ -61,15 +62,29 @@ from pyamp.ui.skin import DEFAULT_SKIN
 log = logging.getLogger(__name__)
 
 
+def apply_libmpv_preference(requested: str | None, settings: Settings) -> None:
+    """Use ``--libmpv`` if given (and remember it), else the saved preference."""
+    if requested:
+        settings.libmpv = requested
+    try:
+        libmpv_loader.set_preference(settings.libmpv)
+    except ValueError:
+        log.warning("Unknown libmpv preference %r; using 'auto'", settings.libmpv)
+        settings.libmpv = "auto"
+        libmpv_loader.set_preference("auto")
+
+
 def version_text() -> str:
     """The version, plus which libmpv the mpv backend would use (loaded only when asked)."""
+    apply_libmpv_preference(None, SettingsStore().load())
+    preference = libmpv_loader.get_preference()
     try:
         from pyamp.audio.mpv_backend import LIBMPV_SOURCE  # noqa: PLC0415
     except OSError as exc:
         libmpv = f"not available ({exc})"
     else:
         libmpv = str(LIBMPV_SOURCE)
-    return f"pyamp {__version__}\nlibmpv: {libmpv}"
+    return f"pyamp {__version__}\nlibmpv: {libmpv}\nlibmpv preference: {preference}"
 
 
 class _VersionAction(argparse.Action):
@@ -83,6 +98,12 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("paths", nargs="*", type=Path, help="files, folders or playlists to play")
     parser.add_argument("--backend", choices=available_backends(), help="audio backend")
     parser.add_argument("--no-plugins", action="store_true", help="don't load plugins")
+    parser.add_argument(
+        "--libmpv",
+        choices=libmpv_loader.PREFERENCES,
+        help="which libmpv the mpv backend prefers: the system's or PyAmp's own "
+        "(default auto: system on Linux, bundled elsewhere; remembered)",
+    )
     parser.add_argument("--log-level", default="WARNING", help="e.g. DEBUG, INFO, WARNING")
     parser.add_argument(
         "--self-test", action="store_true", help="check this installation works, then exit"
@@ -99,6 +120,7 @@ class Application:
     def __init__(self, args: argparse.Namespace, store: SettingsStore | None = None) -> None:
         self._store = store or SettingsStore()
         self.settings = self._store.load()
+        apply_libmpv_preference(args.libmpv, self.settings)  # before the backend loads
 
         self.bus = EventBus()
         self.playlist = Playlist(self.bus)
@@ -207,6 +229,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.self_test:
         from pyamp.selftest import run_self_test  # noqa: PLC0415  (only needed here)
 
+        apply_libmpv_preference(args.libmpv, SettingsStore().load())
         return 0 if run_self_test() else 1
     qt_app = QApplication(sys.argv[:1])
     qt_app.setApplicationName(APP_NAME)

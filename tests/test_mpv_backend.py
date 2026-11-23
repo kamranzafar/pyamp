@@ -331,3 +331,23 @@ def test_playback_completes_with_equalizer_on(
     backend.play()
     wait_until(lambda: "end" in recorder.names())
     assert recorder.values("error") == []
+
+
+def test_this_libmpv_has_the_equaliser_filters() -> None:
+    from pyamp.audio import mpv_backend  # noqa: PLC0415
+
+    assert mpv_backend.missing_eq_filters() == ()
+
+
+def test_missing_filters_are_reported_not_applied(
+    backend: MpvAudioBackend, recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyamp.audio import mpv_backend  # noqa: PLC0415
+
+    # Simulate a libmpv whose ffmpeg was built without the volume filter.
+    monkeypatch.setattr(mpv_backend, "missing_eq_filters", lambda: ("volume",))
+    backend.set_equalizer(Equalizer(enabled=True).with_preset("Rock"))
+    assert eq_filters(backend) == []
+    [message] = recorder.values("error")
+    assert "lacks the volume filter" in str(message)
+    assert "--libmpv bundled" in str(message)

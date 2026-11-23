@@ -31,6 +31,7 @@ the README). mpv exposes no decoded audio, so the visualiser stays flat.
 
 from __future__ import annotations
 
+import functools
 import locale
 import logging
 import threading
@@ -40,7 +41,12 @@ from typing import Any, ClassVar
 from PySide6.QtCore import QObject, Signal, Slot
 
 from pyamp.audio.backend import AudioBackend
-from pyamp.audio.libmpv_loader import LibmpvSource, import_mpv
+from pyamp.audio.libmpv_loader import (
+    LibmpvSource,
+    find_avfilter,
+    import_mpv,
+    missing_filters,
+)
 from pyamp.core.equalizer import BANDS_HZ, Equalizer
 from pyamp.core.models import PlaybackState, ReplayGainMode
 
@@ -93,6 +99,16 @@ def equalizer_graph(equalizer: Equalizer) -> str:
         for i, (hz, gain) in enumerate(zip(BANDS_HZ, equalizer.gains_db, strict=True))
     )
     return f"volume@pre=volume={equalizer.preamp_db}dB,{bands}"
+
+
+#: ffmpeg filters the equaliser graph uses.
+EQ_FILTERS = ("volume", "equalizer")
+
+
+@functools.cache
+def missing_eq_filters() -> tuple[str, ...]:
+    """The equaliser filters this libmpv's ffmpeg lacks (checked once)."""
+    return tuple(missing_filters(EQ_FILTERS, find_avfilter(LIBMPV_SOURCE)))
 
 
 _REPLAYGAIN = {
@@ -223,6 +239,16 @@ class MpvAudioBackend(AudioBackend):
         if self._equalizer is not None:
             self._mpv.command("af", "remove", f"@{EQ_LABEL}")
             self._equalizer = None
+        if equalizer.active and (missing := missing_eq_filters()):
+            # mpv would accept the graph now and only fail once playback starts.
+            message = (
+                "The equaliser isn't available with this libmpv "
+                f"({LIBMPV_SOURCE}): its ffmpeg lacks the {', '.join(missing)} filter. "
+                "Try '--libmpv bundled'."
+            )
+            log.error(message)
+            self._listener.on_error(message)
+            return
         if equalizer.active:
             # The chain is rebuilt on every change. Retuning it live with af-command
             # crashes libmpv (seen with mpv 0.37 and 0.42), so the window only sends

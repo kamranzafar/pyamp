@@ -233,6 +233,18 @@ def test_env_var_without_libmpv_is_an_error(tmp_path: Path) -> None:
         loader.import_mpv({ENV_VAR: str(tmp_path)})
 
 
+def test_missing_filters_unknown_without_a_usable_libavfilter(tmp_path: Path) -> None:
+    assert loader.missing_filters(["volume"], None) == []
+    assert loader.missing_filters(["volume"], tmp_path / "nope.dylib") == []
+
+
+def test_find_avfilter_prefers_the_copy_next_to_libmpv(tmp_path: Path) -> None:
+    lib = touch(tmp_path / "libmpv.dylib")
+    avfilter = touch(tmp_path / "libavfilter.dylib")
+    found = loader.find_avfilter(loader.LibmpvSource(lib, "bundled"), "darwin")
+    assert found == avfilter
+
+
 # -- System lookup (macOS) --------------------------------------------------------- #
 
 
@@ -268,3 +280,89 @@ def test_mpv_backend_uses_the_env_folder() -> None:
     assert source.tier == ENV_VAR
     assert source.path is not None
     assert source.path.parent == loader.find_libmpv(Path(os.environ[ENV_VAR])).parent  # type: ignore[union-attr]
+
+
+# -- Preference: system vs PyAmp's own copy ---------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("preference", "platform", "expected"),
+    [
+        ("auto", "linux", "system"),
+        ("auto", "darwin", "bundled"),
+        ("auto", "win32", "bundled"),
+        ("system", "darwin", "system"),
+        ("bundled", "linux", "bundled"),
+    ],
+)
+def test_effective_preference(preference: str, platform: str, expected: str) -> None:
+    assert loader.effective_preference(preference, platform) == expected
+
+
+def test_invalid_preference_is_rejected() -> None:
+    with pytest.raises(ValueError, match="must be one of"):
+        loader.set_preference("newest")
+
+
+@pytest.fixture
+def own_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A libmpv in PyAmp's user folder."""
+    folder = tmp_path / "user" / "libmpv"
+    lib = touch(folder / "libmpv.dylib")
+    touch(folder / "libmpv.so.2")  # the same copy, as Linux names it
+    monkeypatch.setattr(loader, "user_folder", lambda: folder)
+    return lib
+
+
+def choose(
+    *,
+    preference: str,
+    platform: str = "darwin",
+    system: Path | None = Path("/usr/lib/libmpv.dylib"),
+    broken: set[str] = frozenset(),  # type: ignore[assignment]
+) -> loader.LibmpvSource:
+    def load(kind: str) -> object:
+        def load_lib(path: Path) -> ModuleType:
+            if kind in broken:
+                raise OSError(f"{kind} copy is broken")
+            return ModuleType("mpv")
+
+        return load_lib
+
+    _, source = loader.import_mpv(
+        {},
+        preference=preference,
+        platform=platform,
+        find_system=lambda: system,
+        load_folder=load("own"),  # type: ignore[arg-type]
+        load_system=load("system"),  # type: ignore[arg-type]
+    )
+    return source
+
+
+def test_linux_prefers_the_system_libmpv(own_copy: Path) -> None:
+    assert choose(preference="auto", platform="linux").tier == "system"
+
+
+def test_macos_prefers_its_own_copy(own_copy: Path) -> None:
+    source = choose(preference="auto", platform="darwin")
+    assert (source.tier, source.path) == ("user folder", own_copy)
+
+
+def test_explicit_preference_overrides_the_platform_default(own_copy: Path) -> None:
+    assert choose(preference="system", platform="darwin").tier == "system"
+    assert choose(preference="bundled", platform="linux").tier == "user folder"
+
+
+def test_falls_back_when_the_preferred_one_is_missing(own_copy: Path) -> None:
+    assert choose(preference="system", system=None).tier == "user folder"
+
+
+def test_falls_back_when_the_preferred_one_fails_to_load(own_copy: Path) -> None:
+    assert choose(preference="bundled", broken={"own"}).tier == "system"
+    assert choose(preference="system", broken={"system"}).tier == "user folder"
+
+
+def test_nothing_usable_lists_every_reason(own_copy: Path) -> None:
+    with pytest.raises(OSError, match=r"no usable libmpv.*user folder.*broken.*system.*broken"):
+        choose(preference="bundled", broken={"own", "system"})

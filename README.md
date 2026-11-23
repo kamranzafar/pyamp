@@ -64,8 +64,21 @@ builds it from source), put a prebuilt libmpv **folder** where PyAmp looks for o
 
 The folder holds libmpv plus the libraries shipped with it (ffmpeg, ...); PyAmp loads
 those first, so libmpv uses them rather than different system versions. Packaged
-releases bundle libmpv the same way. `uv run pyamp --version` shows which libmpv is
-used. On macOS, [media-kit's builds](https://github.com/media-kit/libmpv-darwin-build/releases)
+releases bundle libmpv the same way.
+
+**Which libmpv wins** when there's both a system one and PyAmp's own (bundled or in
+the user folder) is set by `--libmpv` (remembered, like `--backend`):
+
+| `--libmpv` | Order |
+|---|---|
+| `auto` (default) | **Linux:** system first. **macOS/Windows:** PyAmp's own first (the tested build) |
+| `system` | the system libmpv, then PyAmp's own |
+| `bundled` | PyAmp's own, then the system libmpv |
+
+A copy that is missing or fails to load is skipped in favour of the next one;
+`PYAMP_LIBMPV` always wins. `uv run pyamp --version` shows which libmpv is used and
+the preference. If a libmpv's ffmpeg lacks the filters the equaliser needs, PyAmp
+says so (and suggests `--libmpv bundled`) instead of failing silently. On macOS, [media-kit's builds](https://github.com/media-kit/libmpv-darwin-build/releases)
 work: take `libmpv-libs_…_macos-<arch>-audio-encodersgpl` (the other flavours lack the
 filters the equaliser needs). They expect libass from the system (`brew install libass`).
 

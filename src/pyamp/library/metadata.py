@@ -7,10 +7,14 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import mutagen
+from mutagen.id3 import ID3
 
 from pyamp.core.models import Track
 
 log = logging.getLogger(__name__)
+
+# Our tag names -> ID3 frame IDs, for formats where mutagen's easy mode doesn't apply.
+_ID3_FRAMES = {"title": "TIT2", "artist": "TPE1", "album": "TALB"}
 
 AUDIO_EXTENSIONS = frozenset(
     {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".aif", ".aiff", ".wma"}
@@ -38,10 +42,17 @@ class MutagenMetadataReader:
             return Track.from_path(path)
 
         tags: Any = audio.tags or {}
+        # easy=True only wraps ID3 for MP3-like formats. WAV and AIFF still hand back raw
+        # ID3 tags keyed by frame ID, so translate our keys for those.
+        raw_id3 = isinstance(tags, ID3)
 
         def first(key: str) -> str:
             try:
-                values = tags.get(key)
+                if raw_id3:
+                    frame = tags.get(_ID3_FRAMES[key])
+                    values = frame.text if frame is not None else None
+                else:
+                    values = tags.get(key)
             except (KeyError, ValueError):
                 return ""
             return str(values[0]).strip() if values else ""

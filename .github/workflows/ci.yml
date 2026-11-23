@@ -38,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0 libpulse0 \
-            dbus playerctl libmpv2 pipewire-bin
+            dbus playerctl libmpv2 pipewire-bin pulseaudio
       - name: Install libmpv
         if: runner.os == 'macOS'
         run: brew install mpv
@@ -47,6 +47,13 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
       - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync --locked
+      - name: Start a silent audio server (Linux)
+        # Gives QtMultimedia an output device ("Dummy Output"), so the Qt backend's
+        # playback tests run instead of skipping.
+        if: runner.os == 'Linux'
+        run: |
+          pulseaudio --start --exit-idle-time=-1
+          pactl info | grep -E "Server Name|Default Sink"
       - name: Run tests
         shell: bash
         run: |

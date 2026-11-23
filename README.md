@@ -1,3 +1,23 @@
+<p align="center">
+  <img src="docs/assets/pyamp-header.svg" alt="PyAmp: a lightweight, Winamp-inspired music player written in Python" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/kamranzafar/pyamp/actions/workflows/ci.yml"><img src="https://github.com/kamranzafar/pyamp/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/kamranzafar/pyamp/actions/workflows/package-macos.yml"><img src="https://github.com/kamranzafar/pyamp/actions/workflows/package-macos.yml/badge.svg?branch=main" alt="macOS app build"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
+  <br>
+  <img src="https://img.shields.io/badge/python-3.13%2B-3776ab?logo=python&amp;logoColor=white" alt="Python 3.13+">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="Platforms: macOS, Linux">
+  <img src="https://img.shields.io/badge/UI-PySide6%20%28Qt%206%29-41cd52?logo=qt&amp;logoColor=white" alt="UI: PySide6 (Qt 6)">
+  <img src="https://img.shields.io/badge/audio-Qt%20Multimedia%20%7C%20mpv-6a3ba1" alt="Audio: Qt Multimedia or mpv">
+  <br>
+  <a href="https://github.com/astral-sh/uv"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json" alt="uv"></a>
+  <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json" alt="Ruff"></a>
+  <a href="https://mypy-lang.org/"><img src="https://www.mypy-lang.org/static/mypy_badge.svg" alt="Checked with mypy"></a>
+  <a href="https://pre-commit.com/"><img src="https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit" alt="pre-commit"></a>
+</p>
+
 # PyAmp
 
 A lightweight, Winamp-inspired music player for local files, written in Python.
@@ -155,6 +175,7 @@ uv run mypy            # strict type checking
 uv run pre-commit install  # run ruff and mypy on every commit
 packaging/macos/build.sh   # build dist/PyAmp.app and a .dmg (macOS)
 uv run python packaging/make_icons.py  # regenerate .icns/.ico/.png after editing the icon SVG
+uv run python docs/make_header.py      # regenerate the README header SVG
 ```
 
 The app icon is `src/pyamp/resources/icon.svg` (drawn on Apple's 1024 grid) and the

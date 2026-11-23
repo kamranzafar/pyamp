@@ -129,7 +129,7 @@ def test_first_run_migrates_the_old_session_playlist(
     session.start()
     wait_until(lambda: loaded(session) and len(playlist) == 2)
     assert session.active == "Default"
-    assert [t.path for t in playlist] == files
+    assert [t.location for t in playlist] == files
 
 
 def test_reopens_the_playlist_that_was_open_last(

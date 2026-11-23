@@ -34,7 +34,7 @@ from PySide6.QtWidgets import QApplication
 from pyamp.audio.backend import AudioBackend
 from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import EventBus
-from pyamp.core.models import PlaybackState, ReplayGainMode, Track
+from pyamp.core.models import Location, PlaybackState, ReplayGainMode, Track
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 
@@ -50,7 +50,7 @@ class FakeBackend(AudioBackend):
 
     def __init__(self) -> None:
         super().__init__()
-        self.loaded: list[Path] = []
+        self.loaded: list[Location] = []
         self.calls: list[str] = []
         self.volume = 0.0
         self.position = 0
@@ -58,8 +58,8 @@ class FakeBackend(AudioBackend):
         self.equalizers: list[Equalizer] = []
         self.replay_gain_modes: list[ReplayGainMode] = []
 
-    def load(self, path: Path) -> None:
-        self.loaded.append(path)
+    def load(self, location: Location) -> None:
+        self.loaded.append(location)
 
     def play(self) -> None:
         self.calls.append("play")
@@ -105,17 +105,17 @@ class FakeGaplessBackend(FakeBackend):
 
     def __init__(self) -> None:
         super().__init__()
-        self.queued: list[Path | None] = []
+        self.queued: list[Location | None] = []
 
     @property
-    def next_up(self) -> Path | None:
+    def next_up(self) -> Location | None:
         return self.queued[-1] if self.queued else None
 
-    def queue_next(self, path: Path | None) -> None:
-        self.queued.append(path)
+    def queue_next(self, location: Location | None) -> None:
+        self.queued.append(location)
 
     # -- simulation helpers --
-    def advance(self, path: Path | None = None) -> None:
+    def advance(self, path: Location | None = None) -> None:
         """The queued track (or ``path``) starts playing without a gap."""
         target = path or self.next_up
         assert target is not None, "nothing queued"
@@ -124,7 +124,8 @@ class FakeGaplessBackend(FakeBackend):
 
 def make_tracks(n: int) -> list[Track]:
     return [
-        Track(path=Path(f"/music/{i}.mp3"), title=f"Song {i}", duration_ms=60_000) for i in range(n)
+        Track(location=Path(f"/music/{i}.mp3"), title=f"Song {i}", duration_ms=60_000)
+        for i in range(n)
     ]
 
 
@@ -192,8 +193,11 @@ class BackendRecorder:
     def on_end_of_track(self) -> None:
         self._record("end")
 
-    def on_track_advanced(self, path: Path) -> None:
-        self._record("advanced", path)
+    def on_track_advanced(self, location: Location) -> None:
+        self._record("advanced", location)
+
+    def on_stream_title(self, title: str) -> None:
+        self._record("stream_title", title)
 
     def on_error(self, message: str) -> None:
         self._record("error", message)

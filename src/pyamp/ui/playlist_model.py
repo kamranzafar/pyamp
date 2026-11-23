@@ -93,7 +93,7 @@ class PlaylistModel(QAbstractTableModel):
             case Qt.ItemDataRole.ForegroundRole if row == self._playlist.current_index:
                 return self._current_color
             case Qt.ItemDataRole.ToolTipRole:
-                return str(track.path)
+                return str(track.location)
         return None
 
     # -- Drag & drop ---------------------------------------------------------- #

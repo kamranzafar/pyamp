@@ -278,7 +278,7 @@ def test_shutdown_saves_settings_and_playlist(
     assert saved.repeat == "all"
     assert saved.active_playlist == "Default"
     playlists = SavedPlaylists(store.directory / "playlists")
-    assert playlists.read_paths("Default") == [t.path for t in tracks]
+    assert playlists.read_paths("Default") == [t.location for t in tracks]
 
 
 def test_upgrade_keeps_the_old_session_playlist(
@@ -293,7 +293,7 @@ def test_upgrade_keeps_the_old_session_playlist(
     application.start([])
     wait_until(lambda: len(application.playlist) == 1)
     assert application.playlists.active == "Default"
-    assert application.playlist[0].path == song
+    assert application.playlist[0].location == song
 
 
 def test_files_given_on_the_command_line_are_added_to_the_open_playlist(

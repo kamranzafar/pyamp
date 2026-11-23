@@ -25,6 +25,78 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from pathlib import Path
+from urllib.parse import unquote, urljoin, urlparse
+from urllib.request import url2pathname
+
+#: URL schemes PyAmp plays as streams (internet radio, media servers).
+STREAM_SCHEMES = ("http", "https")
+
+
+@dataclass(frozen=True, slots=True)
+class StreamUrl:
+    """An http(s) audio stream: internet radio, or a file on a media server."""
+
+    url: str
+
+    def __post_init__(self) -> None:
+        parsed = urlparse(self.url)
+        if parsed.scheme.lower() not in STREAM_SCHEMES or not parsed.netloc:
+            raise ValueError(f"not an http(s) URL: {self.url!r}")
+
+    @property
+    def name(self) -> str:
+        """The last part of the URL's path, or the host: for sorting and as a fallback title."""
+        parsed = urlparse(self.url)
+        segment = unquote(parsed.path.rstrip("/").rsplit("/", 1)[-1])
+        return segment or parsed.hostname or self.url
+
+    @property
+    def stem(self) -> str:
+        name = self.name
+        return name.rsplit(".", 1)[0] if "." in name.strip(".") else name
+
+    @property
+    def suffix(self) -> str:
+        name = self.name
+        return f".{name.rsplit('.', 1)[1].lower()}" if "." in name.strip(".") else ""
+
+    def __str__(self) -> str:
+        return self.url
+
+
+#: Where a track's audio comes from: a local file or a stream.
+type Location = Path | StreamUrl
+
+
+def _stream_url(text: str) -> StreamUrl | None:
+    try:
+        return StreamUrl(text)
+    except ValueError:
+        return None
+
+
+def parse_location(text: str, base: Path | StreamUrl | None = None) -> Location | None:
+    """A playlist entry or user input as a :data:`Location` (None if it isn't one).
+
+    http(s) URLs become :class:`StreamUrl`; ``file://`` URLs and paths become paths, made
+    absolute against ``base`` (a folder, or the URL of a remote playlist). Other URL
+    schemes aren't supported.
+    """
+    text = text.strip()
+    lowered = text.lower()
+    if not text or lowered.startswith(tuple(f"{scheme}://" for scheme in STREAM_SCHEMES)):
+        return _stream_url(text)
+    if lowered.startswith("file://"):
+        # url2pathname decodes %20 etc. and, on Windows, turns /C:/x into C:\x.
+        text = url2pathname(urlparse(text).path)
+    elif "://" in text:
+        return None
+    if isinstance(base, StreamUrl):  # entries of a remote playlist are relative to its URL
+        return parse_location(urljoin(base.url, text.replace("\\", "/")))
+    candidate = Path(text).expanduser()
+    if candidate.is_absolute() or base is None:
+        return candidate
+    return (base / candidate).resolve()
 
 
 class PlaybackState(Enum):
@@ -80,9 +152,9 @@ class ReplayGain:
 
 @dataclass(frozen=True, slots=True)
 class Track:
-    """A playable audio file together with its descriptive metadata."""
+    """Something playable (a file or a stream) together with its descriptive metadata."""
 
-    path: Path
+    location: Location
     title: str
     artist: str = ""
     album: str = ""
@@ -92,7 +164,28 @@ class Track:
     @classmethod
     def from_path(cls, path: Path) -> Track:
         """Create a track with no metadata other than its file name."""
-        return cls(path=path, title=path.stem)
+        return cls(location=path, title=path.stem)
+
+    @classmethod
+    def for_stream(cls, url: StreamUrl, title: str | None = None) -> Track:
+        """A stream, titled from its playlist entry or else its URL."""
+        return cls(location=url, title=title or url.stem or url.name)
+
+    @property
+    def is_stream(self) -> bool:
+        return isinstance(self.location, StreamUrl)
+
+    @property
+    def name(self) -> str:
+        """File name, or the last part of a stream's URL."""
+        return self.location.name
+
+    @property
+    def uri(self) -> str:
+        """``file://`` URI for files, the URL for streams."""
+        if isinstance(self.location, StreamUrl):
+            return self.location.url
+        return self.location.absolute().as_uri()
 
     @property
     def display_title(self) -> str:

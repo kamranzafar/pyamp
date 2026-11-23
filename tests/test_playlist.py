@@ -120,7 +120,7 @@ def titles(playlist: Playlist) -> list[str]:
 
 def named(*names: str, **durations: int) -> list[Track]:
     return [
-        Track(path=Path(f"/m/{n}.mp3"), title=n, duration_ms=durations.get(n, 0)) for n in names
+        Track(location=Path(f"/m/{n}.mp3"), title=n, duration_ms=durations.get(n, 0)) for n in names
     ]
 
 
@@ -169,9 +169,9 @@ def test_move_publishes_one_change(playlist: Playlist, bus: EventBus) -> None:
 def test_sort(playlist: Playlist, key: SortKey, expected: list[str]) -> None:
     playlist.add(
         [
-            Track(path=Path("/m/b.mp3"), title="apple", artist="Zed", duration_ms=300),
-            Track(path=Path("/m/a.mp3"), title="Banana", artist="alpha", duration_ms=200),
-            Track(path=Path("/m/c.mp3"), title="cherry", artist="Zed", duration_ms=100),
+            Track(location=Path("/m/b.mp3"), title="apple", artist="Zed", duration_ms=300),
+            Track(location=Path("/m/a.mp3"), title="Banana", artist="alpha", duration_ms=200),
+            Track(location=Path("/m/c.mp3"), title="cherry", artist="Zed", duration_ms=100),
         ]
     )
     playlist.sort(key)

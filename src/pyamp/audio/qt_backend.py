@@ -26,7 +26,6 @@ tapped with ``QAudioBufferOutput`` (Qt >= 6.8) to feed the visualiser.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
@@ -37,13 +36,14 @@ from PySide6.QtMultimedia import (
     QAudioBufferOutput,
     QAudioFormat,
     QAudioOutput,
+    QMediaMetaData,
     QMediaPlayer,
     QtAudio,
 )
 
 from pyamp.audio.backend import AudioBackend
 from pyamp.audio.qt_audio_env import avoid_incomplete_pipewire
-from pyamp.core.models import PlaybackState
+from pyamp.core.models import Location, PlaybackState, StreamUrl
 
 _STATE_MAP = {
     QMediaPlayer.PlaybackState.StoppedState: PlaybackState.STOPPED,
@@ -94,12 +94,16 @@ class QtAudioBackend(AudioBackend):
         self._player.durationChanged.connect(self._on_duration)
         self._player.mediaStatusChanged.connect(self._on_media_status)
         self._player.errorOccurred.connect(self._on_error)
+        self._player.metaDataChanged.connect(self._on_metadata)
         self._tap.audioBufferReceived.connect(self._on_audio_buffer)
 
     # -- AudioBackend ------------------------------------------------------- #
 
-    def load(self, path: Path) -> None:
-        self._player.setSource(QUrl.fromLocalFile(str(path)))
+    def load(self, location: Location) -> None:
+        if isinstance(location, StreamUrl):
+            self._player.setSource(QUrl(location.url))
+        else:
+            self._player.setSource(QUrl.fromLocalFile(str(location)))
 
     def play(self) -> None:
         self._player.play()
@@ -152,6 +156,14 @@ class QtAudioBackend(AudioBackend):
     def _on_media_status(self, status: QMediaPlayer.MediaStatus) -> None:
         if status is QMediaPlayer.MediaStatus.EndOfMedia:
             self._listener.on_end_of_track()
+
+    def _on_metadata(self) -> None:
+        # For streams, Qt's FFmpeg backend reports the station's current title here.
+        if self._player.source().isLocalFile():
+            return
+        title = self._player.metaData().stringValue(QMediaMetaData.Key.Title)
+        if title:
+            self._listener.on_stream_title(title)
 
     def _on_error(self, error: QMediaPlayer.Error, message: str) -> None:
         if error is not QMediaPlayer.Error.NoError:

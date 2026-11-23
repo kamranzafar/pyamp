@@ -89,7 +89,7 @@ def test_is_audio_file(name: str, expected: bool) -> None:
 
 def test_untagged_wav_uses_file_name_and_real_duration(tmp_path: Path) -> None:
     path = write_wav(tmp_path / "My Song.wav", seconds=1.5)
-    assert reader.read(path) == Track(path=path, title="My Song", duration_ms=1500)
+    assert reader.read(path) == Track(location=path, title="My Song", duration_ms=1500)
 
 
 def test_unreadable_file_still_gives_a_track(tmp_path: Path) -> None:
@@ -119,20 +119,20 @@ def test_tags_are_mapped_and_trimmed(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_mutagen_file(monkeypatch, audio)
     path = Path("/m/file.mp3")
     assert reader.read(path) == Track(
-        path=path, title="Title", artist="Artist", album="Album", duration_ms=61_250
+        location=path, title="Title", artist="Artist", album="Album", duration_ms=61_250
     )
 
 
 def test_missing_tags_and_info_fall_back(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_mutagen_file(monkeypatch, SimpleNamespace(tags=None))
     path = Path("/m/file.mp3")
-    assert reader.read(path) == Track(path=path, title="file")
+    assert reader.read(path) == Track(location=path, title="file")
 
 
 def test_empty_tag_values_fall_back_to_file_name(monkeypatch: pytest.MonkeyPatch) -> None:
     audio = SimpleNamespace(tags={"title": [], "artist": [""]}, info=SimpleNamespace(length=None))
     fake_mutagen_file(monkeypatch, audio)
-    assert reader.read(Path("/m/file.mp3")) == Track(path=Path("/m/file.mp3"), title="file")
+    assert reader.read(Path("/m/file.mp3")) == Track(location=Path("/m/file.mp3"), title="file")
 
 
 def test_tag_lookup_errors_are_tolerated(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -143,7 +143,7 @@ def test_tag_lookup_errors_are_tolerated(monkeypatch: pytest.MonkeyPatch) -> Non
             raise ValueError(key)
 
     fake_mutagen_file(monkeypatch, SimpleNamespace(tags=PickyTags(), info=None))
-    assert reader.read(Path("/m/f.mp3")) == Track(path=Path("/m/f.mp3"), title="Ok")
+    assert reader.read(Path("/m/f.mp3")) == Track(location=Path("/m/f.mp3"), title="Ok")
 
 
 @pytest.mark.parametrize(("writer", "file_type"), [(write_wav, WAVE), (write_aiff, AIFF)])
@@ -153,14 +153,14 @@ def test_id3_tags_in_wav_and_aiff_are_read(
     path = writer(tmp_path / f"file.{file_type.__name__.lower()}")
     add_id3(path, file_type, title=" Real Title ", artist="Artist", album="Album")
     assert reader.read(path) == Track(
-        path=path, title="Real Title", artist="Artist", album="Album", duration_ms=1000
+        location=path, title="Real Title", artist="Artist", album="Album", duration_ms=1000
     )
 
 
 def test_id3_without_title_falls_back_to_file_name(tmp_path: Path) -> None:
     path = write_wav(tmp_path / "untitled.wav")
     add_id3(path, WAVE, artist="Artist")
-    expected = Track(path=path, title="untitled", artist="Artist", duration_ms=1000)
+    expected = Track(location=path, title="untitled", artist="Artist", duration_ms=1000)
     assert reader.read(path) == expected
 
 

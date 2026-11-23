@@ -29,14 +29,13 @@ event bus directly.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import ClassVar, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
 
 from pyamp.core.equalizer import Equalizer
-from pyamp.core.models import PlaybackState, ReplayGainMode
+from pyamp.core.models import Location, PlaybackState, ReplayGainMode
 
 
 class BackendListener(Protocol):
@@ -46,8 +45,12 @@ class BackendListener(Protocol):
     def on_position_changed(self, position_ms: int) -> None: ...
     def on_duration_changed(self, duration_ms: int) -> None: ...
     def on_end_of_track(self) -> None: ...
-    def on_track_advanced(self, path: Path) -> None:
+    def on_track_advanced(self, location: Location) -> None:
         """The queued track (see :meth:`AudioBackend.queue_next`) started without a gap."""
+        ...
+
+    def on_stream_title(self, title: str) -> None:
+        """A stream reported what it's playing now (e.g. an internet radio's current song)."""
         ...
 
     def on_error(self, message: str) -> None: ...
@@ -71,7 +74,10 @@ class _NullListener:
     def on_end_of_track(self) -> None:
         pass
 
-    def on_track_advanced(self, path: Path) -> None:
+    def on_track_advanced(self, location: Location) -> None:
+        pass
+
+    def on_stream_title(self, title: str) -> None:
         pass
 
     def on_error(self, message: str) -> None:
@@ -109,8 +115,8 @@ class AudioBackend(ABC):
         self._listener = listener
 
     @abstractmethod
-    def load(self, path: Path) -> None:
-        """Prepare ``path`` for playback, replacing the current source."""
+    def load(self, location: Location) -> None:
+        """Prepare a file or stream for playback, replacing the current source."""
 
     @abstractmethod
     def play(self) -> None: ...
@@ -128,8 +134,8 @@ class AudioBackend(ABC):
     def set_volume(self, volume: float) -> None:
         """Set the volume on a perceptual 0.0-1.0 scale."""
 
-    def queue_next(self, path: Path | None) -> None:
-        """Play ``path`` straight after the current track, without a gap (or nothing if None).
+    def queue_next(self, location: Location | None) -> None:
+        """Play ``location`` straight after the current track, without a gap (or nothing if None).
 
         Replaces any previously queued track; :meth:`load` and :meth:`stop` discard
         it. When the transition happens the backend calls

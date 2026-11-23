@@ -262,7 +262,7 @@ def test_play_and_pause_are_idempotent(
     playlist.add(make_tracks(2))
     commands.play()
     commands.play()
-    assert backend.loaded == [playlist[0].path]
+    assert backend.loaded == [playlist[0].location]
     assert player.state is PlaybackState.PLAYING
 
     commands.pause()
@@ -271,7 +271,7 @@ def test_play_and_pause_are_idempotent(
 
     commands.play()
     assert player.state is PlaybackState.PLAYING
-    assert backend.loaded == [playlist[0].path]  # resumed, not restarted
+    assert backend.loaded == [playlist[0].location]  # resumed, not restarted
 
 
 def test_play_pause_toggles_and_starts_when_stopped(

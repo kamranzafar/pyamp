@@ -254,7 +254,7 @@ class MprisService:
         metadata: dict[str, Variant] = {
             "mpris:trackid": ("o", self._track_id),
             "xesam:title": ("s", track.title),
-            "xesam:url": ("s", track.path.absolute().as_uri()),
+            "xesam:url": ("s", track.uri),
         }
         if self._now.duration_ms:
             metadata["mpris:length"] = ("x", self._now.duration_ms * 1000)

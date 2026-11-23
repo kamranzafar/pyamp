@@ -32,7 +32,7 @@ from pathlib import Path
 import platformdirs
 
 from pyamp import APP_NAME
-from pyamp.core.models import Track
+from pyamp.core.models import Location, Track
 from pyamp.library.playlist_formats import M3UFormat
 
 SUFFIX = ".m3u8"
@@ -126,11 +126,11 @@ class SavedPlaylists:
         self._format.write(tmp, tracks)
         retry_while_locked(lambda: tmp.replace(target))
 
-    def read_paths(self, name: str) -> list[Path]:
+    def read_paths(self, name: str) -> list[Location]:
         found = self._find(name)
         if found is None:
             raise FileNotFoundError(f"no saved playlist {name!r}")
-        return self._format.read(found)
+        return [entry.location for entry in self._format.read(found)]
 
     def rename(self, old: str, new: str) -> str:
         source = self._find(old)

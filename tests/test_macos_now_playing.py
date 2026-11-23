@@ -65,7 +65,7 @@ def playback_state() -> int:
 
 
 def test_update_publishes_track_info(adapter: MacNowPlayingAdapter) -> None:
-    track = Track(path=Path("/m/a.mp3"), title="Song", artist="Band", album="Record")
+    track = Track(location=Path("/m/a.mp3"), title="Song", artist="Band", album="Record")
     adapter.update(
         NowPlaying(
             track=track,
@@ -166,7 +166,7 @@ def test_end_to_end_with_session(
     bus: EventBus, player: Player, playlist: Playlist, adapter: MacNowPlayingAdapter
 ) -> None:
     session = MediaSession(bus, player, playlist, adapter)
-    playlist.add([Track(path=Path("/m/x.mp3"), title="X", artist="Y", duration_ms=90_000)])
+    playlist.add([Track(location=Path("/m/x.mp3"), title="X", artist="Y", duration_ms=90_000)])
     player.play()
     assert info()[mp.MPMediaItemPropertyTitle] == "X"
     assert info()[mp.MPMediaItemPropertyPlaybackDuration] == 90.0

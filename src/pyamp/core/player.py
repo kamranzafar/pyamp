@@ -23,7 +23,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -40,10 +39,11 @@ from pyamp.core.events import (
     PlayModeChanged,
     PositionChanged,
     ReplayGainChanged,
+    StreamTitleChanged,
     TrackChanged,
     VolumeChanged,
 )
-from pyamp.core.models import PlaybackState, RepeatMode, ReplayGainMode, Track
+from pyamp.core.models import Location, PlaybackState, RepeatMode, ReplayGainMode, Track
 from pyamp.core.play_order import SequentialOrder, ShuffleOrder
 from pyamp.core.playlist import Playlist
 
@@ -75,7 +75,8 @@ class Player:
         self._equalizer = Equalizer()
         # Gapless backends: whether a track is loaded, and what is queued after it.
         self._active = False
-        self._queued: tuple[int, Path] | None = None
+        self._queued: tuple[int, Location] | None = None
+        self._stream_title = ""
 
         backend.set_listener(self)
         backend.set_volume(self._volume)
@@ -87,6 +88,11 @@ class Player:
     @property
     def state(self) -> PlaybackState:
         return self._state
+
+    @property
+    def stream_title(self) -> str:
+        """The current stream's "now playing" title ("" if none, or not a stream)."""
+        return self._stream_title
 
     @property
     def position_ms(self) -> int:
@@ -146,8 +152,9 @@ class Player:
         self._active = True
         self._queued = None
         self._apply_track_gain(track)
-        self._backend.load(track.path)
+        self._backend.load(track.location)
         self._backend.play()
+        self._stream_title = ""
         self._bus.publish(TrackChanged(track, index))
         self._queue_next()
 
@@ -237,7 +244,7 @@ class Player:
             index = current
         else:
             index = self._playlist.next_index(wrap=self._repeat is not RepeatMode.OFF)
-        queued = None if index is None else (index, self._playlist[index].path)
+        queued = None if index is None else (index, self._playlist[index].location)
         if queued != self._queued:
             self._queued = queued
             self._backend.queue_next(queued[1] if queued else None)
@@ -268,31 +275,38 @@ class Player:
         else:
             self.play_index(index)
 
-    def on_track_advanced(self, path: Path) -> None:
+    def on_track_advanced(self, location: Location) -> None:
         queued, self._queued = self._queued, None
         index: int | None
-        if queued is not None and queued[1] == path and self._points_to(queued[0], path):
+        if queued is not None and queued[1] == location and self._points_to(queued[0], location):
             index = queued[0]
         else:
-            # The playlist changed during the transition: find the track by its path.
-            index = next((i for i, t in enumerate(self._playlist) if t.path == path), None)
+            # The playlist changed during the transition: find the track by its location.
+            index = next((i for i, t in enumerate(self._playlist) if t.location == location), None)
         if index is None:
-            log.warning("Backend advanced to %s, which is no longer in the playlist", path)
+            log.warning("Backend advanced to %s, which is no longer in the playlist", location)
             self.stop()
             return
         track = self._playlist.set_current(index)
         assert track is not None
         self._position_ms = self._duration_ms = 0
         self._apply_track_gain(track)
+        self._stream_title = ""
         self._bus.publish(TrackChanged(track, index))
         self._queue_next()
 
-    def _points_to(self, index: int, path: Path) -> bool:
-        return 0 <= index < len(self._playlist) and self._playlist[index].path == path
+    def _points_to(self, index: int, location: Location) -> bool:
+        return 0 <= index < len(self._playlist) and self._playlist[index].location == location
+
+    def on_stream_title(self, title: str) -> None:
+        track = self._playlist.current_track
+        if track is not None and track.is_stream and title != self._stream_title:
+            self._stream_title = title
+            self._bus.publish(StreamTitleChanged(title))
 
     def on_error(self, message: str) -> None:
         track = self._playlist.current_track
-        log.warning("Playback error for %s: %s", track.path if track else None, message)
+        log.warning("Playback error for %s: %s", track.location if track else None, message)
         self._bus.publish(PlaybackError(message, track))
 
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:

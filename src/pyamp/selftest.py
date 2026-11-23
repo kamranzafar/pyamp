@@ -38,7 +38,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from pyamp.core.equalizer import Equalizer
-from pyamp.core.models import PlaybackState, ReplayGainMode
+from pyamp.core.models import Location, PlaybackState, ReplayGainMode
 
 #: How long the mpv playback check may take before it counts as failed.
 PLAYBACK_TIMEOUT_S = 20.0
@@ -52,7 +52,7 @@ class _Recorder:
 
     def __init__(self) -> None:
         self.states: list[PlaybackState] = []
-        self.advanced: list[Path] = []
+        self.advanced: list[Location] = []
         self.errors: list[str] = []
         self.ended = False
 
@@ -68,8 +68,11 @@ class _Recorder:
     def on_end_of_track(self) -> None:
         self.ended = True
 
-    def on_track_advanced(self, path: Path) -> None:
-        self.advanced.append(path)
+    def on_track_advanced(self, location: Location) -> None:
+        self.advanced.append(location)
+
+    def on_stream_title(self, title: str) -> None:
+        pass
 
     def on_error(self, message: str) -> None:
         self.errors.append(message)

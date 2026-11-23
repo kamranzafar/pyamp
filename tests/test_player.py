@@ -46,7 +46,7 @@ def test_play_starts_first_track(player: Player, playlist: Playlist, backend: Fa
     tracks = make_tracks(3)
     playlist.add(tracks)
     player.play()
-    assert backend.loaded == [tracks[0].path]
+    assert backend.loaded == [tracks[0].location]
     assert player.state is PlaybackState.PLAYING
 
 
@@ -143,7 +143,7 @@ def test_next_track_is_queued_after_play(
     tracks = make_tracks(3)
     playlist.add(tracks)
     gplayer.play()
-    assert gapless.next_up == tracks[1].path
+    assert gapless.next_up == tracks[1].location
 
 
 def test_nothing_queued_while_stopped(
@@ -154,7 +154,7 @@ def test_nothing_queued_while_stopped(
     gplayer.play()
     gplayer.stop()
     playlist.add(make_tracks(1))
-    assert gapless.next_up == playlist[1].path  # unchanged: no re-queue after stop
+    assert gapless.next_up == playlist[1].location  # unchanged: no re-queue after stop
 
 
 def test_end_of_list_queues_nothing_unless_repeating(
@@ -165,9 +165,9 @@ def test_end_of_list_queues_nothing_unless_repeating(
     gplayer.play_index(1)
     assert gapless.next_up is None
     gplayer.set_repeat(RepeatMode.ALL)
-    assert gapless.next_up == tracks[0].path
+    assert gapless.next_up == tracks[0].location
     gplayer.set_repeat(RepeatMode.ONE)
-    assert gapless.next_up == tracks[1].path
+    assert gapless.next_up == tracks[1].location
 
 
 def test_advance_switches_track_without_loading(
@@ -183,9 +183,9 @@ def test_advance_switches_track_without_loading(
     gapless.advance()
 
     assert changes == [TrackChanged(tracks[1], 1)]
-    assert gapless.loaded == [tracks[0].path]  # the backend switched by itself
+    assert gapless.loaded == [tracks[0].location]  # the backend switched by itself
     assert gplayer.position_ms == 0
-    assert gapless.next_up == tracks[2].path  # and the one after is queued
+    assert gapless.next_up == tracks[2].location  # and the one after is queued
 
 
 def test_repeat_one_requeues_the_same_track(
@@ -199,7 +199,7 @@ def test_repeat_one_requeues_the_same_track(
     gapless.advance()
     assert playlist.current_index == 0
     assert len(gapless.queued) == queued_before + 1
-    assert gapless.next_up == tracks[0].path
+    assert gapless.next_up == tracks[0].location
 
 
 def test_playlist_and_mode_changes_requeue(
@@ -211,10 +211,10 @@ def test_playlist_and_mode_changes_requeue(
     assert gapless.next_up is None
     extra = make_tracks(4)[3]
     playlist.add([extra])
-    assert gapless.next_up == extra.path
+    assert gapless.next_up == extra.location
 
     gplayer.set_shuffle(True)
-    assert gapless.next_up in {t.path for t in playlist}
+    assert gapless.next_up in {t.location for t in playlist}
 
 
 def test_stale_advance_is_resolved_by_path(
@@ -263,7 +263,7 @@ def test_non_gapless_backend_never_queues_or_touches_shuffle(
 
 
 def rg_track(name: str, **gains: float) -> Track:
-    return Track(path=Path(f"/music/{name}.mp3"), title=name, replay_gain=ReplayGain(**gains))
+    return Track(location=Path(f"/music/{name}.mp3"), title=name, replay_gain=ReplayGain(**gains))
 
 
 def test_replay_gain_is_off_by_default(

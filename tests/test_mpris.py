@@ -63,7 +63,7 @@ from tests.conftest import FakeBackend, make_tracks
 PLAYER = DBusAddress(OBJECT_PATH, bus_name=BUS_NAME, interface=PLAYER_IFACE)
 PROPS = DBusAddress(OBJECT_PATH, bus_name=BUS_NAME, interface=PROPERTIES_IFACE)
 
-TRACK = Track(path=Path("/music/song.flac"), title="Song", artist="Band", album="Record")
+TRACK = Track(location=Path("/music/song.flac"), title="Song", artist="Band", album="Record")
 
 
 class WireBus:
@@ -158,7 +158,7 @@ def test_metadata_has_spec_types(service: MprisService, wire_bus: WireBus) -> No
     assert metadata["xesam:artist"] == ("as", ["Band"])
     assert metadata["xesam:album"] == ("s", "Record")
     # file:///music/song.flac (with the current drive on Windows)
-    assert metadata["xesam:url"] == ("s", TRACK.path.absolute().as_uri())
+    assert metadata["xesam:url"] == ("s", TRACK.uri)
     assert metadata["xesam:url"][1].endswith("/music/song.flac")
 
 

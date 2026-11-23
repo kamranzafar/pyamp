@@ -64,7 +64,7 @@ def add_songs(app: Application, folder: Path, *names: str) -> list[Track]:
     for name in names:
         path = folder / f"{name}.mp3"
         path.write_bytes(b"")
-        tracks.append(Track(path=path, title=name))
+        tracks.append(Track(location=path, title=name))
     app.playlist.add(tracks)
     return tracks
 
@@ -196,9 +196,9 @@ def test_reorder_is_auto_saved(app: Application, tmp_path: Path) -> None:
 
 def test_matches_need_every_word() -> None:
     tracks = [
-        Track(path=Path("/m/01-intro.mp3"), title="Intro", artist="Band"),
-        Track(path=Path("/m/02.mp3"), title="Blue Train", artist="Coltrane"),
-        Track(path=Path("/m/03.mp3"), title="Train Song", artist="Band"),
+        Track(location=Path("/m/01-intro.mp3"), title="Intro", artist="Band"),
+        Track(location=Path("/m/02.mp3"), title="Blue Train", artist="Coltrane"),
+        Track(location=Path("/m/03.mp3"), title="Train Song", artist="Band"),
     ]
     assert matches(tracks, "train") == [1, 2]
     assert matches(tracks, "band TRAIN") == [2]

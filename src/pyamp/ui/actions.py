@@ -1,0 +1,91 @@
+"""Playback commands as ``QAction`` objects (Command pattern).
+
+Each action wraps one player operation. The same object drives the transport
+button, the menu entry and the keyboard shortcut, so all three always agree.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from PySide6.QtCore import QObject, Qt
+from PySide6.QtGui import QAction, QKeySequence
+
+from pyamp.core.events import EventBus, PlayModeChanged
+from pyamp.core.models import RepeatMode
+from pyamp.core.player import Player
+
+SEEK_STEP_MS = 5000
+
+_REPEAT_LABELS = {
+    RepeatMode.OFF: "Repeat: Off",
+    RepeatMode.ALL: "Repeat: All",
+    RepeatMode.ONE: "Repeat: One",
+}
+_REPEAT_GLYPHS = {RepeatMode.OFF: "⟳", RepeatMode.ALL: "⟳", RepeatMode.ONE: "⟳1"}
+
+
+@dataclass(frozen=True, slots=True)
+class PlayerActions:
+    previous: QAction
+    play: QAction
+    pause: QAction
+    stop: QAction
+    next: QAction
+    seek_back: QAction
+    seek_forward: QAction
+    shuffle: QAction
+    repeat: QAction
+
+    @property
+    def transport(self) -> tuple[QAction, ...]:
+        return (self.previous, self.play, self.pause, self.stop, self.next)
+
+
+def _action(parent: QObject, glyph: str, tooltip: str, shortcut: str) -> QAction:
+    action = QAction(glyph, parent)
+    action.setToolTip(f"{tooltip} ({shortcut})")
+    action.setStatusTip(tooltip)
+    action.setShortcut(QKeySequence(shortcut))
+    action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+    return action
+
+
+def create_player_actions(parent: QObject, player: Player, bus: EventBus) -> PlayerActions:
+    """Build the actions. Keyboard shortcuts follow classic Winamp (Z X C V B)."""
+    actions = PlayerActions(
+        previous=_action(parent, "⏮", "Previous", "Z"),
+        play=_action(parent, "▶", "Play", "X"),
+        pause=_action(parent, "⏸", "Pause", "C"),
+        stop=_action(parent, "⏹", "Stop", "V"),
+        next=_action(parent, "⏭", "Next", "B"),
+        seek_back=_action(parent, "«", "Rewind 5 s", "Left"),
+        seek_forward=_action(parent, "»", "Fast-forward 5 s", "Right"),
+        shuffle=_action(parent, "⤮", "Shuffle", "S"),
+        repeat=_action(parent, "⟳", "Repeat", "R"),
+    )
+    actions.previous.triggered.connect(player.previous)
+    actions.play.triggered.connect(player.play)
+    actions.pause.triggered.connect(player.pause)
+    actions.stop.triggered.connect(player.stop)
+    actions.next.triggered.connect(player.next)
+    actions.seek_back.triggered.connect(lambda: player.seek(player.position_ms - SEEK_STEP_MS))
+    actions.seek_forward.triggered.connect(lambda: player.seek(player.position_ms + SEEK_STEP_MS))
+
+    actions.shuffle.setCheckable(True)
+    actions.shuffle.toggled.connect(player.set_shuffle)
+    actions.repeat.setCheckable(True)
+    actions.repeat.triggered.connect(lambda: player.set_repeat(player.repeat.cycle()))
+
+    def sync_modes(event: PlayModeChanged) -> None:
+        # Reflect player state back into the actions (e.g. restored from settings).
+        if actions.shuffle.isChecked() != event.shuffle:
+            actions.shuffle.blockSignals(True)
+            actions.shuffle.setChecked(event.shuffle)
+            actions.shuffle.blockSignals(False)
+        actions.repeat.setChecked(event.repeat is not RepeatMode.OFF)
+        actions.repeat.setText(_REPEAT_GLYPHS[event.repeat])
+        actions.repeat.setToolTip(f"{_REPEAT_LABELS[event.repeat]} (R)")
+
+    bus.subscribe(PlayModeChanged, sync_modes)
+    return actions

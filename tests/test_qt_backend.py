@@ -15,6 +15,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 """The QtMultimedia backend: conversions and signal mapping everywhere, playback where
 there is an audio output device (CI provides a silent one on Linux)."""
 

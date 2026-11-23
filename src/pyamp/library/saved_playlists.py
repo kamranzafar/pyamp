@@ -15,6 +15,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 """Named playlists the user keeps, stored as one ``.m3u8`` file each.
 
 No Qt here: :class:`pyamp.ui.playlist_session.PlaylistSession` decides when to save.

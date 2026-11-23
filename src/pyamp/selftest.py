@@ -15,6 +15,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 """``pyamp --self-test``: check that this installation (e.g. a packaged app) really works.
 
 Runs headless and silently (offscreen Qt, mpv's null audio output) and prints one

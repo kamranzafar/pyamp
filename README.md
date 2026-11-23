@@ -342,3 +342,7 @@ PyAmp is free software: you can redistribute it and/or modify it under the terms
 of the GNU General Public License as published by the Free Software Foundation,
 either version 3 of the License, or (at your option) any later version. See
 [LICENSE](LICENSE) for the full text.
+
+[Additional terms](ADDITIONAL-TERMS.md) apply under section 7 of the GPL: modified
+versions must be marked as changed and distributed under a different name and
+branding, and the PyAmp name may not be used to endorse them.

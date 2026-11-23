@@ -198,7 +198,7 @@ def test_other_load_errors_are_not_retried(tmp_path: Path) -> None:
         attempts.append(1)
         raise OSError("Symbol not found: _av_something")
 
-    with pytest.raises(OSError, match="could not load .*libmpv.dylib"):
+    with pytest.raises(OSError, match=r"could not load .*libmpv\.dylib"):
         loader.import_from(
             lib,
             platform="darwin",

@@ -131,6 +131,14 @@ class PlaylistChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class SavedPlaylistsChanged:
+    """The saved playlists, or which one is open, changed."""
+
+    names: tuple[str, ...]
+    active: str
+
+
+@dataclass(frozen=True, slots=True)
 class PlaybackError:
     message: str
     track: Track | None = None

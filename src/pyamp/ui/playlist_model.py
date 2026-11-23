@@ -20,14 +20,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import (
     QAbstractTableModel,
+    QMimeData,
     QModelIndex,
     QObject,
     QPersistentModelIndex,
     Qt,
+    QTimer,
+    Signal,
 )
 from PySide6.QtGui import QColor
 
@@ -39,9 +44,16 @@ from pyamp.ui.skin import Skin
 type _Index = QModelIndex | QPersistentModelIndex
 
 TITLE_COLUMN, TIME_COLUMN = 0, 1
+#: Rows being dragged within the playlist (private to PyAmp).
+ROWS_MIME = "application/x-pyamp-rows"
 
 
 class PlaylistModel(QAbstractTableModel):
+    #: Rows the dragged tracks ended up at after a move (to keep them selected).
+    rows_moved = Signal(list)
+    #: Files dropped onto the list from outside (e.g. Finder).
+    files_dropped = Signal(list)
+
     def __init__(
         self, playlist: Playlist, bus: EventBus, skin: Skin, parent: QObject | None = None
     ) -> None:
@@ -81,6 +93,48 @@ class PlaylistModel(QAbstractTableModel):
             case Qt.ItemDataRole.ToolTipRole:
                 return str(track.path)
         return None
+
+    # -- Drag & drop ---------------------------------------------------------- #
+
+    def flags(self, index: _Index) -> Qt.ItemFlag:
+        if not index.isValid():
+            return Qt.ItemFlag.ItemIsDropEnabled  # drops land *between* rows
+        return super().flags(index) | Qt.ItemFlag.ItemIsDragEnabled
+
+    def supportedDropActions(self) -> Qt.DropAction:
+        return Qt.DropAction.MoveAction | Qt.DropAction.CopyAction
+
+    def mimeTypes(self) -> list[str]:
+        return [ROWS_MIME, "text/uri-list"]
+
+    def mimeData(self, indexes: Sequence[QModelIndex]) -> QMimeData:
+        rows = sorted({i.row() for i in indexes if i.isValid()})
+        data = QMimeData()
+        data.setData(ROWS_MIME, ",".join(map(str, rows)).encode())
+        return data
+
+    def dropMimeData(
+        self,
+        data: QMimeData,
+        action: Qt.DropAction,
+        row: int,
+        column: int,
+        parent: _Index,
+    ) -> bool:
+        if row < 0:  # dropped onto a row, or below the last one
+            row = parent.row() if parent.isValid() else len(self._playlist)
+        if data.hasFormat(ROWS_MIME):
+            raw = bytes(data.data(ROWS_MIME).data()).decode()
+            rows = [int(r) for r in raw.split(",") if r]
+            # Qt is still handling the drop: reorder (and reset the model) right after it.
+            QTimer.singleShot(0, lambda: self.rows_moved.emit(self._playlist.move(rows, row)))
+            return True
+        if data.hasUrls():
+            paths = [Path(u.toLocalFile()) for u in data.urls() if u.isLocalFile()]
+            if paths:
+                self.files_dropped.emit(paths)
+                return True
+        return False
 
     def _on_playlist_changed(self, event: PlaylistChanged) -> None:
         if event.appended_from == self._rows and len(self._playlist) > self._rows:

@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QItemSelection, QItemSelectionModel, Qt, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTableView, QWidget
 
@@ -39,6 +39,15 @@ class PlaylistView(QTableView):
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Drag rows to reorder; files dropped from outside are added (see PlaylistModel).
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDragDropOverwriteMode(False)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        model.rows_moved.connect(self.select_rows)
         self.verticalHeader().hide()
         self.verticalHeader().setDefaultSectionSize(self.fontMetrics().height() + 2)
         header = self.horizontalHeader()
@@ -49,6 +58,17 @@ class PlaylistView(QTableView):
         header.resizeSection(TIME_COLUMN, self.fontMetrics().horizontalAdvance(" 00:00:00 "))
         # Not using `activated`: its trigger differs per platform. Be explicit instead.
         self.doubleClicked.connect(lambda index: self.track_activated.emit(index.row()))
+
+    def select_rows(self, rows: list[int]) -> None:
+        """Select exactly ``rows`` (e.g. the tracks just moved)."""
+        model = self.model()
+        selection = QItemSelection()
+        for row in rows:
+            selection.select(model.index(row, 0), model.index(row, model.columnCount() - 1))
+        flags = QItemSelectionModel.SelectionFlag.ClearAndSelect
+        self.selectionModel().select(selection, flags)
+        if rows:
+            self.scrollTo(model.index(rows[0], 0))
 
     def selected_rows(self) -> list[int]:
         return sorted({index.row() for index in self.selectionModel().selectedRows()})

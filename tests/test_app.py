@@ -33,9 +33,9 @@ from pyamp.audio.registry import BackendUnavailableError
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.equalizer import Equalizer
 from pyamp.core.models import RepeatMode, ReplayGainMode, Track
-from pyamp.library.playlist_formats import PlaylistFormatRegistry
-from pyamp.ui.background_loader import LoadJob
+from pyamp.library.saved_playlists import SavedPlaylists
 from tests.conftest import FakeBackend, FakeGaplessBackend
+from tests.test_background_loader import wait_until
 
 
 @pytest.fixture(autouse=True)
@@ -56,7 +56,7 @@ def build(store: SettingsStore, **overrides: object) -> Application:
     )
     for key, value in overrides.items():
         setattr(args, key, value)
-    return Application(args, store)
+    return Application(args, store, SavedPlaylists(store.directory / "playlists"))
 
 
 @pytest.fixture
@@ -260,6 +260,8 @@ def test_shutdown_saves_settings_and_playlist(
 ) -> None:
     application = build(store)
     cleanup.append(application)
+    application.start([])
+    wait_until(lambda: not application.playlists.loading)
     application.player.set_volume(0.4)
     application.player.set_shuffle(True)
     application.player.set_repeat(RepeatMode.ALL)
@@ -272,21 +274,37 @@ def test_shutdown_saves_settings_and_playlist(
     assert saved.volume == pytest.approx(0.4)
     assert saved.shuffle is True
     assert saved.repeat == "all"
-    assert PlaylistFormatRegistry.default().read(store.session_playlist) == [t.path for t in tracks]
+    assert saved.active_playlist == "Default"
+    playlists = SavedPlaylists(store.directory / "playlists")
+    assert playlists.read_paths("Default") == [t.path for t in tracks]
 
 
-def test_shutdown_keeps_saved_playlist_while_restore_is_incomplete(
-    store: SettingsStore, cleanup: list[Application]
+def test_upgrade_keeps_the_old_session_playlist(
+    store: SettingsStore, cleanup: list[Application], tmp_path: Path
 ) -> None:
+    song = tmp_path / "song.mp3"
+    song.write_bytes(b"")
     store.directory.mkdir(parents=True, exist_ok=True)
-    store.session_playlist.write_text("#EXTM3U\n/music/original.mp3\n")
+    store.session_playlist.write_text(f"#EXTM3U\n{song}\n")  # as older versions saved it
     application = build(store)
     cleanup.append(application)
-    application._restore_job = LoadJob([store.session_playlist])  # still running
+    application.start([])
+    wait_until(lambda: len(application.playlist) == 1)
+    assert application.playlists.active == "Default"
+    assert application.playlist[0].path == song
 
+
+def test_files_given_on_the_command_line_are_added_to_the_open_playlist(
+    store: SettingsStore, cleanup: list[Application], tmp_path: Path
+) -> None:
+    song = tmp_path / "cli.mp3"
+    song.write_bytes(b"")
+    application = build(store)
+    cleanup.append(application)
+    application.start([song])
+    wait_until(lambda: len(application.playlist) == 1 and not application.playlists.loading)
     application.shutdown()
-
-    assert "original.mp3" in store.session_playlist.read_text()
+    assert SavedPlaylists(store.directory / "playlists").read_paths("Default") == [song]
 
 
 def test_shutdown_survives_unwritable_config_dir(

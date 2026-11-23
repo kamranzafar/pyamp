@@ -20,11 +20,29 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from enum import StrEnum
 
 from pyamp.core.events import EventBus, PlaylistChanged
 from pyamp.core.models import Track
 from pyamp.core.play_order import PlayOrder, SequentialOrder
+
+
+class SortKey(StrEnum):
+    TITLE = "title"
+    ARTIST = "artist"
+    ALBUM = "album"
+    FILENAME = "filename"
+    DURATION = "duration"
+
+
+_SORT_KEYS: dict[SortKey, Callable[[Track], tuple[object, ...]]] = {
+    SortKey.TITLE: lambda t: (t.title.casefold(),),
+    SortKey.ARTIST: lambda t: (t.artist.casefold(), t.album.casefold(), t.title.casefold()),
+    SortKey.ALBUM: lambda t: (t.album.casefold(), t.path.name.casefold()),
+    SortKey.FILENAME: lambda t: (t.path.name.casefold(),),
+    SortKey.DURATION: lambda t: (t.duration_ms,),
+}
 
 
 class Playlist(Sequence[Track]):
@@ -103,6 +121,61 @@ class Playlist(Sequence[Track]):
             else:
                 self._current -= sum(1 for i in doomed if i < self._current)
         self._tracks = [t for i, t in enumerate(self._tracks) if i not in doomed]
+        self._changed()
+
+    def replace(self, tracks: Iterable[Track]) -> None:
+        """Swap in a whole new list (e.g. another saved playlist). Clears the cursor."""
+        self._tracks = list(tracks)
+        self._current = None
+        self._changed()
+
+    def move(self, rows: Iterable[int], to: int) -> list[int]:
+        """Move ``rows`` (as a block, keeping their order) to before row ``to``.
+
+        Returns the rows the moved tracks ended up at, e.g. to keep them selected.
+        """
+        moving = sorted({r for r in rows if 0 <= r < len(self._tracks)})
+        if not moving:
+            return []
+        to = max(0, min(to, len(self._tracks)))
+        insert_at = to - sum(1 for r in moving if r < to)
+        moving_set = set(moving)
+        order = [i for i in range(len(self._tracks)) if i not in moving_set]
+        order[insert_at:insert_at] = moving
+        self._reorder(order)
+        return list(range(insert_at, insert_at + len(moving)))
+
+    def sort(self, key: SortKey, *, descending: bool = False) -> None:
+        """Sort by ``key`` (case-insensitive and stable: ties keep their order)."""
+        sort_key = _SORT_KEYS[key]
+        order = sorted(
+            range(len(self._tracks)),
+            key=lambda i: sort_key(self._tracks[i]),
+            reverse=descending,
+        )
+        self._reorder(order)
+
+    def reverse(self) -> None:
+        self._reorder(list(reversed(range(len(self._tracks)))))
+
+    def remove_duplicates(self) -> int:
+        """Drop repeated files (keeping the playing copy, else the first). Returns how many."""
+        keep: dict[object, int] = {}
+        for i, track in enumerate(self._tracks):
+            keep.setdefault(track.path, i)
+        if self._current is not None:
+            keep[self._tracks[self._current].path] = self._current
+        doomed = [i for i in range(len(self._tracks)) if keep[self._tracks[i].path] != i]
+        self.remove(doomed)
+        return len(doomed)
+
+    def _reorder(self, order: list[int]) -> None:
+        """Rearrange so that new position ``n`` holds old track ``order[n]``."""
+        if order == list(range(len(self._tracks))):
+            return
+        self._tracks = [self._tracks[i] for i in order]
+        if self._current is not None:
+            self._current = order.index(self._current)  # the playing track keeps playing
         self._changed()
 
     def clear(self) -> None:

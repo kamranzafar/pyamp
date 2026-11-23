@@ -24,7 +24,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -35,6 +35,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -48,20 +49,32 @@ from pyamp.config import Settings
 from pyamp.core.events import EventBus, PlaybackError, PlaylistChanged, TrackChanged
 from pyamp.core.models import Track, format_duration
 from pyamp.core.player import Player
-from pyamp.core.playlist import Playlist
+from pyamp.core.playlist import Playlist, SortKey
 from pyamp.library.metadata import AUDIO_EXTENSIONS
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
+from pyamp.library.saved_playlists import PlaylistNameError
 from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
 from pyamp.ui.equalizer_window import EqualizerWindow
+from pyamp.ui.jump_dialog import JumpDialog
 from pyamp.ui.playlist_model import PlaylistModel
+from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import Skin
 from pyamp.ui.widgets.lcd import LcdPanel
+from pyamp.ui.widgets.playlist_selector import PlaylistSelector
 from pyamp.ui.widgets.playlist_view import PlaylistView
 from pyamp.ui.widgets.sliders import SeekSlider, VolumeSlider
 
 WINDOW_WIDTH = 460
 STATUS_TIMEOUT_MS = 5000
+
+SORT_OPTIONS = (
+    ("&Title", SortKey.TITLE),
+    ("&Artist", SortKey.ARTIST),
+    ("Al&bum", SortKey.ALBUM),
+    ("&File Name", SortKey.FILENAME),
+    ("&Duration", SortKey.DURATION),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +88,7 @@ class UiServices:
     playlist_formats: PlaylistFormatRegistry
     settings: Settings
     spectrum_bands: int
+    playlists: PlaylistSession
 
 
 class MainWindow(QMainWindow):
@@ -83,6 +97,7 @@ class MainWindow(QMainWindow):
         self._s = services
         self._skin = skin
         self._equalizer_window: EqualizerWindow | None = None
+        self._jump_dialog: JumpDialog | None = None
         self.setWindowTitle(APP_NAME)
         self.setStyleSheet(skin.stylesheet())
         self.setAcceptDrops(True)
@@ -100,9 +115,15 @@ class MainWindow(QMainWindow):
         self._seek.seek_requested.connect(services.player.seek)
         self._volume = VolumeSlider(services.bus, services.player.volume)
         self._volume.volume_requested.connect(services.player.set_volume)
-        self._playlist_view = PlaylistView(PlaylistModel(services.playlist, services.bus, skin))
+        model = PlaylistModel(services.playlist, services.bus, skin)
+        model.files_dropped.connect(self.add_paths)
+        self._playlist_view = PlaylistView(model)
         self._playlist_view.track_activated.connect(services.player.play_index)
         self._playlist_view.remove_requested.connect(services.playlist.remove)
+        self._playlist_view.customContextMenuRequested.connect(self._show_context_menu)
+        self._selector = PlaylistSelector(services.bus)
+        self._selector.switch_requested.connect(self.switch_playlist)
+        self._selector.new_requested.connect(self.new_playlist)
 
         self._autoplay_jobs: set[LoadJob] = set()
         services.loader.tracks_loaded.connect(self._on_tracks_loaded)
@@ -130,6 +151,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._lcd)
         layout.addWidget(self._seek)
         layout.addLayout(self._build_transport(self._actions))
+        layout.addWidget(self._selector)
         layout.addWidget(self._playlist_view, stretch=1)
         self.setCentralWidget(central)
 
@@ -163,9 +185,9 @@ class MainWindow(QMainWindow):
         )
         self._add_menu_action(file_menu, "Add F&older…", self._add_folder, "Ctrl+Shift+O")
         file_menu.addSeparator()
-        self._add_menu_action(file_menu, "&Open Playlist…", self._open_playlist, "Ctrl+L")
+        self._add_menu_action(file_menu, "&Import Playlist…", self._import_playlist, "Ctrl+L")
         self._add_menu_action(
-            file_menu, "&Save Playlist As…", self._save_playlist, QKeySequence.StandardKey.Save
+            file_menu, "&Export Playlist…", self._export_playlist, QKeySequence.StandardKey.Save
         )
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "&Quit", self.close, QKeySequence.StandardKey.Quit)
@@ -181,8 +203,97 @@ class MainWindow(QMainWindow):
         self._add_menu_action(play_menu, "&Equaliser…", self.show_equalizer, "G")
 
         list_menu = menu_bar.addMenu("P&laylist")
-        self._add_menu_action(list_menu, "&Remove Selected", self._remove_selected)
+        self._add_menu_action(list_menu, "&New Playlist…", self.new_playlist, "Ctrl+N")
+        self._add_menu_action(list_menu, "Re&name Playlist…", self.rename_playlist, "F2")
+        self._add_menu_action(list_menu, "&Delete Playlist…", self.delete_playlist)
+        list_menu.addSeparator()
+        self._sort_menu = list_menu.addMenu("&Sort by")
+        for label, key in SORT_OPTIONS:
+            self._add_menu_action(self._sort_menu, label, self._sorter(key))
+        self._sort_menu.addSeparator()
+        self._add_menu_action(self._sort_menu, "&Reverse Order", self._s.playlist.reverse)
+        self._dedupe_action = self._add_menu_action(
+            list_menu, "Remove D&uplicates", self.remove_duplicates
+        )
+        list_menu.addSeparator()
+        self._jump_action = self._add_menu_action(
+            list_menu, "&Jump to Track…", self.show_jump_dialog, "J"
+        )
+        self._remove_action = self._add_menu_action(
+            list_menu, "&Remove Selected", self._remove_selected
+        )
         self._add_menu_action(list_menu, "&Clear", self._clear_playlist)
+
+    def _sorter(self, key: SortKey) -> Callable[[], None]:
+        # A closure without parameters: Qt passes "checked" to slots that accept one.
+        def sort() -> None:
+            self._s.playlist.sort(key)
+
+        return sort
+
+    def _context_menu(self) -> QMenu:
+        menu = QMenu(self)
+        rows = self._playlist_view.selected_rows()
+        play = menu.addAction("&Play")
+        play.setEnabled(bool(rows))
+        play.triggered.connect(lambda: self._s.player.play_index(rows[0]))
+        menu.addAction(self._remove_action)
+        menu.addSeparator()
+        menu.addMenu(self._sort_menu)
+        menu.addAction(self._dedupe_action)
+        menu.addAction(self._jump_action)
+        return menu
+
+    def _show_context_menu(self, pos: QPoint) -> None:
+        self._context_menu().exec(self._playlist_view.viewport().mapToGlobal(pos))
+
+    # -- Saved playlists ------------------------------------------------------ #
+
+    def switch_playlist(self, name: str) -> None:
+        self._autoplay_jobs.clear()
+        self._s.playlists.switch(name)
+
+    def new_playlist(self) -> None:
+        name, ok = QInputDialog.getText(self, "New Playlist", "Name:", text="New playlist")
+        if ok:
+            self._autoplay_jobs.clear()
+            self._try(lambda: self._s.playlists.new(name), "New Playlist")
+
+    def rename_playlist(self) -> None:
+        current = self._s.playlists.active or ""
+        name, ok = QInputDialog.getText(self, "Rename Playlist", "Name:", text=current)
+        if ok and name.strip() != current:
+            self._try(lambda: self._s.playlists.rename(name), "Rename Playlist")
+
+    def delete_playlist(self) -> None:
+        name = self._s.playlists.active
+        answer = QMessageBox.question(
+            self,
+            "Delete Playlist",
+            f'Delete the playlist "{name}"?\n\nOnly the playlist is deleted; '
+            "the music files stay where they are.",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._autoplay_jobs.clear()
+            self._s.playlists.delete()
+
+    def remove_duplicates(self) -> None:
+        removed = self._s.playlist.remove_duplicates()
+        noun = "duplicate" if removed == 1 else "duplicates"
+        self.statusBar().showMessage(f"Removed {removed} {noun}", STATUS_TIMEOUT_MS)
+
+    def show_jump_dialog(self) -> JumpDialog:
+        dialog = JumpDialog(list(self._s.playlist), self._skin, parent=self)
+        dialog.jump_requested.connect(self._s.player.play_index)
+        dialog.open()
+        self._jump_dialog = dialog
+        return dialog
+
+    def _try(self, action: Callable[[], object], title: str) -> None:
+        try:
+            action()
+        except PlaylistNameError as exc:
+            QMessageBox.warning(self, title, str(exc))
 
     def show_equalizer(self) -> EqualizerWindow:
         """Open the equaliser window (one instance, reused)."""
@@ -237,23 +348,28 @@ class MainWindow(QMainWindow):
         )
         self._add_from_dialog([Path(folder)] if folder else [])
 
-    def _open_playlist(self) -> None:
+    def _import_playlist(self) -> None:
+        """Import a playlist file as a new saved playlist (named after the file)."""
         file, _ = QFileDialog.getOpenFileName(
             self,
-            "Open Playlist",
+            "Import Playlist",
             self._s.settings.last_directory,
             self._s.playlist_formats.file_dialog_filter(),
         )
         if file:
-            self._s.player.stop()
-            self._clear_playlist()
-            self._add_from_dialog([Path(file)])
+            path = Path(file)
+            self._autoplay_jobs.clear()
+            self._try(lambda: self._s.playlists.new(path.stem), "Import Playlist")
+            self._add_from_dialog([path])
 
-    def _save_playlist(self) -> None:
+    def _export_playlist(self) -> None:
         file, _ = QFileDialog.getSaveFileName(
             self,
-            "Save Playlist",
-            self._s.settings.last_directory,
+            "Export Playlist",
+            str(
+                Path(self._s.settings.last_directory)
+                / f"{self._s.playlists.active or 'playlist'}.m3u8"
+            ),
             self._s.playlist_formats.file_dialog_filter(),
         )
         if not file:
@@ -264,9 +380,9 @@ class MainWindow(QMainWindow):
         try:
             self._s.playlist_formats.write(path, list(self._s.playlist))
         except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "Save Playlist", f"Could not save playlist:\n{exc}")
+            QMessageBox.warning(self, "Export Playlist", f"Could not export playlist:\n{exc}")
             return
-        self.statusBar().showMessage(f"Saved {path.name}", STATUS_TIMEOUT_MS)
+        self.statusBar().showMessage(f"Exported {path.name}", STATUS_TIMEOUT_MS)
 
     def _add_from_dialog(self, paths: list[Path]) -> None:
         if paths:

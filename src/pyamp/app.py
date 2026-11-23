@@ -54,9 +54,11 @@ from pyamp.dsp.spectrum import SpectrumService
 from pyamp.library.loader import TrackLoader
 from pyamp.library.metadata import MutagenMetadataReader
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
+from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.plugins import PluginContext, PluginManager
-from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
+from pyamp.ui.background_loader import BackgroundTrackLoader
 from pyamp.ui.main_window import MainWindow, UiServices
+from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import DEFAULT_SKIN
 
 log = logging.getLogger(__name__)
@@ -117,7 +119,12 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 class Application:
     """Owns the long-lived services and the session lifecycle."""
 
-    def __init__(self, args: argparse.Namespace, store: SettingsStore | None = None) -> None:
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        store: SettingsStore | None = None,
+        saved_playlists: SavedPlaylists | None = None,
+    ) -> None:
         self._store = store or SettingsStore()
         self.settings = self._store.load()
         apply_libmpv_preference(args.libmpv, self.settings)  # before the backend loads
@@ -131,7 +138,14 @@ class Application:
             TrackLoader(MutagenMetadataReader(), self.playlist_formats)
         )
         self.plugins = PluginManager(PluginContext(self.bus, self.player, self.playlist))
-        self._restore_job: LoadJob | None = None
+        self.playlists = PlaylistSession(
+            self.playlist,
+            saved_playlists or SavedPlaylists(),
+            self.loader,
+            self.bus,
+            settings=self.settings,
+            legacy_session=self._store.session_playlist,  # migrated once into "Default"
+        )
 
         self.window = MainWindow(
             UiServices(
@@ -142,6 +156,7 @@ class Application:
                 playlist_formats=self.playlist_formats,
                 settings=self.settings,
                 spectrum_bands=self.spectrum.band_count,
+                playlists=self.playlists,
             ),
             DEFAULT_SKIN,
         )
@@ -152,17 +167,13 @@ class Application:
 
     def start(self, paths: Sequence[Path]) -> None:
         self.window.show()
+        self.playlists.start()  # opens the playlist that was open last
         if paths:
             self.window.add_paths(paths, autoplay=True)
-        elif self._store.session_playlist.exists():
-            self._restore_job = self.window.add_paths(
-                [self._store.session_playlist], autoplay=False
-            )
 
     def shutdown(self) -> None:
-        # Quitting while the session is still being restored would save a truncated
-        # playlist over the complete one, so in that case keep the file as it is.
-        restore_incomplete = self._restore_job is not None and not self._restore_job.done
+        # Saves the open playlist, unless it's still loading (then its file is kept).
+        self.playlists.shutdown()
         self.loader.shutdown()
         self.settings.volume = self.player.volume
         self.settings.shuffle = self.player.shuffle
@@ -174,10 +185,6 @@ class Application:
         self.settings.equalizer_gains = list(eq.gains_db)
         try:
             self._store.save(self.settings)
-            if restore_incomplete:
-                log.info("Session restore still in progress; keeping saved playlist")
-            else:
-                self.playlist_formats.write(self._store.session_playlist, list(self.playlist))
         except OSError:
             log.exception("Could not save session")
         self.plugins.shutdown()

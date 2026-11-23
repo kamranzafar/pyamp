@@ -167,11 +167,16 @@ Its menu shows what's playing and has Play/Pause, Next, Previous, Stop, Shuffle,
 Repeat, your saved playlists, Show PyAmp and Quit. On Linux and Windows, clicking
 the icon brings the window back.
 
+Like other music players, **closing the window doesn't stop PyAmp**: the window
+hides and the music keeps playing. Bring it back with the Dock icon (macOS) or the
+menu bar/tray icon. **Quit** (⌘Q, File → Quit, the icon's menu or the Dock) ends it.
+
 Two settings in the **View** menu:
 
 - **Show Icon in Menu Bar** (on by default).
-- **Keep Running in Menu Bar When Closed** (off by default): closing the window
-  only hides it and the music keeps playing; **Quit** in either menu really quits.
+- **Keep Running When Window Is Closed** (on by default; turn it off to have
+  closing the window quit). On Linux and Windows this needs the tray icon, as
+  it's the only way back to a hidden window.
 
 ## Development
 

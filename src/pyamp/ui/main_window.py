@@ -58,7 +58,7 @@ from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
 from pyamp.ui.equalizer_window import EqualizerWindow
 from pyamp.ui.jump_dialog import JumpDialog
-from pyamp.ui.menu_bar import PLACE, MenuBarIcon
+from pyamp.ui.menu_bar import IS_MACOS, PLACE, MenuBarIcon
 from pyamp.ui.playlist_model import PlaylistModel
 from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import Skin
@@ -132,6 +132,11 @@ class MainWindow(QMainWindow):
         services.loader.job_finished.connect(self._on_load_finished)
 
         self._quitting = False
+        self._hidden_by_close = False
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            # A Dock icon click while hidden brings the window back.
+            app.applicationStateChanged.connect(self._on_app_state)
         self.menu_bar_icon = MenuBarIcon(
             services.bus,
             services.player,
@@ -242,9 +247,14 @@ class MainWindow(QMainWindow):
         self.show_icon_action.setCheckable(True)
         self.show_icon_action.setChecked(self.menu_bar_icon.visible)
         self.show_icon_action.toggled.connect(self._set_menu_bar_icon)
-        self.keep_running_action = QAction(f"Keep Running in {PLACE} When Closed", self)
+        self.keep_running_action = QAction(
+            "Keep Running When Window Is Closed"
+            if IS_MACOS
+            else f"Keep Running in {PLACE} When Closed",
+            self,
+        )
         self.keep_running_action.setCheckable(True)
-        self.keep_running_action.setChecked(self._s.settings.keep_running_in_menu_bar)
+        self.keep_running_action.setChecked(self._s.settings.keep_running_when_closed)
         self.keep_running_action.toggled.connect(self._set_keep_running)
         view_menu.addActions([self.show_icon_action, self.keep_running_action])
         if not MenuBarIcon.available():
@@ -258,11 +268,11 @@ class MainWindow(QMainWindow):
         self._sync_view_menu()
 
     def _set_keep_running(self, keep: bool) -> None:
-        self._s.settings.keep_running_in_menu_bar = keep
+        self._s.settings.keep_running_when_closed = keep
 
     def _sync_view_menu(self) -> None:
-        # Keeping running needs the icon: it's the only way back to the window.
-        self.keep_running_action.setEnabled(self.menu_bar_icon.visible)
+        # Elsewhere the tray icon is the only way back to a hidden window; macOS has the Dock.
+        self.keep_running_action.setEnabled(IS_MACOS or self.menu_bar_icon.visible)
 
     def _sorter(self, key: SortKey) -> Callable[[], None]:
         # A closure without parameters: Qt passes "checked" to slots that accept one.
@@ -482,6 +492,7 @@ class MainWindow(QMainWindow):
             self.add_paths(paths)
 
     def show_and_raise(self) -> None:
+        self._hidden_by_close = False
         if self.isMinimized():
             self.showNormal()
         self.show()
@@ -490,7 +501,9 @@ class MainWindow(QMainWindow):
 
     @property
     def keeps_running_when_closed(self) -> bool:
-        return self._s.settings.keep_running_in_menu_bar and self.menu_bar_icon.visible
+        if not self._s.settings.keep_running_when_closed:
+            return False
+        return IS_MACOS or self.menu_bar_icon.visible
 
     def quit(self) -> None:
         """Quit PyAmp, even if closing the window would only hide it."""
@@ -499,10 +512,19 @@ class MainWindow(QMainWindow):
         self.close()
         QApplication.quit()
 
+    def _on_app_state(self, state: Qt.ApplicationState) -> None:
+        # macOS reports a Dock icon click as the app becoming active, even if it already was.
+        if state == Qt.ApplicationState.ApplicationActive and self._hidden_by_close:
+            self.show_and_raise()
+
     def closeEvent(self, event: QCloseEvent) -> None:
         self._s.settings.show_remaining_time = self._lcd.show_remaining
         if self.keeps_running_when_closed and not self._quitting:
+            # Music keeps playing; the Dock or menu bar icon brings the window back. The
+            # system quitting PyAmp (Dock menu, logout) still works: Qt only refuses to quit
+            # while a window is visible, and this one no longer is.
             event.ignore()
-            self.hide()  # music keeps playing; the menu bar icon brings the window back
+            self.hide()
+            self._hidden_by_close = True
             return
         super().closeEvent(event)

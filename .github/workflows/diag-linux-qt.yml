@@ -50,16 +50,14 @@ jobs:
           p.setAudioBufferOutput(t); print("setAudioBufferOutput", flush=True)
           PY
           run() { echo; echo "===== $1"; timeout 60 uv run python "$2" 2>&1 | grep -v "^qt.multimedia.ffmpeg: Using" | tail -12; echo "exit ${PIPESTATUS[0]}"; }
-          for phase in "without libmpv2" "with libmpv2"; do
-            if [ "$phase" = "with libmpv2" ]; then
-              sudo apt-get install -y -qq --no-install-recommends libmpv2 >/dev/null
-            fi
-            echo; echo "################ $phase"
-            run "plain Qt" plain.py
-            run "pyamp QtAudioBackend" pyamp_qt.py
-            run "step by step" pyamp_steps.py
-            run "pyamp QtAudioBackend under dbus-run-session" pyamp_qt.py && echo
-            echo "===== (dbus) "; timeout 60 dbus-run-session -- uv run python pyamp_qt.py 2>&1 | tail -6; echo "exit $?"
-          done
-          echo; echo "################ native backtrace (with libmpv2)"
-          timeout 180 gdb -q -batch -ex run -ex bt -ex "info sharedlibrary avcodec" --args .venv/bin/python pyamp_qt.py 2>&1 | grep -vE "^\[(New|Thread)" | tail -45
+          sudo apt-get install -y -qq --no-install-recommends libmpv2 >/dev/null
+          echo "===== which package owns pipewire's client.conf?"
+          dpkg -S client.conf 2>/dev/null | grep -i pipewire || echo "not installed by any package"
+          apt-file --version >/dev/null 2>&1 || sudo apt-get install -y -qq apt-file >/dev/null; sudo apt-file update >/dev/null 2>&1
+          apt-file search /usr/share/pipewire/client.conf | head -3
+          echo "===== libpipewire recommends:"; apt-cache depends "$(dpkg -l | awk '/libpipewire-0.3-0/ {print $2; exit}')" | grep -iE "Recommends|Depends" | head
+          run "with libmpv2, QT_AUDIO_BACKEND=pulseaudio" plain.py QT_AUDIO_BACKEND=pulseaudio
+          echo "===== (env)"; QT_AUDIO_BACKEND=pulseaudio timeout 60 uv run python pyamp_qt.py 2>&1 | grep -vE "^qt.multimedia" | tail -4; echo "exit ${PIPESTATUS[0]}"
+          pkg=$(apt-file search /usr/share/pipewire/client.conf | head -1 | cut -d: -f1)
+          echo "===== installing $pkg"; sudo apt-get install -y -qq --no-install-recommends "$pkg" >/dev/null
+          run "with libmpv2 + $pkg" pyamp_qt.py

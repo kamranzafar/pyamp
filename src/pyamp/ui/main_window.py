@@ -33,6 +33,7 @@ from PySide6.QtGui import (
     QKeySequence,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
@@ -57,6 +58,7 @@ from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
 from pyamp.ui.equalizer_window import EqualizerWindow
 from pyamp.ui.jump_dialog import JumpDialog
+from pyamp.ui.menu_bar import PLACE, MenuBarIcon
 from pyamp.ui.playlist_model import PlaylistModel
 from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import Skin
@@ -129,6 +131,17 @@ class MainWindow(QMainWindow):
         services.loader.tracks_loaded.connect(self._on_tracks_loaded)
         services.loader.job_finished.connect(self._on_load_finished)
 
+        self._quitting = False
+        self.menu_bar_icon = MenuBarIcon(
+            services.bus,
+            services.player,
+            switch_playlist=self.switch_playlist,
+            show_window=self.show_and_raise,
+            quit_app=self.quit,
+            parent=self,
+        )
+        self.menu_bar_icon.set_visible(services.settings.show_in_menu_bar)
+
         self._build_layout()
         self._build_menus()
 
@@ -190,7 +203,7 @@ class MainWindow(QMainWindow):
             file_menu, "&Export Playlist…", self._export_playlist, QKeySequence.StandardKey.Save
         )
         file_menu.addSeparator()
-        self._add_menu_action(file_menu, "&Quit", self.close, QKeySequence.StandardKey.Quit)
+        self._add_menu_action(file_menu, "&Quit", self.quit, QKeySequence.StandardKey.Quit)
 
         play_menu = menu_bar.addMenu("&Playback")
         play_menu.addActions(list(self._actions.transport))
@@ -223,6 +236,33 @@ class MainWindow(QMainWindow):
             list_menu, "&Remove Selected", self._remove_selected
         )
         self._add_menu_action(list_menu, "&Clear", self._clear_playlist)
+
+        view_menu = menu_bar.addMenu("&View")
+        self.show_icon_action = QAction(f"Show Icon in {PLACE}", self)
+        self.show_icon_action.setCheckable(True)
+        self.show_icon_action.setChecked(self.menu_bar_icon.visible)
+        self.show_icon_action.toggled.connect(self._set_menu_bar_icon)
+        self.keep_running_action = QAction(f"Keep Running in {PLACE} When Closed", self)
+        self.keep_running_action.setCheckable(True)
+        self.keep_running_action.setChecked(self._s.settings.keep_running_in_menu_bar)
+        self.keep_running_action.toggled.connect(self._set_keep_running)
+        view_menu.addActions([self.show_icon_action, self.keep_running_action])
+        if not MenuBarIcon.available():
+            self.show_icon_action.setEnabled(False)
+            self.show_icon_action.setToolTip(f"This desktop has no {PLACE.lower()}")
+        self._sync_view_menu()
+
+    def _set_menu_bar_icon(self, shown: bool) -> None:
+        self._s.settings.show_in_menu_bar = shown
+        self.menu_bar_icon.set_visible(shown)
+        self._sync_view_menu()
+
+    def _set_keep_running(self, keep: bool) -> None:
+        self._s.settings.keep_running_in_menu_bar = keep
+
+    def _sync_view_menu(self) -> None:
+        # Keeping running needs the icon: it's the only way back to the window.
+        self.keep_running_action.setEnabled(self.menu_bar_icon.visible)
 
     def _sorter(self, key: SortKey) -> Callable[[], None]:
         # A closure without parameters: Qt passes "checked" to slots that accept one.
@@ -441,6 +481,28 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
             self.add_paths(paths)
 
+    def show_and_raise(self) -> None:
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    @property
+    def keeps_running_when_closed(self) -> bool:
+        return self._s.settings.keep_running_in_menu_bar and self.menu_bar_icon.visible
+
+    def quit(self) -> None:
+        """Quit PyAmp, even if closing the window would only hide it."""
+        self._quitting = True
+        self.menu_bar_icon.set_visible(False)
+        self.close()
+        QApplication.quit()
+
     def closeEvent(self, event: QCloseEvent) -> None:
         self._s.settings.show_remaining_time = self._lcd.show_remaining
+        if self.keeps_running_when_closed and not self._quitting:
+            event.ignore()
+            self.hide()  # music keeps playing; the menu bar icon brings the window back
+            return
         super().closeEvent(event)

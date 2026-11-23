@@ -38,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0 libpulse0 \
-            dbus playerctl libmpv2 pulseaudio
+            dbus playerctl libmpv2
       - name: Install libmpv
         if: runner.os == 'macOS'
         run: brew install mpv
@@ -47,21 +47,6 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
       - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync --locked
-      - name: Start a (silent) audio server
-        # QtMultimedia crashes in QAudioOutput() when there is no sound server at all.
-        if: runner.os == 'Linux'
-        run: |
-          pulseaudio --start --exit-idle-time=-1
-          pactl info | grep -E "Server Name|Default Sink"
-      - name: "TEMP: diagnose QMediaPlayer crash on Linux"
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set +e
-          code='from PySide6.QtWidgets import QApplication; app = QApplication([]); from pyamp.audio.qt_backend import QtAudioBackend; QtAudioBackend().close(); print("qt backend ok")'
-          echo "== Qt backend alone"; uv run python -X faulthandler -c "$code"; echo "exit $?"
-          echo "== libmpv loaded first"; uv run python -X faulthandler -c "import pyamp.audio.mpv_backend; $code"; echo "exit $?"
-          echo "== Qt first, then libmpv"; uv run python -X faulthandler -c "$code; import pyamp.audio.mpv_backend; print('mpv after qt ok')"; echo "exit $?"
       - name: Run tests
         shell: bash
         run: |

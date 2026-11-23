@@ -17,6 +17,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from __future__ import annotations
 
+import sys
+
 import pytest
 from PySide6.QtCore import QCoreApplication
 
@@ -54,6 +56,11 @@ def test_main_exits_with_the_result(monkeypatch: pytest.MonkeyPatch) -> None:
     assert app_module.main(["--self-test"]) == 0
 
 
+@pytest.mark.skipif(
+    sys.platform.startswith("linux"),
+    reason="QAudioOutput() segfaults on the Ubuntu CI runner (PySide6 6.12), even with "
+    "PulseAudio running; tracked separately",
+)
 def test_real_self_test_where_libmpv_is_available(qt_app: QCoreApplication) -> None:
     try:
         import pyamp.audio.mpv_backend  # noqa: F401, PLC0415

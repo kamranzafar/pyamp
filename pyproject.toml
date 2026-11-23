@@ -3,6 +3,8 @@ name = "pyamp"
 version = "0.1.0"
 description = "A lightweight, Winamp-inspired music player written in Python."
 readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [
     { name = "Kamran Zafar", email = "kamran@kamranzafar.org" }
 ]

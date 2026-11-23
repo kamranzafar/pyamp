@@ -139,3 +139,12 @@ See `src/pyamp/plugins/now_playing.py` for a working example.
 - Frameless, pixel-skinned window + classic `.wsz` skin loader
 - Media keys / MPRIS / macOS Now Playing integration
 - Internet radio (playlist formats currently skip URLs)
+
+## License
+
+Copyright (C) 2026 Kamran Zafar
+
+PyAmp is free software: you can redistribute it and/or modify it under the terms
+of the GNU General Public License as published by the Free Software Foundation,
+either version 3 of the License, or (at your option) any later version. See
+[LICENSE](LICENSE) for the full text.

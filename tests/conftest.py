@@ -43,6 +43,7 @@ class FakeBackend(AudioBackend):
     """In-memory backend that records calls and lets tests simulate callbacks."""
 
     name = "fake"
+    provides_audio_frames = True  # tests drive the visualiser with emit_audio()
 
     def __init__(self) -> None:
         super().__init__()

@@ -73,6 +73,7 @@ def audio_buffer_to_mono(buffer: QAudioBuffer) -> NDArray[np.float32] | None:
 
 class QtAudioBackend(AudioBackend):
     name: ClassVar[str] = "qt"
+    provides_audio_frames: ClassVar[bool] = True  # QAudioBufferOutput taps the PCM
 
     def __init__(self) -> None:
         super().__init__()

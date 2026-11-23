@@ -115,6 +115,11 @@ class Player:
         return self._equalizer
 
     @property
+    def provides_audio_frames(self) -> bool:
+        """Whether the backend reports the audio it plays (for the visualiser)."""
+        return self._backend.provides_audio_frames
+
+    @property
     def supports_equalizer(self) -> bool:
         """Whether the backend can apply :attr:`equalizer` (the setting is kept either way)."""
         return self._backend.supports_equalizer

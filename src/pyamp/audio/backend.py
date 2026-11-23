@@ -96,6 +96,10 @@ class AudioBackend(ABC):
     #: Whether :meth:`set_equalizer` has any effect.
     supports_equalizer: ClassVar[bool] = False
 
+    #: Whether the backend reports the PCM it plays (:meth:`BackendListener.on_audio_frame`).
+    #: If not, the visualiser is fed by analysing the file separately (``track_analysis``).
+    provides_audio_frames: ClassVar[bool] = False
+
     def __init__(self) -> None:
         self._listener: BackendListener = _NullListener()
 

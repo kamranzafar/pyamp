@@ -56,25 +56,26 @@ jobs:
           pulseaudio --start --exit-idle-time=-1
           pactl info | grep -E "Server Name|Default Sink"
       - name: Qt backend tests, with Qt Multimedia's debug log
-        # QMediaPlayer.stop() has hung a few times on CI (virtual audio devices). Qt's log,
-        # uncaptured so it survives a hang, shows which step blocks. Diagnostic; remove later.
+        # QMediaPlayer.stop() has hung a few times on CI (virtual audio devices). These tests
+        # run only here, uncaptured, so Qt's log survives a hang and shows which step blocks.
+        # Diagnostic; fold back into the full run once understood.
         shell: bash
         env:
           QT_LOGGING_RULES: "qt.multimedia*=true"
         run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            dbus-run-session -- uv run pytest -q -s -p no:cacheprovider tests/test_qt_backend.py
-          else
-            uv run pytest -q -s -p no:cacheprovider tests/test_qt_backend.py
-          fi
+          run() { if [ "$RUNNER_OS" = "Linux" ]; then dbus-run-session -- "$@"; else "$@"; fi; }
+          status=0
+          run uv run pytest tests/test_qt_backend.py -q -rs -s -p no:cacheprovider --cov || status=$?
+          # 5 = nothing ran: every test skipped because the runner has no audio device.
+          if [ "$status" -ne 0 ] && [ "$status" -ne 5 ]; then exit "$status"; fi
       - name: Run tests
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             # A private session bus, so the MPRIS tests talk to a real D-Bus daemon.
-            dbus-run-session -- uv run pytest -q -rs --cov
+            dbus-run-session -- uv run pytest -q -rs --cov --cov-append --ignore=tests/test_qt_backend.py
           else
-            uv run pytest -q -rs --cov
+            uv run pytest -q -rs --cov --cov-append --ignore=tests/test_qt_backend.py
           fi
       - name: Survive an incomplete PipeWire install
         # libpipewire without its client.conf crashes Qt's PipeWire audio backend;

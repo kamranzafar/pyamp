@@ -46,7 +46,7 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             # A private session bus, so the MPRIS tests talk to a real D-Bus daemon.
-            dbus-run-session -- uv run pytest -q -rs
+            dbus-run-session -- uv run pytest -q -rs --cov
           else
-            uv run pytest -q -rs
+            uv run pytest -q -rs --cov
           fi

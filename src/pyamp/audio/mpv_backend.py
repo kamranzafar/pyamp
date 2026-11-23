@@ -34,11 +34,15 @@ import threading
 from pathlib import Path
 from typing import Any, ClassVar
 
-import mpv
-from PySide6.QtCore import QObject, Signal, Slot
+from pyamp.audio.libmpv_path import prepare_libmpv_lookup
 
-from pyamp.audio.backend import AudioBackend
-from pyamp.core.models import PlaybackState
+prepare_libmpv_lookup()  # must run before python-mpv looks for libmpv
+
+import mpv  # noqa: E402  (needs prepare_libmpv_lookup first)
+from PySide6.QtCore import QObject, Signal, Slot  # noqa: E402
+
+from pyamp.audio.backend import AudioBackend  # noqa: E402
+from pyamp.core.models import PlaybackState  # noqa: E402
 
 #: Position updates closer together than this are dropped (mpv reports very often).
 POSITION_INTERVAL_S = 0.1

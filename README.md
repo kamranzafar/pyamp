@@ -157,6 +157,8 @@ PyAmp works with your keyboard's media keys, headphone buttons and the system's
 
 - **macOS**: Control Center and lock screen widget, media keys, AirPods/Bluetooth buttons.
 - **Linux**: MPRIS, so desktop media widgets, media keys and `playerctl -p pyamp` work.
+- **Windows**: media keys, headset buttons, the media flyout next to the volume
+  control and the lock screen (System Media Transport Controls).
 
 This is the `media-session` plugin; `--no-plugins` turns it off.
 
@@ -229,6 +231,7 @@ src/pyamp/
 ├── media_session/      OS media controls (used by the media-session plugin)
 │   ├── session.py      Player ⇄ NowPlaying snapshots and OS commands (pure)
 │   ├── macos.py        MediaPlayer framework: Now Playing + remote commands
+│   ├── windows.py      System Media Transport Controls (pywinrt)
 │   └── mpris.py        MPRIS over D-Bus (jeepney), served on the Qt main thread
 ├── plugins/            Entry-point based plugin system, now-playing log, media session
 └── ui/                 PySide6 front-end

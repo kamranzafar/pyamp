@@ -30,7 +30,7 @@ from pyamp.app import Application, parse_args
 from pyamp.audio import registry
 from pyamp.audio.registry import BackendUnavailableError
 from pyamp.config import Settings, SettingsStore
-from pyamp.core.models import RepeatMode, Track
+from pyamp.core.models import RepeatMode, ReplayGainMode, Track
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.ui.background_loader import LoadJob
 from tests.conftest import FakeBackend, FakeGaplessBackend
@@ -88,6 +88,27 @@ def test_saved_settings_are_applied_on_startup(
     assert application.player.volume == pytest.approx(0.25)
     assert application.player.shuffle is True
     assert application.player.repeat is RepeatMode.ONE
+
+
+def test_replay_gain_setting_is_restored_and_saved(
+    store: SettingsStore, cleanup: list[Application]
+) -> None:
+    store.save(Settings(replay_gain="album", backend="fake"))
+    application = build(store)
+    cleanup.append(application)
+    assert application.player.replay_gain is ReplayGainMode.ALBUM
+    application.player.set_replay_gain(ReplayGainMode.TRACK)
+    application.shutdown()
+    assert store.load().replay_gain == "track"
+
+
+def test_invalid_replay_gain_setting_falls_back_to_off(
+    store: SettingsStore, cleanup: list[Application]
+) -> None:
+    store.save(Settings(replay_gain="loudest", backend="fake"))
+    application = build(store)
+    cleanup.append(application)
+    assert application.player.replay_gain is ReplayGainMode.OFF
 
 
 def test_invalid_repeat_setting_falls_back_to_off(

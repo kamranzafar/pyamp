@@ -37,6 +37,22 @@ mpv plays more formats and moves between tracks without a gap. It doesn't expose
 the decoded audio, so the spectrum visualiser stays flat with it. If libmpv isn't
 installed, PyAmp warns and uses `qt`.
 
+### ReplayGain
+
+**Playback → ReplayGain** evens out loudness using the ReplayGain tags written by
+taggers such as foobar2000, beets, loudgain or Picard:
+
+- **Track**: every track at the same loudness.
+- **Album**: albums at the same loudness, keeping the dynamics between their tracks
+  (falls back to the track gain for untagged albums).
+- **Off** (default).
+
+Tags are read from MP3/WAV/AIFF (ID3 `TXXX` or `RVA2`), FLAC/Ogg (Vorbis comments),
+Opus (`R128_*`), MP4 and WMA. Gain is capped so the track's peak never clips. With
+the `qt` backend ReplayGain can only make tracks quieter, never louder (QtMultimedia's
+volume tops out at 100%). The `mpv` backend applies it itself, exactly at gapless
+track boundaries.
+
 ### Media keys and system controls
 
 PyAmp works with your keyboard's media keys, headphone buttons and the system's
@@ -171,7 +187,7 @@ See `src/pyamp/plugins/now_playing.py` for a working example.
 - Process-pool tag reading for very large libraries (mutagen is pure Python, so the
   worker thread still competes for the GIL)
 - Feed the visualiser when using the `mpv` backend
-- Equaliser, ReplayGain
+- Equaliser (mpv backend)
 - Frameless, pixel-skinned window + classic `.wsz` skin loader
 - Windows media controls (SMTC) and album artwork in system media widgets
 - Internet radio (playlist formats currently skip URLs)

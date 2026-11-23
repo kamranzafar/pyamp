@@ -42,6 +42,40 @@ class RepeatMode(StrEnum):
         return modes[(modes.index(self) + 1) % len(modes)]
 
 
+class ReplayGainMode(StrEnum):
+    OFF = "off"
+    TRACK = "track"
+    ALBUM = "album"
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayGain:
+    """ReplayGain values from a file's tags: gains in dB, peaks as linear amplitude."""
+
+    track_gain: float | None = None
+    track_peak: float | None = None
+    album_gain: float | None = None
+    album_peak: float | None = None
+
+    def factor(self, mode: ReplayGainMode, preamp_db: float = 0.0) -> float:
+        """Linear volume multiplier for ``mode``; 1.0 if off or untagged.
+
+        Album mode falls back to the track values. The result is capped so the
+        loudest sample (``peak``) can't clip.
+        """
+        if mode is ReplayGainMode.OFF:
+            return 1.0
+        gain, peak = self.track_gain, self.track_peak
+        if mode is ReplayGainMode.ALBUM and self.album_gain is not None:
+            gain, peak = self.album_gain, self.album_peak
+        if gain is None:
+            return 1.0
+        factor: float = 10 ** ((gain + preamp_db) / 20)
+        if peak:
+            factor = min(factor, 1 / peak)
+        return factor
+
+
 @dataclass(frozen=True, slots=True)
 class Track:
     """A playable audio file together with its descriptive metadata."""
@@ -51,6 +85,7 @@ class Track:
     artist: str = ""
     album: str = ""
     duration_ms: int = 0
+    replay_gain: ReplayGain | None = None
 
     @classmethod
     def from_path(cls, path: Path) -> Track:

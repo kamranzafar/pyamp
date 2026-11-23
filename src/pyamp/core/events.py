@@ -38,7 +38,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from pyamp.core.models import PlaybackState, RepeatMode, Track
+from pyamp.core.models import PlaybackState, RepeatMode, ReplayGainMode, Track
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +106,11 @@ class VolumeChanged:
 class PlayModeChanged:
     shuffle: bool
     repeat: RepeatMode
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayGainChanged:
+    mode: ReplayGainMode
 
 
 @dataclass(frozen=True, slots=True)

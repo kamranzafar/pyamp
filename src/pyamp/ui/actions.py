@@ -27,10 +27,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 
-from pyamp.core.events import EventBus, PlayModeChanged
-from pyamp.core.models import RepeatMode
+from pyamp.core.events import EventBus, PlayModeChanged, ReplayGainChanged
+from pyamp.core.models import RepeatMode, ReplayGainMode
 from pyamp.core.player import Player
 
 SEEK_STEP_MS = 5000
@@ -39,6 +39,11 @@ _REPEAT_LABELS = {
     RepeatMode.OFF: "Repeat: Off",
     RepeatMode.ALL: "Repeat: All",
     RepeatMode.ONE: "Repeat: One",
+}
+_REPLAY_GAIN_LABELS = {
+    ReplayGainMode.OFF: "&Off",
+    ReplayGainMode.TRACK: "&Track",
+    ReplayGainMode.ALBUM: "&Album",
 }
 _REPEAT_GLYPHS = {RepeatMode.OFF: "⟳", RepeatMode.ALL: "⟳", RepeatMode.ONE: "⟳1"}
 
@@ -54,6 +59,8 @@ class PlayerActions:
     seek_forward: QAction
     shuffle: QAction
     repeat: QAction
+    #: Mutually exclusive ReplayGain modes, for a "ReplayGain" submenu.
+    replay_gain: dict[ReplayGainMode, QAction]
 
     @property
     def transport(self) -> tuple[QAction, ...]:
@@ -81,6 +88,7 @@ def create_player_actions(parent: QObject, player: Player, bus: EventBus) -> Pla
         seek_forward=_action(parent, "»", "Fast-forward 5 s", "Right"),
         shuffle=_action(parent, "⤮", "Shuffle", "S"),
         repeat=_action(parent, "⟳", "Repeat", "R"),
+        replay_gain=_replay_gain_actions(parent, player),
     )
     actions.previous.triggered.connect(player.previous)
     actions.play.triggered.connect(player.play)
@@ -105,5 +113,23 @@ def create_player_actions(parent: QObject, player: Player, bus: EventBus) -> Pla
         actions.repeat.setText(_REPEAT_GLYPHS[event.repeat])
         actions.repeat.setToolTip(f"{_REPEAT_LABELS[event.repeat]} (R)")
 
+    def sync_replay_gain(event: ReplayGainChanged) -> None:
+        actions.replay_gain[event.mode].setChecked(True)
+
     bus.subscribe(PlayModeChanged, sync_modes)
+    bus.subscribe(ReplayGainChanged, sync_replay_gain)
+    return actions
+
+
+def _replay_gain_actions(parent: QObject, player: Player) -> dict[ReplayGainMode, QAction]:
+    group = QActionGroup(parent)
+    group.setExclusive(True)
+    actions: dict[ReplayGainMode, QAction] = {}
+    for mode, label in _REPLAY_GAIN_LABELS.items():
+        action = QAction(label, group)
+        action.setCheckable(True)
+        action.setChecked(mode is player.replay_gain)
+        action.setStatusTip(f"ReplayGain: {mode.value}")
+        action.triggered.connect(lambda _checked=False, m=mode: player.set_replay_gain(m))
+        actions[mode] = action
     return actions

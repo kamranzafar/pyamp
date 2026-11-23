@@ -27,11 +27,15 @@ from typing import Any
 
 import mutagen
 import pytest
+from mutagen._vorbis import VCommentDict
 from mutagen.aiff import AIFF
-from mutagen.id3 import TALB, TIT2, TPE1
+from mutagen.asf import ASFTags, ASFUnicodeAttribute  # type: ignore[attr-defined]
+from mutagen.id3 import RVA2, TALB, TIT2, TPE1, TXXX
+from mutagen.mp4 import MP4FreeForm, MP4Tags
+from mutagen.oggopus import OggOpus
 from mutagen.wave import WAVE
 
-from pyamp.core.models import Track
+from pyamp.core.models import ReplayGain, Track
 from pyamp.library.metadata import MutagenMetadataReader, is_audio_file
 
 reader = MutagenMetadataReader()
@@ -70,7 +74,7 @@ def add_id3(path: Path, file_type: Any, **frames: str) -> None:
 
 
 def fake_mutagen_file(monkeypatch: pytest.MonkeyPatch, result: Any) -> None:
-    monkeypatch.setattr(mutagen, "File", lambda path, easy: result)
+    monkeypatch.setattr(mutagen, "File", lambda path, **_: result)
 
 
 @pytest.mark.parametrize(
@@ -98,7 +102,7 @@ def test_missing_file_gives_a_track(tmp_path: Path) -> None:
 
 
 def test_mutagen_error_gives_a_track(monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(path: Path, easy: bool) -> None:
+    def boom(path: Path, **_: object) -> None:
         raise mutagen.MutagenError("corrupt")
 
     monkeypatch.setattr(mutagen, "File", boom)
@@ -156,3 +160,128 @@ def test_id3_without_title_falls_back_to_file_name(tmp_path: Path) -> None:
     add_id3(path, WAVE, artist="Artist")
     expected = Track(path=path, title="untitled", artist="Artist", duration_ms=1000)
     assert reader.read(path) == expected
+
+
+# -- ReplayGain ------------------------------------------------------------------ #
+
+
+def add_frames(path: Path, file_type: Any, *frames: Any) -> None:
+    audio = file_type(path)
+    if audio.tags is None:
+        audio.add_tags()
+    for frame in frames:
+        audio.tags.add(frame)
+    audio.save()
+
+
+def txxx(desc: str, value: str) -> Any:
+    return TXXX(encoding=3, desc=desc, text=[value])
+
+
+@pytest.mark.parametrize(("writer", "file_type"), [(write_wav, WAVE), (write_aiff, AIFF)])
+def test_id3_txxx_replaygain(
+    tmp_path: Path, writer: Callable[[Path], Path], file_type: Any
+) -> None:
+    path = writer(tmp_path / f"rg.{file_type.__name__.lower()}")
+    add_frames(
+        path,
+        file_type,
+        TIT2(encoding=3, text="Song"),
+        txxx("REPLAYGAIN_TRACK_GAIN", "-6.54 dB"),
+        txxx("REPLAYGAIN_TRACK_PEAK", "0.988"),
+        txxx("replaygain_album_gain", "-7.10 dB"),  # lower case is common too
+        txxx("REPLAYGAIN_ALBUM_PEAK", "1.000"),
+    )
+    track = reader.read(path)
+    assert track.title == "Song"
+    assert track.replay_gain == ReplayGain(
+        track_gain=-6.54, track_peak=0.988, album_gain=-7.1, album_peak=1.0
+    )
+
+
+def test_id3_rva2_fallback_and_txxx_priority(tmp_path: Path) -> None:
+    path = write_wav(tmp_path / "rva2.wav")
+    add_frames(
+        path,
+        WAVE,
+        RVA2(desc="track", channel=1, gain=-4.5, peak=0.5),
+        RVA2(desc="album", channel=1, gain=-5.0, peak=0.75),
+        txxx("REPLAYGAIN_ALBUM_GAIN", "-9 dB"),  # TXXX wins over RVA2
+    )
+    gains = reader.read(path).replay_gain
+    assert gains is not None
+    assert gains.track_gain == pytest.approx(-4.5)
+    assert gains.track_peak == pytest.approx(0.5, abs=1e-3)
+    assert gains.album_gain == -9.0
+
+
+def test_untagged_file_has_no_replaygain(tmp_path: Path) -> None:
+    path = write_wav(tmp_path / "plain.wav")
+    add_frames(path, WAVE, TIT2(encoding=3, text="Song"))
+    assert reader.read(path).replay_gain is None
+
+
+def test_vorbis_comments(monkeypatch: pytest.MonkeyPatch) -> None:
+    tags = VCommentDict()
+    tags["TITLE"] = ["Song"]
+    tags["ARTIST"] = ["Band"]
+    tags["REPLAYGAIN_TRACK_GAIN"] = ["+2.30 dB"]
+    tags["REPLAYGAIN_TRACK_PEAK"] = ["0.5"]
+    fake_mutagen_file(monkeypatch, SimpleNamespace(tags=tags, info=SimpleNamespace(length=10)))
+    track = reader.read(Path("/m/song.flac"))
+    assert (track.title, track.artist) == ("Song", "Band")
+    assert track.replay_gain == ReplayGain(track_gain=2.3, track_peak=0.5)
+
+
+def test_opus_r128_gains_are_converted(monkeypatch: pytest.MonkeyPatch) -> None:
+    audio: Any = OggOpus.__new__(OggOpus)  # an OggOpus without parsing a file
+    audio.tags = VCommentDict()
+    audio.tags["R128_TRACK_GAIN"] = ["-2560"]  # -10 dB at -23 LUFS, Q7.8
+    audio.tags["R128_ALBUM_GAIN"] = ["256"]  # +1 dB
+    audio.info = SimpleNamespace(length=3)
+    fake_mutagen_file(monkeypatch, audio)
+    gains = reader.read(Path("/m/song.opus")).replay_gain
+    assert gains == ReplayGain(track_gain=-5.0, album_gain=6.0)  # +5 dB to the -18 LUFS reference
+
+
+def test_mp4_freeform_atoms(monkeypatch: pytest.MonkeyPatch) -> None:
+    tags = MP4Tags()
+    tags["\xa9nam"] = ["Song"]
+    tags["\xa9alb"] = ["Record"]
+    tags["----:com.apple.iTunes:replaygain_track_gain"] = [MP4FreeForm(b"-8.25 dB")]
+    tags["----:com.apple.iTunes:REPLAYGAIN_ALBUM_GAIN"] = [MP4FreeForm(b"-9.00 dB")]
+    tags["----:com.apple.iTunes:iTunNORM"] = [MP4FreeForm(b"ignored")]
+    fake_mutagen_file(monkeypatch, SimpleNamespace(tags=tags, info=None))
+    track = reader.read(Path("/m/song.m4a"))
+    assert (track.title, track.album) == ("Song", "Record")
+    assert track.replay_gain == ReplayGain(track_gain=-8.25, album_gain=-9.0)
+
+
+def test_asf_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
+    tags = ASFTags()
+    tags["Title"] = [ASFUnicodeAttribute("Song")]
+    tags["Author"] = [ASFUnicodeAttribute("Band")]
+    tags["replaygain_track_gain"] = [ASFUnicodeAttribute("-3.5 dB")]
+    fake_mutagen_file(monkeypatch, SimpleNamespace(tags=tags, info=None))
+    track = reader.read(Path("/m/song.wma"))
+    assert (track.title, track.artist) == ("Song", "Band")
+    assert track.replay_gain == ReplayGain(track_gain=-3.5)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("-6.54 dB", -6.54), ("+1.5dB", 1.5), ("\N{MINUS SIGN}3.25 dB", -3.25), ("0.988", 0.988)],
+)
+def test_gain_values_are_parsed_leniently(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: float
+) -> None:
+    fake_mutagen_file(monkeypatch, SimpleNamespace(tags={"replaygain_track_gain": [raw]}))
+    gains = reader.read(Path("/m/f.flac")).replay_gain
+    assert gains is not None
+    assert gains.track_gain == pytest.approx(expected)
+
+
+def test_junk_gain_values_are_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    tags = {"replaygain_track_gain": ["loud"], "replaygain_track_peak": [""]}
+    fake_mutagen_file(monkeypatch, SimpleNamespace(tags=tags))
+    assert reader.read(Path("/m/f.flac")).replay_gain is None

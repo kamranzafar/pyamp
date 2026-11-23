@@ -173,6 +173,8 @@ class MainWindow(QMainWindow):
         play_menu.addActions([self._actions.seek_back, self._actions.seek_forward])
         play_menu.addSeparator()
         play_menu.addActions([self._actions.shuffle, self._actions.repeat])
+        replay_gain_menu = play_menu.addMenu("Replay&Gain")
+        replay_gain_menu.addActions(list(self._actions.replay_gain.values()))
 
         list_menu = menu_bar.addMenu("P&laylist")
         self._add_menu_action(list_menu, "&Remove Selected", self._remove_selected)

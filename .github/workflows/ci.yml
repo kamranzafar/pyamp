@@ -47,6 +47,14 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
       - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync --locked
+      - name: "TEMP: diagnose QMediaPlayer crash on Linux"
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          code='from PySide6.QtWidgets import QApplication; app = QApplication([]); from pyamp.audio.qt_backend import QtAudioBackend; QtAudioBackend().close(); print("qt backend ok")'
+          echo "== Qt backend alone"; uv run python -X faulthandler -c "$code"; echo "exit $?"
+          echo "== libmpv loaded first"; uv run python -X faulthandler -c "import pyamp.audio.mpv_backend; $code"; echo "exit $?"
+          echo "== Qt first, then libmpv"; uv run python -X faulthandler -c "$code; import pyamp.audio.mpv_backend; print('mpv after qt ok')"; echo "exit $?"
       - name: Run tests
         shell: bash
         run: |

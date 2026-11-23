@@ -61,13 +61,32 @@ from pyamp.ui.skin import DEFAULT_SKIN
 log = logging.getLogger(__name__)
 
 
+def version_text() -> str:
+    """The version, plus which libmpv the mpv backend would use (loaded only when asked)."""
+    try:
+        from pyamp.audio.mpv_backend import LIBMPV_SOURCE  # noqa: PLC0415
+    except OSError as exc:
+        libmpv = f"not available ({exc})"
+    else:
+        libmpv = str(LIBMPV_SOURCE)
+    return f"pyamp {__version__}\nlibmpv: {libmpv}"
+
+
+class _VersionAction(argparse.Action):
+    def __call__(self, parser: argparse.ArgumentParser, *_: object) -> None:
+        print(version_text())
+        parser.exit()
+
+
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="pyamp", description=f"{APP_NAME} music player")
     parser.add_argument("paths", nargs="*", type=Path, help="files, folders or playlists to play")
     parser.add_argument("--backend", choices=available_backends(), help="audio backend")
     parser.add_argument("--no-plugins", action="store_true", help="don't load plugins")
     parser.add_argument("--log-level", default="WARNING", help="e.g. DEBUG, INFO, WARNING")
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--version", action=_VersionAction, nargs=0, help="show version and libmpv, then exit"
+    )
     return parser.parse_args(argv)
 
 

@@ -37,6 +37,25 @@ mpv plays more formats and moves between tracks without a gap. It doesn't expose
 the decoded audio, so the spectrum visualiser stays flat with it. If libmpv isn't
 installed, PyAmp warns and uses `qt`.
 
+#### Using a libmpv that isn't installed system-wide
+
+If your package manager can't provide libmpv (e.g. Homebrew on an Intel Mac, which
+builds it from source), put a prebuilt libmpv **folder** where PyAmp looks for one:
+
+| Where | Path |
+|---|---|
+| Environment variable | `PYAMP_LIBMPV=/path/to/folder` (or the library file itself) |
+| User folder (macOS) | `~/Library/Application Support/pyamp/libmpv/` |
+| User folder (Linux) | `~/.local/share/pyamp/libmpv/` |
+| User folder (Windows) | `%LOCALAPPDATA%\pyamp\pyamp\libmpv\` |
+
+The folder holds libmpv plus the libraries shipped with it (ffmpeg, ...); PyAmp loads
+those first, so libmpv uses them rather than different system versions. Packaged
+releases bundle libmpv the same way. `uv run pyamp --version` shows which libmpv is
+used. On macOS, [media-kit's builds](https://github.com/media-kit/libmpv-darwin-build/releases)
+work: take `libmpv-libs_…_macos-<arch>-audio-encodersgpl` (the other flavours lack the
+filters the equaliser needs). They expect libass from the system (`brew install libass`).
+
 ### ReplayGain
 
 **Playback → ReplayGain** evens out loudness using the ReplayGain tags written by

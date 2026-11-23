@@ -74,6 +74,34 @@ def test_parse_args_defaults() -> None:
     assert args.log_level == "WARNING"
 
 
+def test_version_shows_libmpv_status(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        app_module, "version_text", lambda: "pyamp 9.9\nlibmpv: somewhere (user folder)"
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        parse_args(["--version"])
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().out == "pyamp 9.9\nlibmpv: somewhere (user folder)\n"
+
+
+def test_version_text_reports_missing_libmpv(monkeypatch: pytest.MonkeyPatch) -> None:
+    import builtins  # noqa: PLC0415
+
+    real_import = builtins.__import__
+
+    def no_libmpv(name: str, *args: object, **kwargs: object) -> object:
+        if name == "pyamp.audio.mpv_backend":
+            raise OSError("Cannot find libmpv")
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "__import__", no_libmpv)
+    text = app_module.version_text()
+    assert text.startswith("pyamp ")
+    assert "libmpv: not available (Cannot find libmpv)" in text
+
+
 def test_parse_args_paths_and_flags() -> None:
     args = parse_args(["a.mp3", "dir", "--no-plugins", "--log-level", "INFO"])
     assert args.paths == [Path("a.mp3"), Path("dir")]

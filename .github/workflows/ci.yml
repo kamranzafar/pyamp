@@ -56,3 +56,15 @@ jobs:
           else
             uv run pytest -q -rs --cov
           fi
+      - name: Load libmpv from a folder (PYAMP_LIBMPV)
+        shell: bash
+        run: |
+          # Copy the runner's libmpv into a folder of its own, as a bundled app would have it.
+          mkdir -p "$RUNNER_TEMP/libmpv"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cp -L /usr/lib/x86_64-linux-gnu/libmpv.so.2 "$RUNNER_TEMP/libmpv/"
+          else
+            cp -L "$(brew --prefix)/lib/libmpv.dylib" "$RUNNER_TEMP/libmpv/libmpv.2.dylib"
+          fi
+          PYAMP_LIBMPV="$RUNNER_TEMP/libmpv" uv run pytest -q -rs \
+            tests/test_libmpv_loader.py tests/test_mpv_backend.py

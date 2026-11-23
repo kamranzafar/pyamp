@@ -242,12 +242,14 @@ def test_player_plays_a_playlist_gaplessly(
 
 def test_replay_gain_mode_is_passed_to_mpv(backend: MpvAudioBackend) -> None:
     mpv_handle: Any = backend._mpv
-    assert mpv_handle.replaygain == "no"
+    # python-mpv reads mpv's "no" back as False.
+    assert mpv_handle.replaygain is False
     assert mpv_handle.replaygain_clip is False  # i.e. mpv prevents clipping
-    for mode, value in [
+    expected: list[tuple[ReplayGainMode, object]] = [
         (ReplayGainMode.TRACK, "track"),
         (ReplayGainMode.ALBUM, "album"),
-        (ReplayGainMode.OFF, "no"),
-    ]:
+        (ReplayGainMode.OFF, False),
+    ]
+    for mode, value in expected:
         backend.set_replay_gain_mode(mode)
         assert mpv_handle.replaygain == value

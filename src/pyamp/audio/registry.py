@@ -34,12 +34,22 @@ type BackendFactory = Callable[[], AudioBackend]
 
 _BUILTIN: dict[str, str] = {
     "qt": "pyamp.audio.qt_backend:QtAudioBackend",
+    "mpv": "pyamp.audio.mpv_backend:MpvAudioBackend",
 }
 _registered: dict[str, BackendFactory] = {}
 
 
 class UnknownBackendError(LookupError):
     pass
+
+
+class BackendUnavailableError(RuntimeError):
+    """The backend exists but can't run here, e.g. a system library is missing."""
+
+    def __init__(self, name: str, reason: str) -> None:
+        super().__init__(f"audio backend {name!r} is unavailable: {reason}")
+        self.backend = name
+        self.reason = reason
 
 
 def register_backend(name: str, factory: BackendFactory) -> None:
@@ -56,7 +66,11 @@ def create_backend(name: str) -> AudioBackend:
         return _registered[name]()
     if name in _BUILTIN:
         module_name, _, class_name = _BUILTIN[name].partition(":")
-        backend_cls: type[AudioBackend] = getattr(importlib.import_module(module_name), class_name)
+        try:
+            module = importlib.import_module(module_name)
+        except (ImportError, OSError) as exc:  # e.g. python-mpv without libmpv
+            raise BackendUnavailableError(name, str(exc)) from exc
+        backend_cls: type[AudioBackend] = getattr(module, class_name)
         return backend_cls()
     raise UnknownBackendError(
         f"unknown audio backend {name!r}; available: {', '.join(available_backends())}"

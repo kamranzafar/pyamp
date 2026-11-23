@@ -22,6 +22,21 @@ uv run pyamp --log-level INFO     # see plugin activity, e.g. "Now playing: ..."
 
 Drag and drop files or folders onto the window to add them.
 
+### Audio backends
+
+| Backend | Default | Gapless | Visualiser | Needs |
+|---|---|---|---|---|
+| `qt` (QtMultimedia) | yes | no | yes | nothing extra |
+| `mpv` (libmpv) | | **yes** | flat | `brew install mpv` or `apt install libmpv2` |
+
+```bash
+uv run pyamp --backend mpv   # remembered for next time; --backend qt switches back
+```
+
+mpv plays more formats and moves between tracks without a gap. It doesn't expose
+the decoded audio, so the spectrum visualiser stays flat with it. If libmpv isn't
+installed, PyAmp warns and uses `qt`.
+
 ### Media keys and system controls
 
 PyAmp works with your keyboard's media keys, headphone buttons and the system's
@@ -58,7 +73,8 @@ src/pyamp/
 ├── audio/              Sound output
 │   ├── backend.py      AudioBackend ABC + BackendListener protocol
 │   ├── registry.py     Backend factory with lazy imports
-│   └── qt_backend.py   QtMultimedia adapter (+ PCM tap for the visualiser)
+│   ├── qt_backend.py   QtMultimedia adapter (+ PCM tap for the visualiser)
+│   └── mpv_backend.py  libmpv adapter with gapless playback
 ├── dsp/spectrum.py     FFT analyser (pure) + SpectrumService (bus adapter)
 ├── library/            Getting tracks in
 │   ├── metadata.py     Tag reading via mutagen
@@ -96,7 +112,7 @@ That is why the whole player can be tested with a `FakeBackend` (see
 |---|---|---|
 | **Observer** | `core/events.py` | Player/playlist publish events; UI, DSP and plugins subscribe. No back-references. |
 | **Facade** | `core/player.py` | One simple API over playlist + backend for UI, shortcuts and plugins. |
-| **Adapter** | `audio/qt_backend.py`, `ui/playlist_model.py`, `media_session/macos.py`, `media_session/mpris.py` | Wrap third-party APIs (QtMultimedia, Qt model/view) behind our own interfaces. |
+| **Adapter** | `audio/qt_backend.py`, `audio/mpv_backend.py`, `ui/playlist_model.py`, `media_session/macos.py`, `media_session/mpris.py` | Wrap third-party APIs (QtMultimedia, Qt model/view) behind our own interfaces. |
 | **Strategy** | `core/play_order.py`, `library/playlist_formats.py` | Swap play order or file format without touching callers. |
 | **Factory / Registry** | `audio/registry.py`, `PlaylistFormatRegistry` | Choose implementations by name/extension; lazy imports keep optional deps optional. |
 | **Command** | `ui/actions.py` | One `QAction` drives the button, menu item and shortcut. |
@@ -117,6 +133,10 @@ progressively and playback starts with the first batch. Jobs can be cancelled
 (e.g. *Clear* while loading), and batches already in flight are discarded.
 The playlist model applies appends as incremental `beginInsertRows`, so the
 main-thread cost per batch stays constant regardless of playlist size.
+
+libmpv reports events on its own thread. `audio/mpv_backend.py` only records
+state there and emits signals on a main-thread `QObject`, so the player never
+sees a call from mpv's thread.
 
 ## Writing a plugin
 
@@ -150,7 +170,7 @@ See `src/pyamp/plugins/now_playing.py` for a working example.
 
 - Process-pool tag reading for very large libraries (mutagen is pure Python, so the
   worker thread still competes for the GIL)
-- `mpv` backend for gapless playback and wider format support
+- Feed the visualiser when using the `mpv` backend
 - Equaliser, ReplayGain
 - Frameless, pixel-skinned window + classic `.wsz` skin loader
 - Windows media controls (SMTC) and album artwork in system media widgets

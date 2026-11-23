@@ -22,6 +22,7 @@ import pytest
 
 from pyamp.audio import registry
 from pyamp.audio.registry import (
+    BackendUnavailableError,
     UnknownBackendError,
     available_backends,
     create_backend,
@@ -36,12 +37,12 @@ def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_builtin_backends_are_listed() -> None:
-    assert available_backends() == ["qt"]
+    assert available_backends() == ["mpv", "qt"]
 
 
 def test_registered_backend_is_listed_and_created() -> None:
     register_backend("fake", FakeBackend)
-    assert available_backends() == ["fake", "qt"]
+    assert available_backends() == ["fake", "mpv", "qt"]
     assert isinstance(create_backend("fake"), FakeBackend)
 
 
@@ -56,5 +57,16 @@ def test_builtin_backend_is_imported_lazily(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_unknown_backend_names_the_alternatives() -> None:
-    with pytest.raises(UnknownBackendError, match=r"'nope'.*available: qt"):
+    with pytest.raises(UnknownBackendError, match=r"'nope'.*available: mpv, qt"):
         create_backend("nope")
+
+
+def test_backend_with_missing_system_library_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_libmpv(name: str) -> None:
+        raise OSError("Cannot find libmpv")
+
+    monkeypatch.setattr("importlib.import_module", no_libmpv)
+    with pytest.raises(BackendUnavailableError, match="'mpv' is unavailable: Cannot find libmpv"):
+        create_backend("mpv")

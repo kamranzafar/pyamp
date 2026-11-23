@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -31,6 +32,7 @@ from pyamp.core.events import (
     EventBus,
     PlaybackError,
     PlaybackStateChanged,
+    PlaylistChanged,
     PlayModeChanged,
     PositionChanged,
     TrackChanged,
@@ -64,9 +66,14 @@ class Player:
         self._volume = 0.8
         self._shuffle = False
         self._repeat = RepeatMode.OFF
+        # Gapless backends: whether a track is loaded, and what is queued after it.
+        self._active = False
+        self._queued: tuple[int, Path] | None = None
 
         backend.set_listener(self)
         backend.set_volume(self._volume)
+        if backend.supports_gapless:
+            bus.subscribe(PlaylistChanged, lambda _: self._queue_next())
 
     # -- Read-only state ---------------------------------------------------- #
 
@@ -111,9 +118,12 @@ class Player:
         track = self._playlist.set_current(index)
         assert track is not None
         self._position_ms = self._duration_ms = 0
+        self._active = True
+        self._queued = None
         self._backend.load(track.path)
         self._backend.play()
         self._bus.publish(TrackChanged(track, index))
+        self._queue_next()
 
     def pause(self) -> None:
         """Toggle pause (Winamp semantics: pressing pause while paused resumes)."""
@@ -123,6 +133,8 @@ class Player:
             self._backend.play()
 
     def stop(self) -> None:
+        self._active = False
+        self._queued = None
         self._backend.stop()
 
     def next(self) -> None:
@@ -153,10 +165,12 @@ class Player:
         self._shuffle = enabled
         self._playlist.play_order = ShuffleOrder() if enabled else SequentialOrder()
         self._publish_mode()
+        self._queue_next()
 
     def set_repeat(self, mode: RepeatMode) -> None:
         self._repeat = mode
         self._publish_mode()
+        self._queue_next()
 
     def shutdown(self) -> None:
         self._backend.stop()
@@ -164,6 +178,23 @@ class Player:
 
     def _publish_mode(self) -> None:
         self._bus.publish(PlayModeChanged(self._shuffle, self._repeat))
+
+    def _queue_next(self) -> None:
+        """Tell a gapless backend which track follows the current one."""
+        if not self._backend.supports_gapless:
+            return  # also keeps ShuffleOrder from being consulted early
+        current = self._playlist.current_index
+        index: int | None
+        if not self._active or current is None:
+            index = None
+        elif self._repeat is RepeatMode.ONE:
+            index = current
+        else:
+            index = self._playlist.next_index(wrap=self._repeat is not RepeatMode.OFF)
+        queued = None if index is None else (index, self._playlist[index].path)
+        if queued != self._queued:
+            self._queued = queued
+            self._backend.queue_next(queued[1] if queued else None)
 
     # -- BackendListener ---------------------------------------------------- #
 
@@ -187,9 +218,30 @@ class Player:
             return
         index = self._playlist.next_index(wrap=self._repeat is RepeatMode.ALL)
         if index is None:
-            self._backend.stop()
+            self.stop()
         else:
             self.play_index(index)
+
+    def on_track_advanced(self, path: Path) -> None:
+        queued, self._queued = self._queued, None
+        index: int | None
+        if queued is not None and queued[1] == path and self._points_to(queued[0], path):
+            index = queued[0]
+        else:
+            # The playlist changed during the transition: find the track by its path.
+            index = next((i for i, t in enumerate(self._playlist) if t.path == path), None)
+        if index is None:
+            log.warning("Backend advanced to %s, which is no longer in the playlist", path)
+            self.stop()
+            return
+        track = self._playlist.set_current(index)
+        assert track is not None
+        self._position_ms = self._duration_ms = 0
+        self._bus.publish(TrackChanged(track, index))
+        self._queue_next()
+
+    def _points_to(self, index: int, path: Path) -> bool:
+        return 0 <= index < len(self._playlist) and self._playlist[index].path == path
 
     def on_error(self, message: str) -> None:
         track = self._playlist.current_track

@@ -25,13 +25,15 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QCoreApplication
 
+from pyamp import app as app_module
 from pyamp.app import Application, parse_args
 from pyamp.audio import registry
+from pyamp.audio.registry import BackendUnavailableError
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.models import RepeatMode, Track
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.ui.background_loader import LoadJob
-from tests.conftest import FakeBackend
+from tests.conftest import FakeBackend, FakeGaplessBackend
 
 
 @pytest.fixture(autouse=True)
@@ -105,6 +107,34 @@ def test_unknown_backend_in_settings_falls_back_to_default(
     cleanup.append(application)
     assert "Unknown backend 'gone'" in caplog.text
     assert application.player is not None
+
+
+def test_unavailable_backend_falls_back_to_default(
+    store: SettingsStore,
+    cleanup: list[Application],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(name: str) -> FakeBackend:
+        if name == "mpv":
+            raise BackendUnavailableError("mpv", "Cannot find libmpv")
+        return FakeBackend()
+
+    monkeypatch.setattr(app_module, "create_backend", unavailable)
+    application = build(store, backend="mpv")
+    cleanup.append(application)
+    assert "'mpv' is unavailable" in caplog.text
+    assert application.settings.backend == "fake"
+
+
+def test_chosen_backend_is_remembered(
+    store: SettingsStore, cleanup: list[Application], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(registry._registered, "other", FakeGaplessBackend)
+    application = build(store, backend="other")
+    cleanup.append(application)
+    application.shutdown()
+    assert store.load().backend == "other"  # the registry key, not the class's name
 
 
 def test_shutdown_saves_settings_and_playlist(

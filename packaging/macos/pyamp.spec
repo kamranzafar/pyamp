@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Additional terms apply under GPLv3 section 7; see ADDITIONAL-TERMS.md.
 # -*- mode: python -*-
 """PyInstaller spec for PyAmp.app. Run via packaging/macos/build.sh, which provides:
 
@@ -29,6 +30,7 @@ a = Analysis(  # noqa: F821
         *copy_metadata("pyamp"),  # entry points: plugins are discovered through them
         *collect_data_files("pyamp"),  # icons (pyamp/resources)
         (str(ROOT / "LICENSE"), "."),
+        (str(ROOT / "ADDITIONAL-TERMS.md"), "."),
         (str(NOTICES), "."),
     ],
     # Imported lazily (registry, plugins, platform adapters), so list them explicitly.

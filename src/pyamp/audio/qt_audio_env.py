@@ -15,6 +15,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 """Work around a QtMultimedia crash on Linux systems with an incomplete PipeWire.
 
 If the PipeWire client library is installed but its ``client.conf`` is not (e.g. a

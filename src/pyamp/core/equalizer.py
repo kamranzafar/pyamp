@@ -15,6 +15,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 """A 10-band graphic equaliser model (pure: no Qt, no audio).
 
 Backends that can filter audio (see ``AudioBackend.supports_equalizer``) turn an

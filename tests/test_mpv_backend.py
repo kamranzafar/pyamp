@@ -299,21 +299,56 @@ def test_changes_while_idle_rebuild_the_filter(backend: MpvAudioBackend) -> None
 
 
 def test_changes_while_playing_retune_without_rebuilding(
-    backend: MpvAudioBackend, recorder: Recorder, tmp_path: Path
+    qt_app: QCoreApplication, tmp_path: Path
 ) -> None:
-    backend.load(write_wav(tmp_path / "long.wav", 10))
-    backend.play()
-    wait_until(lambda: PlaybackState.PLAYING in recorder.values("state"))
-    eq = Equalizer(enabled=True).with_preset("Bass Boost")
-    backend.set_equalizer(eq)
-    # The filter chain is (re)initialised asynchronously; wait until it accepts commands.
-    wait_until(lambda: backend._retune(eq, eq.with_gain(9, 1.0)))
+    log_lines: list[str] = []
+    backend = MpvAudioBackend(
+        ao="null",
+        loglevel="v",
+        log_handler=lambda level, prefix, text: log_lines.append(f"[{level}] {prefix}: {text}"),
+    )
+    recorder = Recorder()
+    backend.set_listener(recorder)
+    try:
+        backend.load(write_wav(tmp_path / "long.wav", 10))
+        backend.play()
+        wait_until(lambda: PlaybackState.PLAYING in recorder.values("state"))
+        eq = Equalizer(enabled=True).with_preset("Bass Boost")
+        backend.set_equalizer(eq)
 
-    backend.set_equalizer(eq.with_gain(0, -5.0).with_preamp(-2.0))
+        # The filter chain is (re)initialised asynchronously; wait until it accepts commands.
+        errors: list[str] = []
 
-    # Retuned in place: mpv's filter definition still holds the original values.
-    assert eq_graph_in_mpv(backend) == equalizer_graph(eq)
-    assert recorder.values("error") == []
+        def retuned() -> bool:
+            try:
+                backend._mpv.command("af-command", EQ_LABEL, "g", "1.0", "equalizer@b9")
+            except Exception as exc:
+                errors.append(repr(exc))
+                return False
+            return True
+
+        try:
+            wait_until(retuned, timeout=5)
+        except TimeoutError:
+            mpv_handle: Any = backend._mpv
+            relevant = [
+                line for line in log_lines if any(k in line for k in ("af", "lavfi", "command"))
+            ]
+            pytest.fail(
+                "af-command never succeeded.\n"
+                f"mpv version: {mpv_handle.mpv_version}\n"
+                f"af: {mpv_handle.af}\n"
+                f"last error: {errors[-1:]}\n"
+                "log:\n" + "\n".join(relevant[-40:])
+            )
+
+        backend.set_equalizer(eq.with_gain(0, -5.0).with_preamp(-2.0))
+
+        # Retuned in place: mpv's filter definition still holds the original values.
+        assert eq_graph_in_mpv(backend) == equalizer_graph(eq)
+        assert recorder.values("error") == []
+    finally:
+        backend.close()
 
 
 def test_playback_completes_with_equalizer_on(

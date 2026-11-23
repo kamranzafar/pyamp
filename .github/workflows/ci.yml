@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
@@ -74,6 +74,8 @@ jobs:
           uv run pyamp --self-test 2>&1 | tee selftest.txt
           grep -q "client.conf" selftest.txt
       - name: Load libmpv from a folder (PYAMP_LIBMPV)
+        # Windows has no system libmpv to copy; its bundled one is tested by the package workflow.
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           # Copy the runner's libmpv into a folder of its own, as a bundled app would have it.

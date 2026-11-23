@@ -22,7 +22,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from pyamp.core.events import EventBus
@@ -37,6 +38,8 @@ class PluginContext:
     bus: EventBus
     player: Player
     playlist: Playlist
+    #: The main window's native handle (an HWND on Windows), once it exists.
+    window_handle: Callable[[], int | None] = field(default=lambda: None)
 
 
 @runtime_checkable

@@ -36,9 +36,11 @@ This is the `media-session` plugin; `--no-plugins` turns it off.
 
 ```bash
 uv run pytest          # tests (no audio device or display needed)
+uv run pytest --cov    # tests with a coverage report
 uv run ruff check .    # lint
 uv run ruff format .   # format
 uv run mypy            # strict type checking
+uv run pre-commit install  # run ruff and mypy on every commit
 ```
 
 ## Architecture

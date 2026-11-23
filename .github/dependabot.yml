@@ -15,3 +15,7 @@ updates:
     groups:
       python-dependencies:
         patterns: ["*"]
+    ignore:
+      # pyobjc 13.0 crashes on import on macOS 15 (see the comment in pyproject.toml).
+      - dependency-name: "pyobjc*"
+        versions: [">=13"]

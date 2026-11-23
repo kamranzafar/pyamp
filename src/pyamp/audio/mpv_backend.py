@@ -31,6 +31,7 @@ the README). mpv exposes no decoded audio, so the visualiser stays flat.
 from __future__ import annotations
 
 import locale
+import logging
 import threading
 from pathlib import Path
 from typing import Any, ClassVar
@@ -43,7 +44,10 @@ import mpv  # noqa: E402  (needs prepare_libmpv_lookup first)
 from PySide6.QtCore import QObject, Signal, Slot  # noqa: E402
 
 from pyamp.audio.backend import AudioBackend  # noqa: E402
+from pyamp.core.equalizer import BANDS_HZ, Equalizer  # noqa: E402
 from pyamp.core.models import PlaybackState, ReplayGainMode  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 #: Position updates closer together than this are dropped (mpv reports very often).
 POSITION_INTERVAL_S = 0.1
@@ -67,6 +71,24 @@ _DEFAULT_OPTIONS: dict[str, Any] = {
     "replaygain_clip": False,
     "replaygain_fallback": 0,
 }
+
+#: Label of our filter in mpv's audio filter chain.
+EQ_LABEL = "pyamp-eq"
+#: Band filter width (Q): about one octave, so neighbouring bands blend smoothly.
+EQ_Q = 1.41
+
+
+def equalizer_graph(equalizer: Equalizer) -> str:
+    """The lavfi graph for ``equalizer``: a preamp, then one peaking filter per band.
+
+    Each filter is named (``pre``, ``b0``..``b9``) so ``af-command`` can retune it live.
+    """
+    bands = ",".join(
+        f"equalizer@b{i}=f={hz}:t=q:w={EQ_Q}:g={gain}"
+        for i, (hz, gain) in enumerate(zip(BANDS_HZ, equalizer.gains_db, strict=True))
+    )
+    return f"volume@pre=volume={equalizer.preamp_db}dB,{bands}"
+
 
 _REPLAYGAIN = {
     ReplayGainMode.OFF: "no",
@@ -127,6 +149,7 @@ class MpvAudioBackend(AudioBackend):
     # mpv reads the tags itself and applies them per file while decoding, so the gain
     # changes exactly at gapless track boundaries.
     applies_replay_gain: ClassVar[bool] = True
+    supports_equalizer: ClassVar[bool] = True
 
     def __init__(self, **options: Any) -> None:
         """``options`` are extra mpv options, e.g. ``ao="null"`` in tests."""
@@ -139,6 +162,7 @@ class MpvAudioBackend(AudioBackend):
         self._paused = False
         self._idle = True
         self._last_position = -1.0
+        self._equalizer: Equalizer | None = None  # what's currently in mpv's filter chain
 
         # libmpv refuses to start unless LC_NUMERIC is "C" (mpv_create returns NULL and
         # python-mpv then crashes). python-mpv sets it on import, but creating the Qt
@@ -187,6 +211,35 @@ class MpvAudioBackend(AudioBackend):
 
     def set_replay_gain_mode(self, mode: ReplayGainMode) -> None:
         self._mpv.replaygain = _REPLAYGAIN[mode]
+
+    def set_equalizer(self, equalizer: Equalizer) -> None:
+        applied = self._equalizer
+        if not equalizer.active:
+            if applied is not None:
+                self._mpv.command("af", "remove", f"@{EQ_LABEL}")
+                self._equalizer = None
+            return
+        if applied is not None and self._retune(applied, equalizer):
+            self._equalizer = equalizer
+            return
+        # Switching on, or retuning wasn't possible (e.g. no file loaded): (re)build the filter.
+        if applied is not None:
+            self._mpv.command("af", "remove", f"@{EQ_LABEL}")
+        self._mpv.command("af", "add", f"@{EQ_LABEL}:lavfi=[{equalizer_graph(equalizer)}]")
+        self._equalizer = equalizer
+
+    def _retune(self, old: Equalizer, new: Equalizer) -> bool:
+        """Change gains in the running filter without rebuilding it (no audible dropout)."""
+        try:
+            if new.preamp_db != old.preamp_db:
+                self._mpv.command("af-command", EQ_LABEL, "volume", f"{new.preamp_db}dB", "pre")
+            for i, (was, now) in enumerate(zip(old.gains_db, new.gains_db, strict=True)):
+                if now != was:
+                    self._mpv.command("af-command", EQ_LABEL, "g", str(now), f"b{i}")
+        except (SystemError, ValueError) as exc:
+            log.debug("Live equaliser update failed (%s); rebuilding the filter", exc)
+            return False
+        return True
 
     def close(self) -> None:
         self._mpv.terminate()

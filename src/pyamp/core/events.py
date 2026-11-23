@@ -38,6 +38,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from pyamp.core.equalizer import Equalizer
 from pyamp.core.models import PlaybackState, RepeatMode, ReplayGainMode, Track
 
 log = logging.getLogger(__name__)
@@ -111,6 +112,11 @@ class PlayModeChanged:
 @dataclass(frozen=True, slots=True)
 class ReplayGainChanged:
     mode: ReplayGainMode
+
+
+@dataclass(frozen=True, slots=True)
+class EqualizerChanged:
+    equalizer: Equalizer
 
 
 @dataclass(frozen=True, slots=True)

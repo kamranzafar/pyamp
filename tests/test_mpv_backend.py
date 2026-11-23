@@ -32,13 +32,14 @@ import pytest
 from numpy.typing import NDArray
 from PySide6.QtCore import QCoreApplication
 
+from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import EventBus, PlaybackStateChanged, TrackChanged
 from pyamp.core.models import PlaybackState, ReplayGainMode, Track
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 
 try:
-    from pyamp.audio.mpv_backend import MpvAudioBackend
+    from pyamp.audio.mpv_backend import EQ_LABEL, MpvAudioBackend, equalizer_graph
 except OSError as exc:  # no libmpv on this machine
     pytest.skip(f"libmpv not available: {exc}", allow_module_level=True)
 
@@ -253,3 +254,73 @@ def test_replay_gain_mode_is_passed_to_mpv(backend: MpvAudioBackend) -> None:
     for mode, value in expected:
         backend.set_replay_gain_mode(mode)
         assert mpv_handle.replaygain == value
+
+
+# -- Equaliser ------------------------------------------------------------------- #
+
+
+def eq_filters(backend: MpvAudioBackend) -> list[dict[str, Any]]:
+    mpv_handle: Any = backend._mpv
+    return [f for f in mpv_handle.af if f.get("label") == EQ_LABEL]
+
+
+def eq_graph_in_mpv(backend: MpvAudioBackend) -> str:
+    [entry] = eq_filters(backend)
+    graph: str = entry["params"]["graph"]
+    return graph
+
+
+def test_equalizer_graph() -> None:
+    graph = equalizer_graph(Equalizer(preamp_db=-3.0).with_gain(0, 6.0))
+    assert graph.startswith("volume@pre=volume=-3.0dB,equalizer@b0=f=60:t=q:w=1.41:g=6.0,")
+    assert graph.endswith("equalizer@b9=f=16000:t=q:w=1.41:g=0.0")
+    assert graph.count("equalizer@") == 10
+
+
+def test_equalizer_is_added_and_removed(backend: MpvAudioBackend) -> None:
+    eq = Equalizer(enabled=True).with_preset("Rock")
+    backend.set_equalizer(eq)
+    assert eq_graph_in_mpv(backend) == equalizer_graph(eq)
+
+    backend.set_equalizer(eq.with_enabled(False))
+    assert eq_filters(backend) == []
+
+    backend.set_equalizer(eq)
+    backend.set_equalizer(Equalizer(enabled=True))  # flat: nothing to do, so no filter
+    assert eq_filters(backend) == []
+
+
+def test_changes_while_idle_rebuild_the_filter(backend: MpvAudioBackend) -> None:
+    eq = Equalizer(enabled=True).with_gain(0, 3.0)
+    backend.set_equalizer(eq)
+    changed = eq.with_gain(1, 4.0)
+    backend.set_equalizer(changed)  # nothing playing, so it can't be retuned live
+    assert eq_graph_in_mpv(backend) == equalizer_graph(changed)
+
+
+def test_changes_while_playing_retune_without_rebuilding(
+    backend: MpvAudioBackend, recorder: Recorder, tmp_path: Path
+) -> None:
+    backend.load(write_wav(tmp_path / "long.wav", 10))
+    backend.play()
+    wait_until(lambda: PlaybackState.PLAYING in recorder.values("state"))
+    eq = Equalizer(enabled=True).with_preset("Bass Boost")
+    backend.set_equalizer(eq)
+    # The filter chain is (re)initialised asynchronously; wait until it accepts commands.
+    wait_until(lambda: backend._retune(eq, eq.with_gain(9, 1.0)))
+
+    backend.set_equalizer(eq.with_gain(0, -5.0).with_preamp(-2.0))
+
+    # Retuned in place: mpv's filter definition still holds the original values.
+    assert eq_graph_in_mpv(backend) == equalizer_graph(eq)
+    assert recorder.values("error") == []
+
+
+def test_playback_completes_with_equalizer_on(
+    backend: MpvAudioBackend, recorder: Recorder, tmp_path: Path
+) -> None:
+    backend.set_equalizer(Equalizer(enabled=True, preamp_db=-6.0).with_preset("Vocal"))
+    backend.load(write_wav(tmp_path / "a.wav", 0.5))
+    backend.play()
+    wait_until(lambda: "end" in recorder.names())
+    assert recorder.values("error") == []

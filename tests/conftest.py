@@ -29,6 +29,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
 from pyamp.audio.backend import AudioBackend
+from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import EventBus
 from pyamp.core.models import PlaybackState, ReplayGainMode, Track
 from pyamp.core.player import Player
@@ -50,6 +51,7 @@ class FakeBackend(AudioBackend):
         self.volume = 0.0
         self.position = 0
         self.gains: list[float] = []
+        self.equalizers: list[Equalizer] = []
         self.replay_gain_modes: list[ReplayGainMode] = []
 
     def load(self, path: Path) -> None:
@@ -73,6 +75,9 @@ class FakeBackend(AudioBackend):
 
     def set_volume(self, volume: float) -> None:
         self.volume = volume
+
+    def set_equalizer(self, equalizer: Equalizer) -> None:
+        self.equalizers.append(equalizer)
 
     def set_track_gain(self, factor: float) -> None:
         self.gains.append(factor)

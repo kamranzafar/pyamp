@@ -27,8 +27,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from pyamp.audio.backend import AudioBackend
+from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import (
     AudioFrame,
+    EqualizerChanged,
     EventBus,
     PlaybackError,
     PlaybackStateChanged,
@@ -68,6 +70,7 @@ class Player:
         self._shuffle = False
         self._repeat = RepeatMode.OFF
         self._replay_gain = ReplayGainMode.OFF
+        self._equalizer = Equalizer()
         # Gapless backends: whether a track is loaded, and what is queued after it.
         self._active = False
         self._queued: tuple[int, Path] | None = None
@@ -106,6 +109,15 @@ class Player:
     @property
     def replay_gain(self) -> ReplayGainMode:
         return self._replay_gain
+
+    @property
+    def equalizer(self) -> Equalizer:
+        return self._equalizer
+
+    @property
+    def supports_equalizer(self) -> bool:
+        """Whether the backend can apply :attr:`equalizer` (the setting is kept either way)."""
+        return self._backend.supports_equalizer
 
     # -- Transport ---------------------------------------------------------- #
 
@@ -186,6 +198,12 @@ class Player:
         else:
             self._apply_track_gain(self._playlist.current_track)
         self._bus.publish(ReplayGainChanged(mode))
+
+    def set_equalizer(self, equalizer: Equalizer) -> None:
+        self._equalizer = equalizer
+        if self._backend.supports_equalizer:
+            self._backend.set_equalizer(equalizer)
+        self._bus.publish(EqualizerChanged(equalizer))
 
     def shutdown(self) -> None:
         self._backend.stop()

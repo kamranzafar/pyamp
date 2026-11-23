@@ -24,10 +24,10 @@ Drag and drop files or folders onto the window to add them.
 
 ### Audio backends
 
-| Backend | Default | Gapless | Visualiser | Needs |
-|---|---|---|---|---|
-| `qt` (QtMultimedia) | yes | no | yes | nothing extra |
-| `mpv` (libmpv) | | **yes** | flat | `brew install mpv` or `apt install libmpv2` |
+| Backend | Default | Gapless | Equaliser | Visualiser | Needs |
+|---|---|---|---|---|---|
+| `qt` (QtMultimedia) | yes | no | no | yes | nothing extra |
+| `mpv` (libmpv) | | **yes** | **yes** | flat | `brew install mpv` or `apt install libmpv2` |
 
 ```bash
 uv run pyamp --backend mpv   # remembered for next time; --backend qt switches back
@@ -52,6 +52,15 @@ Opus (`R128_*`), MP4 and WMA. Gain is capped so the track's peak never clips. Wi
 the `qt` backend ReplayGain can only make tracks quieter, never louder (QtMultimedia's
 volume tops out at 100%). The `mpv` backend applies it itself, exactly at gapless
 track boundaries.
+
+### Equaliser
+
+**Playback → Equaliser…** (`G`) opens a 10-band graphic equaliser (60 Hz – 16 kHz,
+±12 dB) with a preamp and presets. It needs the `mpv` backend: QtMultimedia gives
+no access to the audio stream, so with `qt` the window is shown but disabled.
+Sliders retune the running filter live, without dropouts, and the settings are
+remembered. Boosting bands can clip loud tracks; lower the preamp if you hear
+distortion.
 
 ### Media keys and system controls
 
@@ -85,6 +94,7 @@ src/pyamp/
 │   ├── events.py       EventBus + event types
 │   ├── play_order.py   Sequential / Shuffle strategies
 │   ├── playlist.py     Playlist model with a "current" cursor
+│   ├── equalizer.py    10-band equaliser model and presets
 │   └── player.py       Player facade: transport, volume, modes
 ├── audio/              Sound output
 │   ├── backend.py      AudioBackend ABC + BackendListener protocol
@@ -104,6 +114,7 @@ src/pyamp/
 └── ui/                 PySide6 front-end
     ├── skin.py         All colours in one place (seam for .wsz skins)
     ├── actions.py      Playback commands as QActions
+    ├── equalizer_window.py  The equaliser window
     ├── background_loader.py  Non-blocking track loading (worker thread)
     ├── playlist_model.py  Playlist → QAbstractTableModel adapter
     ├── main_window.py
@@ -187,7 +198,6 @@ See `src/pyamp/plugins/now_playing.py` for a working example.
 - Process-pool tag reading for very large libraries (mutagen is pure Python, so the
   worker thread still competes for the GIL)
 - Feed the visualiser when using the `mpv` backend
-- Equaliser (mpv backend)
 - Frameless, pixel-skinned window + classic `.wsz` skin loader
 - Windows media controls (SMTC) and album artwork in system media widgets
 - Internet radio (playlist formats currently skip URLs)

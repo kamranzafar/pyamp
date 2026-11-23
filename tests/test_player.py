@@ -24,8 +24,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import (
     AudioFrame,
+    EqualizerChanged,
     EventBus,
     PlaybackStateChanged,
     ReplayGainChanged,
@@ -305,3 +307,37 @@ def test_backend_that_reads_tags_gets_the_mode_instead(playlist: Playlist, bus: 
     backend.advance()
     assert backend.replay_gain_modes == [ReplayGainMode.ALBUM]
     assert backend.gains == []
+
+
+# -- Equaliser ------------------------------------------------------------------- #
+
+
+def test_equalizer_is_passed_to_supporting_backend(playlist: Playlist, bus: EventBus) -> None:
+    class EqBackend(FakeBackend):
+        supports_equalizer = True
+
+    backend = EqBackend()
+    player = Player(backend, playlist, bus)
+    events: list[EqualizerChanged] = []
+    bus.subscribe(EqualizerChanged, events.append)
+    eq = Equalizer(enabled=True).with_preset("Rock")
+
+    player.set_equalizer(eq)
+
+    assert player.supports_equalizer
+    assert backend.equalizers == [eq]
+    assert player.equalizer == eq
+    assert events == [EqualizerChanged(eq)]
+
+
+def test_equalizer_setting_kept_without_backend_support(
+    player: Player, backend: FakeBackend, bus: EventBus
+) -> None:
+    events: list[EqualizerChanged] = []
+    bus.subscribe(EqualizerChanged, events.append)
+    eq = Equalizer(enabled=True).with_gain(0, 6)
+    player.set_equalizer(eq)
+    assert not player.supports_equalizer
+    assert backend.equalizers == []  # nothing to apply it to
+    assert player.equalizer == eq  # but the setting is remembered
+    assert events == [EqualizerChanged(eq)]

@@ -15,6 +15,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 """PyAmp in the menu bar (macOS) or system tray (Linux, Windows).
 
 The icon's menu shows what's playing and offers the basic controls, so PyAmp can

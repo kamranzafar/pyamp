@@ -15,6 +15,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 """Visualiser levels for backends that don't expose the audio they play (mpv).
 
 Instead of tapping the playback, the file is analysed separately: Qt's

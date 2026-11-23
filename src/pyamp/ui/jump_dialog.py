@@ -15,6 +15,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 """Jump to Track (Winamp's J): type part of a name, pick a match, play it."""
 
 from __future__ import annotations

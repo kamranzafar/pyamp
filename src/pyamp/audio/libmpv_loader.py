@@ -255,24 +255,129 @@ def prepare_system_lookup(platform: str = sys.platform) -> None:
     os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = macos_library_path(os.environ, existing)
 
 
-def import_mpv(env: Mapping[str, str] = os.environ) -> tuple[ModuleType, LibmpvSource]:
-    """Import python-mpv with the best available libmpv. Raises ``OSError`` if there is none."""
+#: Which libmpv to prefer when both a system and a PyAmp-provided one exist.
+#: "auto": the system one on Linux (distros expect shared libraries to be used),
+#: PyAmp's own (bundled or user folder) elsewhere, where it's the tested build.
+PREFERENCES = ("auto", "system", "bundled")
+_state = {"preference": "auto"}
+
+
+def set_preference(preference: str) -> None:
+    """Choose the libmpv preference; takes effect when the mpv backend is first loaded."""
+    if preference not in PREFERENCES:
+        raise ValueError(f"libmpv preference must be one of {PREFERENCES}, not {preference!r}")
+    _state["preference"] = preference
+
+
+def get_preference() -> str:
+    return _state["preference"]
+
+
+def effective_preference(preference: str, platform: str = sys.platform) -> str:
+    """Resolve "auto" to "system" (Linux) or "bundled" (everything else)."""
+    if preference == "auto":
+        return "system" if platform.startswith("linux") else "bundled"
+    return preference
+
+
+def system_libmpv(
+    platform: str = sys.platform, find: Callable[[str], str | None] | None = None
+) -> Path | None:
+    """The libmpv python-mpv's own lookup would use, or None if there isn't one."""
+    prepare_system_lookup(platform)
+    find = find or ctypes.util.find_library
+    names = WINDOWS_NAMES if platform == "win32" else ("mpv",)
+    for name in names:
+        found = find(name)
+        if found:
+            return Path(found)
+    return None
+
+
+def import_system(libmpv: Path) -> ModuleType:
+    """Import python-mpv bound to a system libmpv (its dependencies are the system's)."""
+    with steer_find_library(libmpv):
+        return _import_python_mpv()
+
+
+def import_mpv(
+    env: Mapping[str, str] = os.environ,
+    *,
+    preference: str | None = None,
+    platform: str = sys.platform,
+    find_system: Callable[[], Path | None] | None = None,
+    load_folder: Callable[[Path], ModuleType] = import_from,
+    load_system: Callable[[Path], ModuleType] = import_system,
+) -> tuple[ModuleType, LibmpvSource]:
+    """Import python-mpv with the best available libmpv. Raises ``OSError`` if there is none.
+
+    ``PYAMP_LIBMPV`` always wins. Otherwise the system libmpv and PyAmp's own copies
+    (bundled, then the user folder) are tried in the order the preference gives; a
+    copy that fails to load is skipped in favour of the next one.
+    """
+    if env.get(ENV_VAR):
+        override = Path(env[ENV_VAR]).expanduser()
+        libmpv = find_libmpv(override, platform)
+        if libmpv is None:
+            raise OSError(f"{ENV_VAR}={override}: no libmpv found there")
+        return load_folder(libmpv), LibmpvSource(libmpv, ENV_VAR)
+
     bundled = bundled_folders(
         frozen=bool(getattr(sys, "frozen", False)),
         meipass=getattr(sys, "_MEIPASS", None),
         executable=sys.executable,
     )
-    for location, tier in candidate_folders(env, bundled=bundled, user=user_folder()):
-        libmpv = find_libmpv(location)
-        if libmpv is None:
-            if tier == ENV_VAR:
-                raise OSError(f"{ENV_VAR}={location}: no libmpv found there")
-            continue
-        module = import_from(libmpv)
-        return module, LibmpvSource(libmpv, tier)
+    own = candidate_folders({}, bundled=bundled, user=user_folder())
+    system: list[tuple[Path | None, str]] = [(None, "system")]
+    prefer = effective_preference(preference or get_preference(), platform)
+    order = [*system, *own] if prefer == "system" else [*own, *system]
 
-    prepare_system_lookup()
-    module = _import_python_mpv()
-    backend = getattr(module, "backend", None)
-    name = getattr(backend, "_name", None)
-    return module, LibmpvSource(Path(name) if name else None, "system")
+    failures: list[str] = []
+    candidate: Path | None
+    for location, tier in order:
+        if tier == "system":
+            candidate = (find_system or (lambda: system_libmpv(platform)))()
+            if candidate is None:
+                failures.append("system: none installed")
+                continue
+            load = load_system
+        else:
+            assert location is not None
+            candidate = find_libmpv(location, platform)
+            if candidate is None:
+                continue
+            load = load_folder
+        try:
+            module = load(candidate)
+        except OSError as exc:
+            log.warning("Could not load %s libmpv %s: %s", tier, candidate, exc)
+            failures.append(f"{tier} ({candidate}): {exc}")
+            continue
+        return module, LibmpvSource(candidate, tier)
+    raise OSError("no usable libmpv found. " + "; ".join(failures or ["nothing to try"]))
+
+
+def find_avfilter(source: LibmpvSource, platform: str = sys.platform) -> Path | None:
+    """The ffmpeg filter library (libavfilter) that the loaded libmpv uses, if known."""
+    if source.path is not None and source.tier != "system":
+        patterns = {"darwin": "libavfilter*.dylib", "win32": "avfilter-*.dll"}
+        found = sorted(source.path.parent.glob(patterns.get(platform, "libavfilter.so*")))
+        if found:
+            return found[0]
+    system = ctypes.util.find_library("avfilter")
+    return Path(system) if system else None
+
+
+def missing_filters(names: Sequence[str], avfilter: Path | None) -> list[str]:
+    """Which of the ffmpeg filters ``names`` that libavfilter lacks ([] if unknown)."""
+    if avfilter is None:
+        return []
+    try:
+        library = ctypes.CDLL(str(avfilter))
+        get_by_name = library.avfilter_get_by_name
+    except (OSError, AttributeError) as exc:
+        log.debug("Can't check ffmpeg filters in %s (assuming present): %s", avfilter, exc)
+        return []
+    get_by_name.restype = ctypes.c_void_p
+    get_by_name.argtypes = [ctypes.c_char_p]
+    return [name for name in names if not get_by_name(name.encode())]

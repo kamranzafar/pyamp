@@ -301,12 +301,8 @@ def test_changes_while_idle_rebuild_the_filter(backend: MpvAudioBackend) -> None
 def test_changes_while_playing_retune_without_rebuilding(
     qt_app: QCoreApplication, tmp_path: Path
 ) -> None:
-    log_lines: list[str] = []
-    backend = MpvAudioBackend(
-        ao="null",
-        loglevel="v",
-        log_handler=lambda level, prefix, text: log_lines.append(f"[{level}] {prefix}: {text}"),
-    )
+    log_file = tmp_path / "mpv.log"
+    backend = MpvAudioBackend(ao="null", log_file=str(log_file), msg_level="all=v")
     recorder = Recorder()
     backend.set_listener(recorder)
     try:
@@ -331,6 +327,9 @@ def test_changes_while_playing_retune_without_rebuilding(
             wait_until(retuned, timeout=5)
         except TimeoutError:
             mpv_handle: Any = backend._mpv
+            log_lines = (
+                log_file.read_text(errors="replace").splitlines() if log_file.exists() else []
+            )
             relevant = [
                 line for line in log_lines if any(k in line for k in ("af", "lavfi", "command"))
             ]

@@ -154,11 +154,50 @@ def check_replay_gain() -> str:
     return "track, album and off modes accepted"
 
 
+def check_track_analysis() -> str:
+    """The visualiser's file analysis (used with mpv): decode a 1 kHz tone, find its band."""
+    from PySide6.QtCore import QCoreApplication  # noqa: PLC0415
+
+    from pyamp.audio.track_analysis import FPS, TrackAnalyser  # noqa: PLC0415
+
+    analyser = TrackAnalyser()
+    try:
+        with tempfile.TemporaryDirectory(prefix="pyamp-selftest-") as tmp:
+            path = Path(tmp) / "tone.wav"
+            rate, hz = 44100, 1000
+            t = np.arange(rate) / rate
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(rate)
+                w.writeframes((np.sin(2 * np.pi * hz * t) * 12000).astype("<i2").tobytes())
+            timeline = analyser.analyse(path)
+            deadline = time.monotonic() + PLAYBACK_TIMEOUT_S
+            while not timeline.finished.is_set():
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"no analysis after {PLAYBACK_TIMEOUT_S:.0f} s")
+                QCoreApplication.processEvents()
+                time.sleep(0.01)
+    finally:
+        analyser.shutdown()
+    if abs(len(timeline.rows) - FPS) > 2:
+        raise RuntimeError(f"expected about {FPS} rows for 1 s of audio, got {len(timeline.rows)}")
+    row = timeline.row_at(0.5)
+    assert row is not None
+    edges = np.geomspace(40.0, 16_000.0, len(row) + 1)
+    expected = int(np.searchsorted(edges, hz) - 1)
+    loudest = int(np.argmax(row))
+    if abs(loudest - expected) > 1:
+        raise RuntimeError(f"1 kHz tone peaked in band {loudest}, expected about {expected}")
+    return f"{len(timeline.rows)} rows, 1 kHz in band {loudest}"
+
+
 CHECKS: Sequence[tuple[str, Check]] = (
     ("libmpv", check_libmpv),
     ("qt backend", check_qt_backend),
     ("mpv playback", check_mpv_playback),
     ("replaygain", check_replay_gain),
+    ("visualiser analysis", check_track_analysis),
 )
 
 

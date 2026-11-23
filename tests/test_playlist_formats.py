@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -46,13 +47,22 @@ def test_m3u_resolves_relative_paths_and_skips_urls(tmp_path: Path) -> None:
     playlist_file.write_text(
         "#EXTM3U\nmusic/a.mp3\nhttp://radio.example/stream\n\nfile:///abs/b%20c.mp3\n"
     )
-    assert registry.read(playlist_file) == [tmp_path / "music" / "a.mp3", Path("/abs/b c.mp3")]
+    root = Path(tmp_path.anchor)  # "/", or the drive on Windows ("C:\\")
+    assert registry.read(playlist_file) == [tmp_path / "music" / "a.mp3", root / "abs" / "b c.mp3"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows file URLs have drive letters")
+def test_m3u_reads_windows_file_urls(tmp_path: Path) -> None:
+    playlist_file = tmp_path / "list.m3u"
+    playlist_file.write_text("file:///C:/Music/a%20b.mp3\nfile:///D:/x.flac\n")
+    assert registry.read(playlist_file) == [Path("C:/Music/a b.mp3"), Path("D:/x.flac")]
 
 
 def test_pls_orders_by_entry_number(tmp_path: Path) -> None:
     playlist_file = tmp_path / "list.pls"
     playlist_file.write_text("[playlist]\nFile2=/b.mp3\nFile1=/a.mp3\nNumberOfEntries=2\n")
-    assert registry.read(playlist_file) == [Path("/a.mp3"), Path("/b.mp3")]
+    root = Path(tmp_path.anchor)
+    assert registry.read(playlist_file) == [root / "a.mp3", root / "b.mp3"]
 
 
 def test_unsupported_extension() -> None:

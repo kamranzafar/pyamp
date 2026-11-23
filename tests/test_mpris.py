@@ -157,7 +157,9 @@ def test_metadata_has_spec_types(service: MprisService, wire_bus: WireBus) -> No
     assert metadata["xesam:title"] == ("s", "Song")
     assert metadata["xesam:artist"] == ("as", ["Band"])
     assert metadata["xesam:album"] == ("s", "Record")
-    assert metadata["xesam:url"] == ("s", "file:///music/song.flac")
+    # file:///music/song.flac (with the current drive on Windows)
+    assert metadata["xesam:url"] == ("s", TRACK.path.absolute().as_uri())
+    assert metadata["xesam:url"][1].endswith("/music/song.flac")
 
 
 def test_position_is_read_live_in_microseconds(

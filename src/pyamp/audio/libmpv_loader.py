@@ -92,9 +92,11 @@ def bundled_folders(*, frozen: bool, meipass: str | None, executable: str) -> li
     if not frozen:
         return []
     exe_dir = Path(executable).resolve().parent
-    folders = [Path(meipass)] if meipass else []
+    roots = [Path(meipass)] if meipass else []
     # A macOS app keeps libraries in Contents/Frameworks, next to Contents/MacOS/<exe>.
-    return [*folders, exe_dir, exe_dir.parent / "Frameworks"]
+    roots += [exe_dir, exe_dir.parent / "Frameworks"]
+    # Packaged builds keep libmpv and its own ffmpeg in a "libmpv" subfolder, apart from Qt's.
+    return [folder for root in roots for folder in (root / "libmpv", root)]
 
 
 def candidate_folders(

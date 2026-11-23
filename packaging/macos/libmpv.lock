@@ -1,0 +1,5 @@
+# libmpv bundled into PyAmp.app: media-kit's prebuilt "video-encodersgpl" flavour.
+# (The audio flavours lack libass and the ffmpeg "volume" filter the equaliser needs.)
+# Format: <arch> <sha256> <url>. build.sh refuses a download whose hash doesn't match.
+x86_64 730ec656d66d9656001d4734b70e10797d068ca91a641a2afdef13d62ee95c01 https://github.com/media-kit/libmpv-darwin-build/releases/download/v0.7.3/libmpv-libs_v0.7.3_macos-amd64-video-encodersgpl.tar.gz
+arm64 b8f16a0b0335880f359a8545f1566b9ff5c9da0a29e60576944befe802e7613f https://github.com/media-kit/libmpv-darwin-build/releases/download/v0.7.3/libmpv-libs_v0.7.3_macos-arm64-video-encodersgpl.tar.gz

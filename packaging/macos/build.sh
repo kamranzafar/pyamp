@@ -57,7 +57,19 @@ cp -R "$APP" "$WORK/dmg/"
 ln -s /Applications "$WORK/dmg/Applications" # drag-to-install
 DMG="$OUT/PyAmp-$VERSION-macos-$ARCH.dmg"
 rm -f "$DMG"
-hdiutil create -quiet -volname "PyAmp $VERSION" -srcfolder "$WORK/dmg" -format UDZO "$DMG"
+# hdiutil fails now and then on CI runners ("Resource busy"), so retry a few times.
+for attempt in 1 2 3 4; do
+  if hdiutil create -volname "PyAmp $VERSION" -srcfolder "$WORK/dmg" -format UDZO "$DMG"; then
+    break
+  fi
+  if [ "$attempt" -eq 4 ]; then
+    echo "error: hdiutil could not create $DMG" >&2
+    exit 1
+  fi
+  echo "hdiutil failed (attempt $attempt); retrying in 5 s" >&2
+  rm -f "$DMG"
+  sleep 5
+done
 
 echo "App: $OUT/PyAmp.app ($(du -sh "$OUT/PyAmp.app" | cut -f1))"
 echo "DMG: $DMG ($(du -sh "$DMG" | cut -f1))"

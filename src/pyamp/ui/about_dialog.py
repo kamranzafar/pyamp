@@ -29,11 +29,13 @@ from pathlib import Path
 
 from PySide6 import __version__ as pyside_version
 from PySide6.QtCore import Qt, QUrl, qVersion
-from PySide6.QtGui import QColor, QDesktopServices, QTextCursor, QTextDocument
+from PySide6.QtGui import QColor, QDesktopServices, QShowEvent, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
+    QFrame,
     QLabel,
+    QScrollArea,
     QTabWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -107,7 +109,7 @@ def recolour_links(document: QTextDocument, colour: QColor) -> None:
 def notice_html(link_colour: str = "") -> str:
     link = f" style='color:{link_colour}'" if link_colour else ""
     return (
-        f"<p style='font-size:15pt'><b>{APP_NAME}</b></p>"
+        f"<h2>{APP_NAME}</h2>"
         f"<p>Version {__version__}<br>"
         "A lightweight music player for your local library.</p>"
         f"<p>{COPYRIGHT}</p>"
@@ -145,22 +147,49 @@ class AboutDialog(QDialog):
         notice.setWordWrap(True)
         notice.setOpenExternalLinks(True)
         notice.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-        about = QWidget()
-        about_layout = QVBoxLayout(about)
+        self.about_page = QWidget()
+        about_layout = self.about_layout = QVBoxLayout(self.about_page)
         about_layout.addWidget(icon)
         about_layout.addWidget(notice)
         about_layout.addStretch(1)
+        # Scrolls only if the screen is too small for it (see _fit_about_page).
+        self.about_scroll = QScrollArea()
+        self.about_scroll.setWidget(self.about_page)
+        self.about_scroll.setWidgetResizable(True)
+        self.about_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(about, "About")
+        self.tabs.addTab(self.about_scroll, "About")
         for title, name, url in DOCUMENTS:
             self.tabs.addTab(self._document(name, url), title)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
+        layout = self._layout = QVBoxLayout(self)
         layout.addWidget(self.tabs)
         layout.addWidget(buttons)
+        self._fitted = False
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if not self._fitted:  # once: later the user's own resizing wins
+            self._fitted = True
+            self._fit_about_page()
+
+    def _fit_about_page(self) -> None:
+        """Grow the dialog until the About tab fits, as far as the screen allows.
+
+        The text wraps, so its height depends on the fonts (system, size, scaling).
+        """
+        self._layout.activate()
+        viewport = self.about_scroll.viewport()
+        needed = self.about_layout.totalHeightForWidth(viewport.width())
+        missing = needed - viewport.height()
+        if missing <= 0:
+            return
+        screen = self.screen().availableGeometry().height() if self.screen() else 10_000
+        self.resize(self.width(), min(self.height() + missing, int(screen * 0.9)))
 
     def open_link(self, url: QUrl) -> None:
         """Web links open in the browser; links to the other documents switch tabs."""

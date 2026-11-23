@@ -55,6 +55,18 @@ jobs:
         run: |
           pulseaudio --start --exit-idle-time=-1
           pactl info | grep -E "Server Name|Default Sink"
+      - name: Qt backend tests, with Qt Multimedia's debug log
+        # QMediaPlayer.stop() has hung a few times on CI (virtual audio devices). Qt's log,
+        # uncaptured so it survives a hang, shows which step blocks. Diagnostic; remove later.
+        shell: bash
+        env:
+          QT_LOGGING_RULES: "qt.multimedia*=true"
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            dbus-run-session -- uv run pytest -q -s -p no:cacheprovider tests/test_qt_backend.py
+          else
+            uv run pytest -q -s -p no:cacheprovider tests/test_qt_backend.py
+          fi
       - name: Run tests
         shell: bash
         run: |

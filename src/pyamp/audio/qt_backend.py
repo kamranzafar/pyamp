@@ -1,0 +1,125 @@
+"""Audio backend built on QtMultimedia (Adapter pattern).
+
+Needs no system libraries beyond what ships with PySide6. Decoded PCM is
+tapped with ``QAudioBufferOutput`` (Qt >= 6.8) to feed the visualiser.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import ClassVar
+
+import numpy as np
+from numpy.typing import NDArray
+from PySide6.QtCore import QUrl
+from PySide6.QtMultimedia import (
+    QAudioBuffer,
+    QAudioBufferOutput,
+    QAudioFormat,
+    QAudioOutput,
+    QMediaPlayer,
+    QtAudio,
+)
+
+from pyamp.audio.backend import AudioBackend
+from pyamp.core.models import PlaybackState
+
+_STATE_MAP = {
+    QMediaPlayer.PlaybackState.StoppedState: PlaybackState.STOPPED,
+    QMediaPlayer.PlaybackState.PlayingState: PlaybackState.PLAYING,
+    QMediaPlayer.PlaybackState.PausedState: PlaybackState.PAUSED,
+}
+
+# sample format -> (numpy dtype, offset, scale) to map raw samples into [-1, 1]
+_SAMPLE_FORMATS: dict[QAudioFormat.SampleFormat, tuple[type[np.generic], float, float]] = {
+    QAudioFormat.SampleFormat.UInt8: (np.uint8, 128.0, 128.0),
+    QAudioFormat.SampleFormat.Int16: (np.int16, 0.0, 32768.0),
+    QAudioFormat.SampleFormat.Int32: (np.int32, 0.0, 2147483648.0),
+    QAudioFormat.SampleFormat.Float: (np.float32, 0.0, 1.0),
+}
+
+
+def audio_buffer_to_mono(buffer: QAudioBuffer) -> NDArray[np.float32] | None:
+    """Convert an interleaved ``QAudioBuffer`` into mono float32 samples."""
+    fmt = buffer.format()
+    spec = _SAMPLE_FORMATS.get(fmt.sampleFormat())
+    channels = fmt.channelCount()
+    if spec is None or channels <= 0 or buffer.frameCount() == 0:
+        return None
+    dtype, offset, scale = spec
+    raw = np.frombuffer(buffer.constData(), dtype=dtype, count=buffer.sampleCount())
+    samples = (raw.astype(np.float32) - offset) / scale
+    return samples.reshape(-1, channels).mean(axis=1, dtype=np.float32)
+
+
+class QtAudioBackend(AudioBackend):
+    name: ClassVar[str] = "qt"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._player = QMediaPlayer()
+        self._output = QAudioOutput()
+        self._tap = QAudioBufferOutput()
+        self._player.setAudioOutput(self._output)
+        self._player.setAudioBufferOutput(self._tap)
+
+        self._player.playbackStateChanged.connect(self._on_playback_state)
+        self._player.positionChanged.connect(self._on_position)
+        self._player.durationChanged.connect(self._on_duration)
+        self._player.mediaStatusChanged.connect(self._on_media_status)
+        self._player.errorOccurred.connect(self._on_error)
+        self._tap.audioBufferReceived.connect(self._on_audio_buffer)
+
+    # -- AudioBackend ------------------------------------------------------- #
+
+    def load(self, path: Path) -> None:
+        self._player.setSource(QUrl.fromLocalFile(str(path)))
+
+    def play(self) -> None:
+        self._player.play()
+
+    def pause(self) -> None:
+        self._player.pause()
+
+    def stop(self) -> None:
+        self._player.stop()
+
+    def seek(self, position_ms: int) -> None:
+        self._player.setPosition(position_ms)
+
+    def set_volume(self, volume: float) -> None:
+        # Human loudness perception is logarithmic; Qt expects a linear gain.
+        linear = QtAudio.convertVolume(
+            volume,
+            QtAudio.VolumeScale.LogarithmicVolumeScale,
+            QtAudio.VolumeScale.LinearVolumeScale,
+        )
+        self._output.setVolume(linear)
+
+    def close(self) -> None:
+        self._player.setSource(QUrl())
+
+    # -- Qt signal handlers ------------------------------------------------- #
+
+    def _on_playback_state(self, state: QMediaPlayer.PlaybackState) -> None:
+        self._listener.on_state_changed(_STATE_MAP[state])
+
+    # Look the listener up on every call: it may be replaced after construction.
+    def _on_position(self, position_ms: int) -> None:
+        self._listener.on_position_changed(position_ms)
+
+    def _on_duration(self, duration_ms: int) -> None:
+        self._listener.on_duration_changed(duration_ms)
+
+    def _on_media_status(self, status: QMediaPlayer.MediaStatus) -> None:
+        if status is QMediaPlayer.MediaStatus.EndOfMedia:
+            self._listener.on_end_of_track()
+
+    def _on_error(self, error: QMediaPlayer.Error, message: str) -> None:
+        if error is not QMediaPlayer.Error.NoError:
+            self._listener.on_error(message or error.name)
+
+    def _on_audio_buffer(self, buffer: QAudioBuffer) -> None:
+        samples = audio_buffer_to_mono(buffer)
+        if samples is not None:
+            self._listener.on_audio_frame(samples, buffer.format().sampleRate())

@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+import os
+from collections.abc import Iterator
+from pathlib import Path
+
+import numpy as np
+import pytest
+from numpy.typing import NDArray
+from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
+
+from pyamp.audio.backend import AudioBackend
+from pyamp.core.events import EventBus
+from pyamp.core.models import PlaybackState, Track
+from pyamp.core.player import Player
+from pyamp.core.playlist import Playlist
+
+# Widget tests must never open real windows (and must work on CI without a display).
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+class FakeBackend(AudioBackend):
+    """In-memory backend that records calls and lets tests simulate callbacks."""
+
+    name = "fake"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.loaded: list[Path] = []
+        self.calls: list[str] = []
+        self.volume = 0.0
+        self.position = 0
+
+    def load(self, path: Path) -> None:
+        self.loaded.append(path)
+
+    def play(self) -> None:
+        self.calls.append("play")
+        self._listener.on_state_changed(PlaybackState.PLAYING)
+
+    def pause(self) -> None:
+        self.calls.append("pause")
+        self._listener.on_state_changed(PlaybackState.PAUSED)
+
+    def stop(self) -> None:
+        self.calls.append("stop")
+        self._listener.on_state_changed(PlaybackState.STOPPED)
+
+    def seek(self, position_ms: int) -> None:
+        self.position = position_ms
+        self._listener.on_position_changed(position_ms)
+
+    def set_volume(self, volume: float) -> None:
+        self.volume = volume
+
+    # -- simulation helpers --
+    def finish_track(self) -> None:
+        self._listener.on_end_of_track()
+
+    def emit_audio(self, samples: NDArray[np.float32], rate: int) -> None:
+        self._listener.on_audio_frame(samples, rate)
+
+
+def make_tracks(n: int) -> list[Track]:
+    return [
+        Track(path=Path(f"/music/{i}.mp3"), title=f"Song {i}", duration_ms=60_000) for i in range(n)
+    ]
+
+
+@pytest.fixture
+def bus() -> EventBus:
+    return EventBus()
+
+
+@pytest.fixture
+def backend() -> FakeBackend:
+    return FakeBackend()
+
+
+@pytest.fixture
+def playlist(bus: EventBus) -> Playlist:
+    return Playlist(bus)
+
+
+@pytest.fixture
+def player(backend: FakeBackend, playlist: Playlist, bus: EventBus) -> Player:
+    return Player(backend, playlist, bus)
+
+
+@pytest.fixture(scope="session")
+def qt_app() -> Iterator[QCoreApplication]:
+    """A Qt application object, needed for signals, threads and widgets (offscreen)."""
+    yield QApplication.instance() or QApplication([])

@@ -81,7 +81,8 @@ EQ_Q = 1.41
 def equalizer_graph(equalizer: Equalizer) -> str:
     """The lavfi graph for ``equalizer``: a preamp, then one peaking filter per band.
 
-    Each filter is named (``pre``, ``b0``..``b9``) so ``af-command`` can retune it live.
+    Each filter instance is named (``volume@pre``, ``equalizer@b0``..``equalizer@b9``) so
+    ``af-command`` can retune it live.
     """
     bands = ",".join(
         f"equalizer@b{i}=f={hz}:t=q:w={EQ_Q}:g={gain}"
@@ -232,10 +233,13 @@ class MpvAudioBackend(AudioBackend):
         """Change gains in the running filter without rebuilding it (no audible dropout)."""
         try:
             if new.preamp_db != old.preamp_db:
-                self._mpv.command("af-command", EQ_LABEL, "volume", f"{new.preamp_db}dB", "pre")
+                self._mpv.command(
+                    "af-command", EQ_LABEL, "volume", f"{new.preamp_db}dB", "volume@pre"
+                )
             for i, (was, now) in enumerate(zip(old.gains_db, new.gains_db, strict=True)):
                 if now != was:
-                    self._mpv.command("af-command", EQ_LABEL, "g", str(now), f"b{i}")
+                    # ffmpeg matches the instance's full name, "equalizer@b<i>".
+                    self._mpv.command("af-command", EQ_LABEL, "g", str(now), f"equalizer@b{i}")
         except (SystemError, ValueError) as exc:
             log.debug("Live equaliser update failed (%s); rebuilding the filter", exc)
             return False

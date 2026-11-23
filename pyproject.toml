@@ -13,8 +13,13 @@ dependencies = [
     "mutagen>=1.47",
     "numpy>=1.26",
     "platformdirs>=4.0",
+    # macOS Now Playing / media keys. pyobjc 13.0's CoreMedia binding links
+    # libswiftCoreMedia.dylib, which macOS 15 doesn't ship, so stay on 12.x for now.
+    "pyobjc-framework-mediaplayer>=11,<13 ; sys_platform == 'darwin'",
+    "pyobjc-core>=11,<13 ; sys_platform == 'darwin'",
     "pyside6-addons>=6.8",      # QtMultimedia (QAudioBufferOutput needs Qt >= 6.8)
     "pyside6-essentials>=6.8",  # QtCore / QtGui / QtWidgets
+    "jeepney>=0.8 ; sys_platform == 'linux'",
 ]
 
 [project.scripts]
@@ -24,6 +29,7 @@ pyamp = "pyamp.app:main"
 # can register their own plugins the same way.
 [project.entry-points."pyamp.plugins"]
 now-playing-log = "pyamp.plugins.now_playing:NowPlayingLogPlugin"
+media-session = "pyamp.plugins.media_session:MediaSessionPlugin"
 
 [build-system]
 requires = ["uv_build>=0.13.9,<0.14.0"]
@@ -31,6 +37,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "jeepney>=0.9.0",
     "mypy>=2.4.1",
     "pytest>=9.2.0",
     "ruff>=0.17.6",
@@ -43,6 +50,10 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N", "PL"]
 ignore = ["PLR0913", "PLR2004"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests take their collaborators as pytest fixtures, i.e. as positional arguments.
+"tests/*" = ["PLR0917"]
 
 [tool.ruff.lint.pep8-naming]
 # Qt event handlers (mousePressEvent, paintEvent, ...) are camelCase by necessity.
@@ -58,6 +69,11 @@ strict_equality = false  # asserting state before/after an action trips mypy's n
 
 [[tool.mypy.overrides]]
 module = ["mutagen", "mutagen.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# pyobjc and jeepney ship no type information.
+module = ["MediaPlayer", "jeepney", "jeepney.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

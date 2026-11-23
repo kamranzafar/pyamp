@@ -22,6 +22,16 @@ uv run pyamp --log-level INFO     # see plugin activity, e.g. "Now playing: ..."
 
 Drag and drop files or folders onto the window to add them.
 
+### Media keys and system controls
+
+PyAmp works with your keyboard's media keys, headphone buttons and the system's
+"Now Playing" controls, even when its window is in the background:
+
+- **macOS**: Control Center and lock screen widget, media keys, AirPods/Bluetooth buttons.
+- **Linux**: MPRIS, so desktop media widgets, media keys and `playerctl -p pyamp` work.
+
+This is the `media-session` plugin; `--no-plugins` turns it off.
+
 ## Development
 
 ```bash
@@ -52,7 +62,11 @@ src/pyamp/
 │   ├── metadata.py     Tag reading via mutagen
 │   ├── playlist_formats.py  M3U / PLS read & write
 │   └── loader.py       Files/folders/playlists → Tracks
-├── plugins/            Entry-point based plugin system + example plugin
+├── media_session/      OS media controls (used by the media-session plugin)
+│   ├── session.py      Player ⇄ NowPlaying snapshots and OS commands (pure)
+│   ├── macos.py        MediaPlayer framework: Now Playing + remote commands
+│   └── mpris.py        MPRIS over D-Bus (jeepney), served on the Qt main thread
+├── plugins/            Entry-point based plugin system, now-playing log, media session
 └── ui/                 PySide6 front-end
     ├── skin.py         All colours in one place (seam for .wsz skins)
     ├── actions.py      Playback commands as QActions
@@ -80,7 +94,7 @@ That is why the whole player can be tested with a `FakeBackend` (see
 |---|---|---|
 | **Observer** | `core/events.py` | Player/playlist publish events; UI, DSP and plugins subscribe. No back-references. |
 | **Facade** | `core/player.py` | One simple API over playlist + backend for UI, shortcuts and plugins. |
-| **Adapter** | `audio/qt_backend.py`, `ui/playlist_model.py` | Wrap third-party APIs (QtMultimedia, Qt model/view) behind our own interfaces. |
+| **Adapter** | `audio/qt_backend.py`, `ui/playlist_model.py`, `media_session/macos.py`, `media_session/mpris.py` | Wrap third-party APIs (QtMultimedia, Qt model/view) behind our own interfaces. |
 | **Strategy** | `core/play_order.py`, `library/playlist_formats.py` | Swap play order or file format without touching callers. |
 | **Factory / Registry** | `audio/registry.py`, `PlaylistFormatRegistry` | Choose implementations by name/extension; lazy imports keep optional deps optional. |
 | **Command** | `ui/actions.py` | One `QAction` drives the button, menu item and shortcut. |
@@ -137,7 +151,7 @@ See `src/pyamp/plugins/now_playing.py` for a working example.
 - `mpv` backend for gapless playback and wider format support
 - Equaliser, ReplayGain
 - Frameless, pixel-skinned window + classic `.wsz` skin loader
-- Media keys / MPRIS / macOS Now Playing integration
+- Windows media controls (SMTC) and album artwork in system media widgets
 - Internet radio (playlist formats currently skip URLs)
 
 ## License

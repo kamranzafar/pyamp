@@ -1,0 +1,58 @@
+name: Package (macOS)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "packaging/**"
+      - ".github/workflows/package-macos.yml"
+      - "src/pyamp/audio/libmpv_loader.py"
+      - "src/pyamp/selftest.py"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: PyAmp.app (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+      - run: uv sync --locked --group packaging
+
+      - name: Make sure no system libmpv is installed
+        # So the self-test can only pass with the copy bundled in the app.
+        run: |
+          if brew list mpv >/dev/null 2>&1; then brew uninstall --ignore-dependencies mpv; fi
+
+      - name: Build PyAmp.app and .dmg
+        run: packaging/macos/build.sh dist
+
+      - name: Self-test the built app
+        env:
+          PYAMP_SELFTEST_TRACEBACK: "1"
+        run: |
+          app=dist/PyAmp.app/Contents/MacOS/PyAmp
+          "$app" --version | tee version.txt
+          grep -q "(bundled)" version.txt || { echo "::error::app did not use its bundled libmpv"; exit 1; }
+          "$app" --self-test
+          codesign --verify --deep --strict dist/PyAmp.app
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: PyAmp-macos-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error

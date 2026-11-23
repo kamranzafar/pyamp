@@ -55,10 +55,15 @@ def test_bundled_folders_only_when_frozen(tmp_path: Path) -> None:
     exe = tmp_path / "PyAmp.app" / "Contents" / "MacOS" / "pyamp"
     assert loader.bundled_folders(frozen=False, meipass=None, executable=str(exe)) == []
     folders = loader.bundled_folders(frozen=True, meipass="/tmp/_MEI1", executable=str(exe))
+    macos_dir = exe.resolve().parent
+    frameworks = macos_dir.parent / "Frameworks"  # PyAmp.app/Contents/Frameworks
     assert folders == [
+        Path("/tmp/_MEI1/libmpv"),  # each location's "libmpv" subfolder first
         Path("/tmp/_MEI1"),
-        exe.resolve().parent,
-        exe.resolve().parent.parent / "Frameworks",  # PyAmp.app/Contents/Frameworks
+        macos_dir / "libmpv",
+        macos_dir,
+        frameworks / "libmpv",
+        frameworks,
     ]
 
 

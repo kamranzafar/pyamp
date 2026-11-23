@@ -85,6 +85,9 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--no-plugins", action="store_true", help="don't load plugins")
     parser.add_argument("--log-level", default="WARNING", help="e.g. DEBUG, INFO, WARNING")
     parser.add_argument(
+        "--self-test", action="store_true", help="check this installation works, then exit"
+    )
+    parser.add_argument(
         "--version", action=_VersionAction, nargs=0, help="show version and libmpv, then exit"
     )
     return parser.parse_args(argv)
@@ -201,6 +204,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
         level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+    if args.self_test:
+        from pyamp.selftest import run_self_test  # noqa: PLC0415  (only needed here)
+
+        return 0 if run_self_test() else 1
     qt_app = QApplication(sys.argv[:1])
     qt_app.setApplicationName(APP_NAME)
     qt_app.setApplicationVersion(__version__)

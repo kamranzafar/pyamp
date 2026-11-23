@@ -2,6 +2,19 @@
 
 A lightweight, Winamp-inspired music player for local files, written in Python.
 
+## Installing on macOS
+
+Download `PyAmp-<version>-macos-<arch>.dmg` from the
+[latest *Package (macOS)* workflow run](../../actions/workflows/package-macos.yml)
+(`x86_64` for Intel Macs, `arm64` for Apple Silicon) and drag **PyAmp** to
+Applications. libmpv is bundled, so the `mpv` backend, the equaliser and gapless
+playback work without installing anything else.
+
+The app isn't notarised yet, so the first time macOS will refuse to open it:
+right-click PyAmp → **Open** → **Open**. If something doesn't work, run
+`/Applications/PyAmp.app/Contents/MacOS/PyAmp --self-test` and include the output
+in a bug report.
+
 ## Running
 
 ```bash
@@ -101,7 +114,13 @@ uv run ruff check .    # lint
 uv run ruff format .   # format
 uv run mypy            # strict type checking
 uv run pre-commit install  # run ruff and mypy on every commit
+packaging/macos/build.sh   # build dist/PyAmp.app and a .dmg (macOS)
 ```
+
+`build.sh` downloads the libmpv pinned in `packaging/macos/libmpv.lock` (checked
+against its SHA-256), bundles it with PyInstaller and makes a disk image. Licences of
+bundled components are listed in `packaging/THIRD_PARTY_NOTICES.md`, which ships
+inside the app.
 
 ## Architecture
 

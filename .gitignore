@@ -17,3 +17,9 @@ graphify-out/
 
 # JetBrains IDE settings
 .idea/
+
+# Test coverage data
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

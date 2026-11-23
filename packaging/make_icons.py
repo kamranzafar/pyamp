@@ -47,12 +47,23 @@ ICO = ROOT / "packaging" / "windows" / "PyAmp.ico"
 PNG = ROOT / "packaging" / "linux" / "pyamp.png"
 
 #: macOS iconset: (points, scale) pairs iconutil expects.
-ICONSET = [(16, 1), (16, 2), (32, 1), (32, 2), (128, 1), (128, 2), (256, 1), (256, 2), (512, 1), (512, 2)]
+ICONSET = [
+    (16, 1),
+    (16, 2),
+    (32, 1),
+    (32, 2),
+    (128, 1),
+    (128, 2),
+    (256, 1),
+    (256, 2),
+    (512, 1),
+    (512, 2),
+]
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 
 
 def render(renderer: QSvgRenderer, size: int) -> bytes:
-    """The SVG as a ``size`` × ``size`` PNG with a transparent background."""
+    """The SVG as a square ``size``-pixel PNG with a transparent background."""
     image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
     image.fill(Qt.GlobalColor.transparent)
     painter = QPainter(image)
@@ -90,7 +101,9 @@ def write_icns(path: Path, renderer: QSvgRenderer) -> None:
         iconset.mkdir()
         for points, scale in ICONSET:
             suffix = "" if scale == 1 else "@2x"
-            (iconset / f"icon_{points}x{points}{suffix}.png").write_bytes(render(renderer, points * scale))
+            (iconset / f"icon_{points}x{points}{suffix}.png").write_bytes(
+                render(renderer, points * scale)
+            )
         path.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run([iconutil, "-c", "icns", str(iconset), "-o", str(path)], check=True)
 

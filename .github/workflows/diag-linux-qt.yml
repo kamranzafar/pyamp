@@ -7,59 +7,59 @@ on:
 
 jobs:
   diag:
-    name: diag (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, ubuntu-24.04]
+    runs-on: ubuntu-latest
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v7
-      - name: System info and packages
+      - name: Base packages (as CI, minus libmpv2)
         run: |
-          cat /etc/os-release | grep -E "^(PRETTY_NAME|VERSION_ID)"
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
             libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0 libpulse0 \
-            gdb pulseaudio pipewire pipewire-pulse wireplumber >/dev/null
+            dbus playerctl gdb >/dev/null
       - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync --locked
       - name: Probe
         shell: bash
         run: |
           set +e
-          cat > probe.py <<'PY'
-          import faulthandler, sys
-          faulthandler.enable()
-          from PySide6 import __version__ as v
-          print("PySide6", v, flush=True)
+          cat > plain.py <<'PY'
+          import faulthandler; faulthandler.enable()
           from PySide6.QtWidgets import QApplication
           app = QApplication([])
-          from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
-          print("outputs:", [d.description() for d in QMediaDevices.audioOutputs()], flush=True)
-          player = QMediaPlayer(); print("player ok", flush=True)
-          out = QAudioOutput(); print("QAudioOutput ok", flush=True)
+          from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+          QMediaPlayer(); QAudioOutput(); print("plain Qt ok", flush=True)
           PY
-          run() { echo; echo "===== $1"; shift; env "$@" timeout 60 uv run python probe.py 2>&1 | tail -25; echo "exit ${PIPESTATUS[0]}"; }
-
-          run "no sound server"
-          run "no server, debug logging" QT_LOGGING_RULES="qt.multimedia*=true"
-
-          echo; echo "===== ldd of the Qt multimedia ffmpeg plugin (missing deps?)"
-          plugin=$(find .venv -path "*multimedia*" -name "*.so" | head -3)
-          for p in $plugin; do echo "-- $p"; ldd "$p" | grep -E "not found" || echo "   all deps found"; done
-
-          pulseaudio --start --exit-idle-time=-1
-          run "pulseaudio running"
-          run "pulseaudio + QT_AUDIO_BACKEND=pulseaudio" QT_AUDIO_BACKEND=pulseaudio
-          pulseaudio --kill
-
-          (pipewire & sleep 1; wireplumber & sleep 1; pipewire-pulse &) ; sleep 3
-          run "pipewire running"
-          run "pipewire + QT_AUDIO_BACKEND=pipewire" QT_AUDIO_BACKEND=pipewire
-
-          echo; echo "===== native backtrace (no server)"
-          pkill pipewire; pkill wireplumber; sleep 1
-          timeout 120 gdb -q -batch -ex run -ex bt -ex "info sharedlibrary multimedia" --args .venv/bin/python probe.py 2>&1 | grep -vE "^\[(New|Thread)" | tail -40
+          cat > pyamp_qt.py <<'PY'
+          import faulthandler; faulthandler.enable()
+          from PySide6.QtWidgets import QApplication
+          app = QApplication([])
+          from pyamp.audio.qt_backend import QtAudioBackend
+          QtAudioBackend().close(); print("pyamp QtAudioBackend ok", flush=True)
+          PY
+          cat > pyamp_steps.py <<'PY'
+          import faulthandler; faulthandler.enable()
+          from PySide6.QtWidgets import QApplication
+          app = QApplication([])
+          from PySide6.QtMultimedia import QAudioBufferOutput, QAudioOutput, QMediaPlayer
+          p = QMediaPlayer(); print("player", flush=True)
+          o = QAudioOutput(); print("output", flush=True)
+          t = QAudioBufferOutput(); print("buffer output", flush=True)
+          p.setAudioOutput(o); print("setAudioOutput", flush=True)
+          p.setAudioBufferOutput(t); print("setAudioBufferOutput", flush=True)
+          PY
+          run() { echo; echo "===== $1"; timeout 60 uv run python "$2" 2>&1 | grep -v "^qt.multimedia.ffmpeg: Using" | tail -12; echo "exit ${PIPESTATUS[0]}"; }
+          for phase in "without libmpv2" "with libmpv2"; do
+            if [ "$phase" = "with libmpv2" ]; then
+              sudo apt-get install -y -qq --no-install-recommends libmpv2 >/dev/null
+            fi
+            echo; echo "################ $phase"
+            run "plain Qt" plain.py
+            run "pyamp QtAudioBackend" pyamp_qt.py
+            run "step by step" pyamp_steps.py
+            run "pyamp QtAudioBackend under dbus-run-session" pyamp_qt.py && echo
+            echo "===== (dbus) "; timeout 60 dbus-run-session -- uv run python pyamp_qt.py 2>&1 | tail -6; echo "exit $?"
+          done
+          echo; echo "################ native backtrace (with libmpv2)"
+          timeout 180 gdb -q -batch -ex run -ex bt -ex "info sharedlibrary avcodec" --args .venv/bin/python pyamp_qt.py 2>&1 | grep -vE "^\[(New|Thread)" | tail -45

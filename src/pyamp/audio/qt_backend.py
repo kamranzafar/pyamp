@@ -79,6 +79,8 @@ class QtAudioBackend(AudioBackend):
         self._output = QAudioOutput()
         self._tap = QAudioBufferOutput()
         self._player.setAudioOutput(self._output)
+        self._linear_volume = 1.0
+        self._gain = 1.0
         self._player.setAudioBufferOutput(self._tap)
 
         self._player.playbackStateChanged.connect(self._on_playback_state)
@@ -107,12 +109,24 @@ class QtAudioBackend(AudioBackend):
 
     def set_volume(self, volume: float) -> None:
         # Human loudness perception is logarithmic; Qt expects a linear gain.
-        linear = QtAudio.convertVolume(
+        self._linear_volume = QtAudio.convertVolume(
             volume,
             QtAudio.VolumeScale.LogarithmicVolumeScale,
             QtAudio.VolumeScale.LinearVolumeScale,
         )
-        self._output.setVolume(linear)
+        self._apply_output_volume()
+
+    def set_track_gain(self, factor: float) -> None:
+        self._gain = factor
+        self._apply_output_volume()
+
+    @property
+    def output_volume(self) -> float:
+        return float(self._output.volume())
+
+    def _apply_output_volume(self) -> None:
+        # QAudioOutput can't go above 1.0, so ReplayGain can attenuate but not boost here.
+        self._output.setVolume(min(self._linear_volume * self._gain, 1.0))
 
     def close(self) -> None:
         self._player.setSource(QUrl())

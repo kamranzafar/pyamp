@@ -24,8 +24,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from pyamp.core.events import AudioFrame, EventBus, PlaybackStateChanged, TrackChanged
-from pyamp.core.models import PlaybackState, RepeatMode
+from pyamp.core.events import (
+    AudioFrame,
+    EventBus,
+    PlaybackStateChanged,
+    ReplayGainChanged,
+    TrackChanged,
+)
+from pyamp.core.models import PlaybackState, RepeatMode, ReplayGain, ReplayGainMode, Track
 from pyamp.core.play_order import ShuffleOrder
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
@@ -247,3 +253,55 @@ def test_non_gapless_backend_never_queues_or_touches_shuffle(
     player.set_repeat(RepeatMode.ALL)
     # The order was only asked when playing, never ahead of time.
     assert order._sequence == []
+
+
+# -- ReplayGain ---------------------------------------------------------------- #
+
+
+def rg_track(name: str, **gains: float) -> Track:
+    return Track(path=Path(f"/music/{name}.mp3"), title=name, replay_gain=ReplayGain(**gains))
+
+
+def test_replay_gain_is_off_by_default(
+    player: Player, playlist: Playlist, backend: FakeBackend
+) -> None:
+    playlist.add([rg_track("a", track_gain=-6.0)])
+    player.play()
+    assert player.replay_gain is ReplayGainMode.OFF
+    assert backend.gains == [1.0]
+
+
+def test_track_gain_applied_on_play_and_mode_change(
+    player: Player, playlist: Playlist, backend: FakeBackend, bus: EventBus
+) -> None:
+    events: list[ReplayGainChanged] = []
+    bus.subscribe(ReplayGainChanged, events.append)
+    playlist.add([rg_track("a", track_gain=-6.0206, album_gain=-12.0412), make_tracks(1)[0]])
+    player.play()
+
+    player.set_replay_gain(ReplayGainMode.TRACK)  # applies to the current track at once
+    assert backend.gains[-1] == pytest.approx(0.5, abs=1e-4)
+    player.set_replay_gain(ReplayGainMode.ALBUM)
+    assert backend.gains[-1] == pytest.approx(0.25, abs=1e-4)
+    assert events == [
+        ReplayGainChanged(ReplayGainMode.TRACK),
+        ReplayGainChanged(ReplayGainMode.ALBUM),
+    ]
+
+    player.next()  # untagged track: no change in level
+    assert backend.gains[-1] == 1.0
+    assert backend.replay_gain_modes == []  # this backend doesn't read tags itself
+
+
+def test_backend_that_reads_tags_gets_the_mode_instead(playlist: Playlist, bus: EventBus) -> None:
+    class TagReadingBackend(FakeGaplessBackend):
+        applies_replay_gain = True
+
+    backend = TagReadingBackend()
+    player = Player(backend, playlist, bus)
+    playlist.add([rg_track("a", track_gain=-6.0), rg_track("b", track_gain=-3.0)])
+    player.set_replay_gain(ReplayGainMode.ALBUM)
+    player.play()
+    backend.advance()
+    assert backend.replay_gain_modes == [ReplayGainMode.ALBUM]
+    assert backend.gains == []

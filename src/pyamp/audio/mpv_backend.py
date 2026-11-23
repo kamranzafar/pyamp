@@ -43,7 +43,7 @@ import mpv  # noqa: E402  (needs prepare_libmpv_lookup first)
 from PySide6.QtCore import QObject, Signal, Slot  # noqa: E402
 
 from pyamp.audio.backend import AudioBackend  # noqa: E402
-from pyamp.core.models import PlaybackState  # noqa: E402
+from pyamp.core.models import PlaybackState, ReplayGainMode  # noqa: E402
 
 #: Position updates closer together than this are dropped (mpv reports very often).
 POSITION_INTERVAL_S = 0.1
@@ -61,6 +61,17 @@ _DEFAULT_OPTIONS: dict[str, Any] = {
     "config": False,
     "input_default_bindings": False,
     "terminal": False,
+    # ReplayGain is off until the player sets a mode; never let it clip, and leave
+    # untagged files at their natural level.
+    "replaygain": "no",
+    "replaygain_clip": False,
+    "replaygain_fallback": 0,
+}
+
+_REPLAYGAIN = {
+    ReplayGainMode.OFF: "no",
+    ReplayGainMode.TRACK: "track",
+    ReplayGainMode.ALBUM: "album",
 }
 
 
@@ -113,6 +124,9 @@ class _Bridge(QObject):
 class MpvAudioBackend(AudioBackend):
     name: ClassVar[str] = "mpv"
     supports_gapless: ClassVar[bool] = True
+    # mpv reads the tags itself and applies them per file while decoding, so the gain
+    # changes exactly at gapless track boundaries.
+    applies_replay_gain: ClassVar[bool] = True
 
     def __init__(self, **options: Any) -> None:
         """``options`` are extra mpv options, e.g. ``ao="null"`` in tests."""
@@ -170,6 +184,9 @@ class MpvAudioBackend(AudioBackend):
     def set_volume(self, volume: float) -> None:
         # mpv's software volume is already cubic, i.e. perceptual like our 0..1 scale.
         self._mpv.volume = max(0.0, min(volume, 1.0)) * 100
+
+    def set_replay_gain_mode(self, mode: ReplayGainMode) -> None:
+        self._mpv.replaygain = _REPLAYGAIN[mode]
 
     def close(self) -> None:
         self._mpv.terminate()

@@ -33,7 +33,7 @@ from typing import ClassVar, Protocol
 import numpy as np
 from numpy.typing import NDArray
 
-from pyamp.core.models import PlaybackState
+from pyamp.core.models import PlaybackState, ReplayGainMode
 
 
 class BackendListener(Protocol):
@@ -88,6 +88,10 @@ class AudioBackend(ABC):
     #: only after the previous one has ended.
     supports_gapless: ClassVar[bool] = False
 
+    #: Whether the backend reads ReplayGain tags itself (see :meth:`set_replay_gain_mode`).
+    #: If not, the player computes each track's gain and calls :meth:`set_track_gain`.
+    applies_replay_gain: ClassVar[bool] = False
+
     def __init__(self) -> None:
         self._listener: BackendListener = _NullListener()
 
@@ -122,6 +126,14 @@ class AudioBackend(ABC):
         :meth:`BackendListener.on_track_advanced`. Only called on backends with
         :attr:`supports_gapless`.
         """
+        return None
+
+    def set_replay_gain_mode(self, mode: ReplayGainMode) -> None:
+        """Apply ReplayGain from the files' own tags. Only for :attr:`applies_replay_gain`."""
+        return None
+
+    def set_track_gain(self, factor: float) -> None:
+        """Scale the output by ``factor`` (linear) on top of the user's volume."""
         return None
 
     def close(self) -> None:

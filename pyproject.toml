@@ -69,6 +69,7 @@ files = ["src", "tests"]
 [[tool.mypy.overrides]]
 module = ["tests.*"]
 strict_equality = false  # asserting state before/after an action trips mypy's narrowing
+disallow_untyped_calls = false  # tests build mutagen tag objects, which are untyped
 
 [[tool.mypy.overrides]]
 module = ["mutagen", "mutagen.*"]

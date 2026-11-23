@@ -35,10 +35,11 @@ from pyamp.core.events import (
     PlaylistChanged,
     PlayModeChanged,
     PositionChanged,
+    ReplayGainChanged,
     TrackChanged,
     VolumeChanged,
 )
-from pyamp.core.models import PlaybackState, RepeatMode
+from pyamp.core.models import PlaybackState, RepeatMode, ReplayGainMode, Track
 from pyamp.core.play_order import SequentialOrder, ShuffleOrder
 from pyamp.core.playlist import Playlist
 
@@ -66,6 +67,7 @@ class Player:
         self._volume = 0.8
         self._shuffle = False
         self._repeat = RepeatMode.OFF
+        self._replay_gain = ReplayGainMode.OFF
         # Gapless backends: whether a track is loaded, and what is queued after it.
         self._active = False
         self._queued: tuple[int, Path] | None = None
@@ -101,6 +103,10 @@ class Player:
     def repeat(self) -> RepeatMode:
         return self._repeat
 
+    @property
+    def replay_gain(self) -> ReplayGainMode:
+        return self._replay_gain
+
     # -- Transport ---------------------------------------------------------- #
 
     def play(self) -> None:
@@ -120,6 +126,7 @@ class Player:
         self._position_ms = self._duration_ms = 0
         self._active = True
         self._queued = None
+        self._apply_track_gain(track)
         self._backend.load(track.path)
         self._backend.play()
         self._bus.publish(TrackChanged(track, index))
@@ -172,12 +179,26 @@ class Player:
         self._publish_mode()
         self._queue_next()
 
+    def set_replay_gain(self, mode: ReplayGainMode) -> None:
+        self._replay_gain = mode
+        if self._backend.applies_replay_gain:
+            self._backend.set_replay_gain_mode(mode)
+        else:
+            self._apply_track_gain(self._playlist.current_track)
+        self._bus.publish(ReplayGainChanged(mode))
+
     def shutdown(self) -> None:
         self._backend.stop()
         self._backend.close()
 
     def _publish_mode(self) -> None:
         self._bus.publish(PlayModeChanged(self._shuffle, self._repeat))
+
+    def _apply_track_gain(self, track: Track | None) -> None:
+        if self._backend.applies_replay_gain:
+            return  # the backend reads the tags itself, exactly at track boundaries
+        gains = track.replay_gain if track else None
+        self._backend.set_track_gain(gains.factor(self._replay_gain) if gains else 1.0)
 
     def _queue_next(self) -> None:
         """Tell a gapless backend which track follows the current one."""
@@ -237,6 +258,7 @@ class Player:
         track = self._playlist.set_current(index)
         assert track is not None
         self._position_ms = self._duration_ms = 0
+        self._apply_track_gain(track)
         self._bus.publish(TrackChanged(track, index))
         self._queue_next()
 

@@ -25,6 +25,7 @@ import time
 import wave
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -32,7 +33,7 @@ from numpy.typing import NDArray
 from PySide6.QtCore import QCoreApplication
 
 from pyamp.core.events import EventBus, PlaybackStateChanged, TrackChanged
-from pyamp.core.models import PlaybackState, Track
+from pyamp.core.models import PlaybackState, ReplayGainMode, Track
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 
@@ -237,3 +238,16 @@ def test_player_plays_a_playlist_gaplessly(
     wait_until(lambda: changes == [0, 1, 2] and player.state is PlaybackState.STOPPED)
     # Playing continued across both track boundaries without stopping in between.
     assert states == [PlaybackState.PLAYING, PlaybackState.STOPPED]
+
+
+def test_replay_gain_mode_is_passed_to_mpv(backend: MpvAudioBackend) -> None:
+    mpv_handle: Any = backend._mpv
+    assert mpv_handle.replaygain == "no"
+    assert mpv_handle.replaygain_clip is False  # i.e. mpv prevents clipping
+    for mode, value in [
+        (ReplayGainMode.TRACK, "track"),
+        (ReplayGainMode.ALBUM, "album"),
+        (ReplayGainMode.OFF, "no"),
+    ]:
+        backend.set_replay_gain_mode(mode)
+        assert mpv_handle.replaygain == value

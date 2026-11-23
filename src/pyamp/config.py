@@ -39,6 +39,7 @@ class Settings:
     volume: float = 0.8
     shuffle: bool = False
     repeat: str = "off"
+    replay_gain: str = "off"
     backend: str = "qt"
     last_directory: str = ""
     show_remaining_time: bool = False

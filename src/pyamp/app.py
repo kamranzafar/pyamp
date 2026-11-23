@@ -45,7 +45,7 @@ from pyamp.audio.registry import (
 )
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.events import EventBus
-from pyamp.core.models import RepeatMode
+from pyamp.core.models import RepeatMode, ReplayGainMode
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 from pyamp.dsp.spectrum import SpectrumService
@@ -122,6 +122,7 @@ class Application:
         self.settings.volume = self.player.volume
         self.settings.shuffle = self.player.shuffle
         self.settings.repeat = self.player.repeat.value
+        self.settings.replay_gain = self.player.replay_gain.value
         try:
             self._store.save(self.settings)
             if restore_incomplete:
@@ -155,6 +156,10 @@ class Application:
             self.player.set_repeat(RepeatMode(settings.repeat))
         except ValueError:
             self.player.set_repeat(RepeatMode.OFF)
+        try:
+            self.player.set_replay_gain(ReplayGainMode(settings.replay_gain))
+        except ValueError:
+            self.player.set_replay_gain(ReplayGainMode.OFF)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

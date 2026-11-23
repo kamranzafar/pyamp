@@ -238,6 +238,7 @@ src/pyamp/
     ├── background_loader.py  Non-blocking track loading (worker thread)
     ├── playlist_session.py   Which saved playlist is open; auto-save
     ├── jump_dialog.py        Jump to Track (J)
+    ├── about_dialog.py       Help → About: version, licence, notices
     ├── menu_bar.py           Menu bar / system tray icon and its menu
     ├── playlist_model.py  Playlist → QAbstractTableModel adapter
     ├── main_window.py

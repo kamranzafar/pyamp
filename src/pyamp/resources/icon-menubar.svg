@@ -3,7 +3,7 @@
      PyAmp menu bar / tray icon: the app icon's play mark and analyser as a
      one-colour silhouette. macOS uses it as a template image (tinted to suit
      the menu bar); other platforms show it as drawn. -->
-<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="12 25 82 52">
+<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="12 10 82 82">
   <path d="M18 30 L18 70 L46 50 Z" fill="#000" stroke="#000" stroke-width="6" stroke-linejoin="round"/>
   <rect x="55" y="52" width="9" height="18" rx="2.5" fill="#000"/>
   <rect x="68" y="30" width="9" height="40" rx="2.5" fill="#000"/>

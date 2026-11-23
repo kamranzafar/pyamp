@@ -150,7 +150,12 @@ uv run ruff format .   # format
 uv run mypy            # strict type checking
 uv run pre-commit install  # run ruff and mypy on every commit
 packaging/macos/build.sh   # build dist/PyAmp.app and a .dmg (macOS)
+uv run python packaging/make_icons.py  # regenerate .icns/.ico/.png after editing the icon SVG
 ```
+
+The app icon is `src/pyamp/resources/icon.svg` (drawn on Apple's 1024 grid) and the
+one-colour menu bar/tray icon is `icon-menubar.svg`; the platform files in `packaging/`
+are generated from them.
 
 `build.sh` downloads the libmpv pinned in `packaging/macos/libmpv.lock` (checked
 against its SHA-256), bundles it with PyInstaller and makes a disk image. Licences of

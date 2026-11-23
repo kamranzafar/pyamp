@@ -9,7 +9,7 @@ PYAMP_NOTICES         THIRD_PARTY_NOTICES.md to put in Contents/Resources
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 import pyamp
 
@@ -27,6 +27,7 @@ a = Analysis(  # noqa: F821
     binaries=libmpv_binaries,
     datas=[
         *copy_metadata("pyamp"),  # entry points: plugins are discovered through them
+        *collect_data_files("pyamp"),  # icons (pyamp/resources)
         (str(ROOT / "LICENSE"), "."),
         (str(NOTICES), "."),
     ],
@@ -56,6 +57,7 @@ coll = COLLECT(exe, a.binaries, a.datas, name="PyAmp")  # noqa: F821
 app = BUNDLE(  # noqa: F821
     coll,
     name="PyAmp.app",
+    icon=str(ROOT / "packaging" / "macos" / "PyAmp.icns"),  # from packaging/make_icons.py
     bundle_identifier="org.pyamp.PyAmp",
     version=pyamp.__version__,
     info_plist={

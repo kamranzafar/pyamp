@@ -18,13 +18,18 @@
 
 from __future__ import annotations
 
+import random
+from pathlib import Path
+
 import numpy as np
+import pytest
 
 from pyamp.core.events import AudioFrame, EventBus, PlaybackStateChanged, TrackChanged
 from pyamp.core.models import PlaybackState, RepeatMode
+from pyamp.core.play_order import ShuffleOrder
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
-from tests.conftest import FakeBackend, make_tracks
+from tests.conftest import FakeBackend, FakeGaplessBackend, make_tracks
 
 
 def test_play_starts_first_track(player: Player, playlist: Playlist, backend: FakeBackend) -> None:
@@ -107,3 +112,138 @@ def test_events_are_published(
     player.play()
     backend.emit_audio(np.zeros(16, dtype=np.float32), 44100)
     assert [type(e) for e in received] == [PlaybackStateChanged, TrackChanged, AudioFrame]
+
+
+# -- Gapless backends -------------------------------------------------------- #
+
+
+@pytest.fixture
+def gapless() -> FakeGaplessBackend:
+    return FakeGaplessBackend()
+
+
+@pytest.fixture
+def gplayer(gapless: FakeGaplessBackend, playlist: Playlist, bus: EventBus) -> Player:
+    return Player(gapless, playlist, bus)
+
+
+def test_next_track_is_queued_after_play(
+    gplayer: Player, playlist: Playlist, gapless: FakeGaplessBackend
+) -> None:
+    tracks = make_tracks(3)
+    playlist.add(tracks)
+    gplayer.play()
+    assert gapless.next_up == tracks[1].path
+
+
+def test_nothing_queued_while_stopped(
+    gplayer: Player, playlist: Playlist, gapless: FakeGaplessBackend
+) -> None:
+    playlist.add(make_tracks(3))
+    assert gapless.queued == []  # adding files must not start anything
+    gplayer.play()
+    gplayer.stop()
+    playlist.add(make_tracks(1))
+    assert gapless.next_up == playlist[1].path  # unchanged: no re-queue after stop
+
+
+def test_end_of_list_queues_nothing_unless_repeating(
+    gplayer: Player, playlist: Playlist, gapless: FakeGaplessBackend
+) -> None:
+    tracks = make_tracks(2)
+    playlist.add(tracks)
+    gplayer.play_index(1)
+    assert gapless.next_up is None
+    gplayer.set_repeat(RepeatMode.ALL)
+    assert gapless.next_up == tracks[0].path
+    gplayer.set_repeat(RepeatMode.ONE)
+    assert gapless.next_up == tracks[1].path
+
+
+def test_advance_switches_track_without_loading(
+    gplayer: Player, playlist: Playlist, gapless: FakeGaplessBackend, bus: EventBus
+) -> None:
+    tracks = make_tracks(3)
+    playlist.add(tracks)
+    gplayer.play()
+    gplayer.on_position_changed(59_000)
+    changes: list[TrackChanged] = []
+    bus.subscribe(TrackChanged, changes.append)
+
+    gapless.advance()
+
+    assert changes == [TrackChanged(tracks[1], 1)]
+    assert gapless.loaded == [tracks[0].path]  # the backend switched by itself
+    assert gplayer.position_ms == 0
+    assert gapless.next_up == tracks[2].path  # and the one after is queued
+
+
+def test_repeat_one_requeues_the_same_track(
+    gplayer: Player, playlist: Playlist, gapless: FakeGaplessBackend
+) -> None:
+    tracks = make_tracks(2)
+    playlist.add(tracks)
+    gplayer.set_repeat(RepeatMode.ONE)
+    gplayer.play()
+    queued_before = len(gapless.queued)
+    gapless.advance()
+    assert playlist.current_index == 0
+    assert len(gapless.queued) == queued_before + 1
+    assert gapless.next_up == tracks[0].path
+
+
+def test_playlist_and_mode_changes_requeue(
+    gplayer: Player, playlist: Playlist, gapless: FakeGaplessBackend
+) -> None:
+    tracks = make_tracks(2)
+    playlist.add(tracks)
+    gplayer.play_index(1)
+    assert gapless.next_up is None
+    extra = make_tracks(4)[3]
+    playlist.add([extra])
+    assert gapless.next_up == extra.path
+
+    gplayer.set_shuffle(True)
+    assert gapless.next_up in {t.path for t in playlist}
+
+
+def test_stale_advance_is_resolved_by_path(
+    gplayer: Player, playlist: Playlist, gapless: FakeGaplessBackend
+) -> None:
+    tracks = make_tracks(3)
+    playlist.add(tracks)
+    gplayer.play()
+    queued = gapless.next_up
+    playlist.remove([0])  # indices shift while the backend is already switching
+    gapless.advance(queued)
+    assert playlist.current_track == tracks[1]
+
+
+def test_advance_to_removed_track_stops(
+    gplayer: Player, playlist: Playlist, gapless: FakeGaplessBackend
+) -> None:
+    playlist.add(make_tracks(2))
+    gplayer.play()
+    gapless.advance(Path("/music/gone.mp3"))
+    assert gplayer.state is PlaybackState.STOPPED
+
+
+def test_end_of_track_still_works_when_nothing_was_queued(
+    gplayer: Player, playlist: Playlist, gapless: FakeGaplessBackend
+) -> None:
+    playlist.add(make_tracks(1))
+    gplayer.play()
+    gapless.finish_track()
+    assert gplayer.state is PlaybackState.STOPPED
+
+
+def test_non_gapless_backend_never_queues_or_touches_shuffle(
+    player: Player, playlist: Playlist, backend: FakeBackend
+) -> None:
+    order = ShuffleOrder(random.Random(3))
+    playlist.play_order = order
+    playlist.add(make_tracks(4))
+    player.play_index(0)
+    player.set_repeat(RepeatMode.ALL)
+    # The order was only asked when playing, never ahead of time.
+    assert order._sequence == []

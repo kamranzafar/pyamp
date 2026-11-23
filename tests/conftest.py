@@ -80,6 +80,31 @@ class FakeBackend(AudioBackend):
         self._listener.on_audio_frame(samples, rate)
 
 
+class FakeGaplessBackend(FakeBackend):
+    """A gapless backend: records what is queued and can simulate the transition."""
+
+    name = "fake-gapless"
+    supports_gapless = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.queued: list[Path | None] = []
+
+    @property
+    def next_up(self) -> Path | None:
+        return self.queued[-1] if self.queued else None
+
+    def queue_next(self, path: Path | None) -> None:
+        self.queued.append(path)
+
+    # -- simulation helpers --
+    def advance(self, path: Path | None = None) -> None:
+        """The queued track (or ``path``) starts playing without a gap."""
+        target = path or self.next_up
+        assert target is not None, "nothing queued"
+        self._listener.on_track_advanced(target)
+
+
 def make_tracks(n: int) -> list[Track]:
     return [
         Track(path=Path(f"/music/{i}.mp3"), title=f"Song {i}", duration_ms=60_000) for i in range(n)

@@ -43,6 +43,10 @@ class BackendListener(Protocol):
     def on_position_changed(self, position_ms: int) -> None: ...
     def on_duration_changed(self, duration_ms: int) -> None: ...
     def on_end_of_track(self) -> None: ...
+    def on_track_advanced(self, path: Path) -> None:
+        """The queued track (see :meth:`AudioBackend.queue_next`) started without a gap."""
+        ...
+
     def on_error(self, message: str) -> None: ...
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
         """Mono float32 PCM in [-1, 1] that is currently being played (optional)."""
@@ -64,6 +68,9 @@ class _NullListener:
     def on_end_of_track(self) -> None:
         pass
 
+    def on_track_advanced(self, path: Path) -> None:
+        pass
+
     def on_error(self, message: str) -> None:
         pass
 
@@ -76,6 +83,10 @@ class AudioBackend(ABC):
 
     #: Identifier used in settings and on the command line (``--backend``).
     name: ClassVar[str]
+
+    #: Whether :meth:`queue_next` is honoured. If not, the player loads each track
+    #: only after the previous one has ended.
+    supports_gapless: ClassVar[bool] = False
 
     def __init__(self) -> None:
         self._listener: BackendListener = _NullListener()
@@ -102,6 +113,16 @@ class AudioBackend(ABC):
     @abstractmethod
     def set_volume(self, volume: float) -> None:
         """Set the volume on a perceptual 0.0-1.0 scale."""
+
+    def queue_next(self, path: Path | None) -> None:
+        """Play ``path`` straight after the current track, without a gap (or nothing if None).
+
+        Replaces any previously queued track; :meth:`load` and :meth:`stop` discard
+        it. When the transition happens the backend calls
+        :meth:`BackendListener.on_track_advanced`. Only called on backends with
+        :attr:`supports_gapless`.
+        """
+        return None
 
     def close(self) -> None:
         """Release native resources. Override if needed."""

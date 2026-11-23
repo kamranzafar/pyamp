@@ -37,7 +37,12 @@ from PySide6.QtWidgets import QApplication
 
 from pyamp import APP_NAME, __version__
 from pyamp.audio.backend import AudioBackend
-from pyamp.audio.registry import UnknownBackendError, available_backends, create_backend
+from pyamp.audio.registry import (
+    BackendUnavailableError,
+    UnknownBackendError,
+    available_backends,
+    create_backend,
+)
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.events import EventBus
 from pyamp.core.models import RepeatMode
@@ -129,14 +134,19 @@ class Application:
         self.player.shutdown()
 
     def _create_backend(self, requested: str | None) -> AudioBackend:
+        """Create the requested backend and remember its name, so ``--backend`` sticks."""
         name = requested or self.settings.backend
         try:
-            return create_backend(name)
+            backend = create_backend(name)
         except UnknownBackendError:
-            log.warning(
-                "Unknown backend %r in settings; falling back to %r", name, Settings.backend
-            )
-            return create_backend(Settings.backend)
+            log.warning("Unknown backend %r; falling back to %r", name, Settings.backend)
+        except BackendUnavailableError as exc:
+            log.warning("%s; falling back to %r", exc, Settings.backend)
+        else:
+            self.settings.backend = name
+            return backend
+        self.settings.backend = Settings.backend
+        return create_backend(Settings.backend)
 
     def _apply_settings(self, settings: Settings) -> None:
         self.player.set_volume(settings.volume)

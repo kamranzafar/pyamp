@@ -30,6 +30,7 @@ the README). mpv exposes no decoded audio, so the visualiser stays flat.
 
 from __future__ import annotations
 
+import locale
 import threading
 from pathlib import Path
 from typing import Any, ClassVar
@@ -125,6 +126,10 @@ class MpvAudioBackend(AudioBackend):
         self._idle = True
         self._last_position = -1.0
 
+        # libmpv refuses to start unless LC_NUMERIC is "C" (mpv_create returns NULL and
+        # python-mpv then crashes). python-mpv sets it on import, but creating the Qt
+        # application resets it to the user's locale, so set it again here.
+        locale.setlocale(locale.LC_NUMERIC, "C")
         self._mpv: Any = mpv.MPV(**{**_DEFAULT_OPTIONS, **options})
         self._mpv.observe_property("pause", self._observe_pause)
         self._mpv.observe_property("idle-active", self._observe_idle)

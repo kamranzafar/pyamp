@@ -540,10 +540,10 @@ class MainWindow(QMainWindow):
             self._update_summary()
 
     def _update_summary(self) -> None:
-        tracks = list(self._s.playlist)
-        total = sum(t.duration_ms for t in tracks)
+        playlist = self._s.playlist
+        total = format_duration(playlist.total_duration_ms)
         loading = " · loading…" if self._s.loader.busy else ""
-        self.statusBar().showMessage(f"{len(tracks)} tracks · {format_duration(total)}{loading}")
+        self.statusBar().showMessage(f"{len(playlist)} tracks · {total}{loading}")
 
     # -- Qt overrides ------------------------------------------------------- #
 

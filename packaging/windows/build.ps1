@@ -66,7 +66,7 @@ try {
     Copy-Item -Recurse $app "$Out\PyAmp"
 
     # -- Portable zip --------------------------------------------------------------- #
-    $zip = "$Out\$name.zip"
+    $zip = "$Out\$name-portable.zip"
     if (Test-Path $zip) { Remove-Item $zip }
     Compress-Archive -Path $app -DestinationPath $zip -CompressionLevel Optimal
 

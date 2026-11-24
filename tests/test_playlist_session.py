@@ -19,7 +19,8 @@
 # Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 from __future__ import annotations
 
-from collections.abc import Iterator
+import threading
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import pytest
@@ -237,3 +238,64 @@ def test_shutdown_saves_pending_edits(
     playlist.add([Track.from_path(make_files(tmp_path / "x", 1)[0])])
     session.shutdown()  # before the auto-save timer fires
     assert len(saved.read_paths("Default")) == 1
+
+
+class SlowSaves(SavedPlaylists):
+    """Background saves of tracks wait for :attr:`release`; every save is recorded.
+
+    (Opening a playlist may also auto-save it while it's still empty, depending on how
+    quickly it loads; those aren't held up, and tests look for the save they expect.)
+    """
+
+    def __init__(self, directory: Path) -> None:
+        super().__init__(directory)
+        self.saves: list[tuple[bool, int]] = []  # (on the main thread, how many tracks)
+        self.release = threading.Event()
+
+    def save(self, name: str, tracks: Sequence[Track]) -> None:
+        on_main = threading.current_thread() is threading.main_thread()
+        self.saves.append((on_main, len(tracks)))
+        if tracks and not on_main:
+            self.release.wait(5)
+        super().save(name, tracks)
+
+
+def test_auto_saves_are_written_off_the_main_thread(
+    playlist: Playlist,
+    loader: BackgroundTrackLoader,
+    bus: EventBus,
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    saved = SlowSaves(tmp_path / "playlists")
+    session = session_for(playlist, saved, loader, bus, settings)
+    session.start()
+    wait_until(lambda: loaded(session))
+    playlist.add([Track.from_path(f) for f in make_files(tmp_path / "add", 3)])
+    # The auto-save of the three tracks is under way on another thread, and the main
+    # thread (the window) carried on meanwhile.
+    wait_until(lambda: (False, 3) in saved.saves)
+    assert saved.read_paths("Default") == []
+    saved.release.set()
+    session.wait_for_saves()
+    assert len(saved.read_paths("Default")) == 3
+
+
+def test_deleting_waits_for_a_pending_auto_save(
+    playlist: Playlist,
+    loader: BackgroundTrackLoader,
+    bus: EventBus,
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    saved = SlowSaves(tmp_path / "playlists")
+    session = session_for(playlist, saved, loader, bus, settings)
+    session.start()
+    session.new("Doomed")
+    wait_until(lambda: loaded(session))
+    playlist.add([Track.from_path(f) for f in make_files(tmp_path / "add", 1)])
+    wait_until(lambda: (False, 1) in saved.saves)  # the auto-save is under way
+    threading.Timer(0.1, saved.release.set).start()
+    session.delete()
+    session.wait_for_saves()
+    assert saved.names() == ["Default"]  # not brought back by the late auto-save

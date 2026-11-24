@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, QTimer
-from PySide6.QtGui import QColor, QFont, QPainter, QPaintEvent
+from PySide6.QtGui import QColor, QFont, QHideEvent, QPainter, QPaintEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 SEPARATOR = "  ***  "
@@ -40,8 +40,7 @@ class MarqueeLabel(QWidget):
         self.setFixedHeight(self.fontMetrics().height() + 2)
         self._timer = QTimer(self)
         self._timer.setInterval(40)
-        self._timer.timeout.connect(self._tick)
-        self._timer.start()
+        self._timer.timeout.connect(self._tick)  # runs only while scrolling (_sync_timer)
 
     def text(self) -> str:
         return self._text
@@ -51,6 +50,7 @@ class MarqueeLabel(QWidget):
             self._text = text
             self._offset = 0
             self.update()
+            self._sync_timer()
 
     def sizeHint(self) -> QSize:
         return QSize(150, self.fontMetrics().height() + 2)
@@ -65,6 +65,27 @@ class MarqueeLabel(QWidget):
         if self._needs_scroll():
             self._offset = (self._offset + 1) % max(self._cycle_width(), 1)
             self.update()
+
+    def _sync_timer(self) -> None:
+        """Scroll only when it's needed and someone can see it."""
+        if self.isVisible() and self._needs_scroll():
+            if not self._timer.isActive():
+                self._timer.start()
+        else:
+            self._timer.stop()
+            self._offset = 0
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._sync_timer()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        super().hideEvent(event)
+        self._sync_timer()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._sync_timer()
 
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)

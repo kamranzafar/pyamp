@@ -33,14 +33,33 @@ from pyamp.ui.skin import Skin
 MAX_MATCHES = 500
 
 
-def matches(tracks: Sequence[Track], query: str) -> list[int]:
-    """Indices of tracks whose title or file name contains every word of ``query``."""
+def search_text(track: Track) -> str:
+    """What a search looks in: the title (with artist) and the file name, case-folded."""
+    return f"{track.display_title} {track.name}".casefold()
+
+
+def matches(
+    tracks: Sequence[Track],
+    query: str,
+    *,
+    limit: int | None = None,
+    texts: Sequence[str] | None = None,
+) -> list[int]:
+    """Indices of tracks whose title or file name contains every word of ``query``.
+
+    Stops after ``limit`` matches. ``texts`` are the tracks' :func:`search_text`, if
+    already worked out (worth it when searching the same tracks on every keystroke).
+    """
     words = query.casefold().split()
+    if not words:
+        return list(range(len(tracks) if limit is None else min(limit, len(tracks))))
     found = []
-    for index, track in enumerate(tracks):
-        haystack = f"{track.display_title} {track.name}".casefold()
+    haystacks = texts if texts is not None else map(search_text, tracks)
+    for index, haystack in enumerate(haystacks):
         if all(word in haystack for word in words):
             found.append(index)
+            if len(found) == limit:
+                break
     return found
 
 
@@ -52,6 +71,7 @@ class JumpDialog(QDialog):
     def __init__(self, tracks: Sequence[Track], skin: Skin, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._tracks = tracks
+        self._texts: list[str] | None = None  # worked out on the first search
         self.setWindowTitle("Jump to Track")
         self.setStyleSheet(skin.stylesheet() + f"QDialog {{ background: {skin.window}; }}")
         self.resize(420, 360)
@@ -75,7 +95,9 @@ class JumpDialog(QDialog):
 
     def _refresh(self, text: str) -> None:
         self.results.clear()
-        for index in matches(self._tracks, text)[:MAX_MATCHES]:
+        if text.strip() and self._texts is None:
+            self._texts = [search_text(t) for t in self._tracks]
+        for index in matches(self._tracks, text, limit=MAX_MATCHES, texts=self._texts):
             item = QListWidgetItem(f"{index + 1}. {self._tracks[index].display_title}")
             item.setData(Qt.ItemDataRole.UserRole, index)
             self.results.addItem(item)

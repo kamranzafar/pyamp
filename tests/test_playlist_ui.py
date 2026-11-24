@@ -34,7 +34,7 @@ from pyamp.audio import registry
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.models import Track
 from pyamp.library.saved_playlists import SavedPlaylists
-from pyamp.ui.jump_dialog import matches
+from pyamp.ui.jump_dialog import matches, search_text
 from pyamp.ui.playlist_model import ROWS_MIME
 from tests.conftest import FakeBackend
 from tests.test_background_loader import make_files, wait_until
@@ -204,6 +204,10 @@ def test_matches_need_every_word() -> None:
     assert matches(tracks, "band TRAIN") == [2]
     assert matches(tracks, "01-intro") == [0]  # file names count too
     assert matches(tracks, "") == [0, 1, 2]
+    assert matches(tracks, "", limit=2) == [0, 1]
+    assert matches(tracks, "a", limit=1) == [0]  # stops at the first match
+    texts = [search_text(t) for t in tracks]
+    assert matches(tracks, "band TRAIN", texts=texts) == [2]
 
 
 def test_jump_dialog_plays_the_chosen_track(app: Application, tmp_path: Path) -> None:

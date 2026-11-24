@@ -345,6 +345,13 @@ progressively and playback starts with the first batch. Jobs can be cancelled
 The playlist model applies appends as incremental `beginInsertRows`, so the
 main-thread cost per batch stays constant regardless of playlist size.
 
+Auto-saves of the open playlist are written by `ui/playlist_session.py` on a single
+writer thread, from a snapshot of the (immutable) tracks; anything else that touches
+the playlist files (switching, renaming, deleting, quitting) waits for it first.
+
+The visualiser only works while the window can be seen: hiding or minimising it pauses
+the FFT and, on the `mpv` backend, the second decoding of the playing file.
+
 libmpv reports events on its own thread. `audio/mpv_backend.py` only records
 state there and emits signals on a main-thread `QObject`, so the player never
 sees a call from mpv's thread.

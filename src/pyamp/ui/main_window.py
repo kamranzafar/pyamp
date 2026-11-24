@@ -26,13 +26,15 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
     QDragEnterEvent,
     QDropEvent,
+    QHideEvent,
     QKeySequence,
+    QShowEvent,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -103,8 +105,13 @@ class UiServices:
 
 
 class MainWindow(QMainWindow):
+    #: Whether the window can be seen (shown and not minimised); the visualiser pauses
+    #: its work while it can't.
+    visibility_changed = Signal(bool)
+
     def __init__(self, services: UiServices, skin: Skin) -> None:
         super().__init__()
+        self._seen = False
         self._s = services
         self._skin = skin
         self._equalizer_window: EqualizerWindow | None = None
@@ -582,6 +589,29 @@ class MainWindow(QMainWindow):
         # macOS reports a Dock icon click as the app becoming active, even if it already was.
         if state == Qt.ApplicationState.ApplicationActive and self._hidden_by_close:
             self.show_and_raise()
+
+    @property
+    def seen(self) -> bool:
+        return self._seen
+
+    def _sync_seen(self) -> None:
+        seen = self.isVisible() and not self.isMinimized()
+        if seen != self._seen:
+            self._seen = seen
+            self.visibility_changed.emit(seen)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._sync_seen()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        super().hideEvent(event)
+        self._sync_seen()
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._sync_seen()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._s.settings.show_remaining_time = self._lcd.show_remaining

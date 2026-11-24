@@ -26,7 +26,7 @@ from collections.abc import Sequence
 
 import numpy as np
 from PySide6.QtCore import QRectF, QSize, QTimer
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPaintEvent
+from PySide6.QtGui import QColor, QHideEvent, QLinearGradient, QPainter, QPaintEvent, QShowEvent
 from PySide6.QtWidgets import QWidget
 
 from pyamp.ui.skin import Skin
@@ -54,11 +54,25 @@ class SpectrumWidget(QWidget):
         self.setMinimumHeight(32)
         self._timer = QTimer(self)
         self._timer.setInterval(FRAME_MS)
-        self._timer.timeout.connect(self._animate)
-        self._timer.start()
+        self._timer.timeout.connect(self._animate)  # runs only while bars move
 
     def set_levels(self, levels: Sequence[float]) -> None:
         self._target = np.asarray(levels, dtype=float)
+        if self.isVisible() and not self._timer.isActive() and self._target.any():
+            self._timer.start()
+
+    @property
+    def animating(self) -> bool:
+        return self._timer.isActive()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._target.any() or self._bars.any() or self._peaks.any():
+            self._timer.start()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        super().hideEvent(event)
+        self._timer.stop()
 
     def sizeHint(self) -> QSize:
         return QSize(len(self._bars) * 5, 40)
@@ -70,6 +84,8 @@ class SpectrumWidget(QWidget):
         self._hold = np.where(rising, PEAK_HOLD_FRAMES, self._hold - 1)
         peaks = np.where(self._hold <= 0, np.maximum(bars, peaks - PEAK_FALL), peaks)
         if np.array_equal(bars, self._bars) and np.array_equal(peaks, self._peaks):
+            if not (bars.any() or peaks.any()):
+                self._timer.stop()  # all fallen to zero: nothing to animate until new levels
             return  # nothing moved; skip the repaint
         self._bars, self._peaks = bars, peaks
         self.update()

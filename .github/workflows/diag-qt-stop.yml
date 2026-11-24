@@ -27,20 +27,20 @@ jobs:
           pulseaudio --start --exit-idle-time=-1
       - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync --locked
-      - name: Run the stop() test 40 times
+      - name: Run the whole Qt backend test file 30 times
         shell: bash
         run: |
           hangs=0
-          for i in $(seq 1 40); do
-            if ! uv run pytest -q -s -p no:cacheprovider \
-                "tests/test_qt_backend.py::test_pause_resume_and_seek" > run.log 2>&1; then
+          for i in $(seq 1 30); do
+            if ! uv run pytest -q -s -p no:cacheprovider -o faulthandler_timeout=60 \
+                -o faulthandler_exit_on_timeout=true tests/test_qt_backend.py > run.log 2>&1; then
               hangs=$((hangs + 1))
               echo "::group::run $i FAILED: last 400 lines"
               tail -n 400 run.log
               echo "::endgroup::"
             fi
           done
-          echo "hangs: $hangs of 40"
+          echo "hangs: $hangs of 30"
           echo "::group::a passing run's log, for comparison"
-          uv run pytest -q -s -p no:cacheprovider "tests/test_qt_backend.py::test_pause_resume_and_seek" 2>&1 | tail -n 200
+          uv run pytest -q -s -p no:cacheprovider tests/test_qt_backend.py 2>&1 | tail -n 200
           echo "::endgroup::"

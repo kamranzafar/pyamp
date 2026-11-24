@@ -23,8 +23,14 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends libegl1 libgl1 libxkbcommon0 \
-            libfontconfig1 libdbus-1-3 libglib2.0-0 libpulse0 dbus pulseaudio >/dev/null
+            libfontconfig1 libdbus-1-3 libglib2.0-0 libpulse0 dbus pulseaudio libmpv2 >/dev/null
           pulseaudio --start --exit-idle-time=-1
+      - name: libmpv (macOS), as in CI
+        if: runner.os == 'macOS'
+        run: brew install mpv
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
       - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync --locked
       - name: Qt backend file with coverage (x30), then the full suite with coverage (x10)

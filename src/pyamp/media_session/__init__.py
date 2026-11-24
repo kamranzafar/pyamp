@@ -21,7 +21,8 @@
 """Integration with the operating system's media controls.
 
 Media keys, headphone buttons and system "Now Playing" widgets (macOS Control
-Center, MPRIS clients on Linux) show the current track and control playback.
+Center, MPRIS clients on Linux, the Windows media flyout) show the current track
+and control playback.
 Platform modules are imported lazily, so their dependencies only matter on the
 platform that uses them.
 """
@@ -30,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Callable
 
 from pyamp.media_session.session import (
     MediaCommands,
@@ -49,10 +51,19 @@ __all__ = [
 ]
 
 
+def _no_window() -> int | None:
+    return None
+
+
 def create_adapter(
-    commands: MediaCommands, platform: str = sys.platform
+    commands: MediaCommands,
+    platform: str = sys.platform,
+    window_handle: Callable[[], int | None] = _no_window,
 ) -> MediaSessionAdapter | None:
-    """The adapter for this platform, or ``None`` if it has no supported integration."""
+    """The adapter for this platform, or ``None`` if it has no supported integration.
+
+    ``window_handle`` gives the main window's native handle (Windows needs it).
+    """
     if platform == "darwin":
         from pyamp.media_session.macos import MacNowPlayingAdapter  # noqa: PLC0415
 
@@ -61,5 +72,9 @@ def create_adapter(
         from pyamp.media_session.mpris import MprisAdapter  # noqa: PLC0415
 
         return MprisAdapter.connect(commands)
+    if platform == "win32":
+        from pyamp.media_session.windows import WindowsMediaAdapter  # noqa: PLC0415
+
+        return WindowsMediaAdapter.connect(commands, window_handle())
     log.info("No media session integration for platform %r", platform)
     return None

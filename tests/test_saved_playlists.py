@@ -24,7 +24,13 @@ from pathlib import Path
 import pytest
 
 from pyamp.core.models import Track
-from pyamp.library.saved_playlists import PlaylistNameError, SavedPlaylists, validate_name
+from pyamp.library.saved_playlists import (
+    LOCK_RETRY_S,
+    PlaylistNameError,
+    SavedPlaylists,
+    retry_while_locked,
+    validate_name,
+)
 
 
 @pytest.fixture
@@ -128,3 +134,44 @@ def test_valid_names_are_trimmed() -> None:
     assert validate_name("  Road trip 2026 ") == "Road trip 2026"
     name = "Caf\N{LATIN SMALL LETTER E WITH ACUTE} \N{EN DASH} \N{EIGHTH NOTE}"
     assert validate_name(name) == name  # Unicode is fine
+
+
+# -- Windows: files open elsewhere ------------------------------------------------------ #
+
+
+def test_retries_while_windows_reports_the_file_in_use() -> None:
+    calls: list[int] = []
+    sleeps: list[float] = []
+
+    def busy_twice() -> str:
+        calls.append(1)
+        if len(calls) < 3:
+            raise PermissionError(32, "The process cannot access the file")
+        return "done"
+
+    assert retry_while_locked(busy_twice, platform="win32", sleep=sleeps.append) == "done"
+    assert len(calls) == 3
+    assert len(sleeps) == 2
+
+
+def test_gives_up_after_about_a_second() -> None:
+    sleeps: list[float] = []
+
+    def always_busy() -> None:
+        raise PermissionError(32, "in use")
+
+    with pytest.raises(PermissionError):
+        retry_while_locked(always_busy, platform="win32", sleep=sleeps.append)
+    assert sum(sleeps) == pytest.approx(LOCK_RETRY_S, abs=0.1)
+
+
+def test_no_retries_elsewhere() -> None:
+    calls: list[int] = []
+
+    def denied() -> None:
+        calls.append(1)
+        raise PermissionError(13, "Permission denied")  # a real permission problem
+
+    with pytest.raises(PermissionError):
+        retry_while_locked(denied, platform="darwin", sleep=lambda _: None)
+    assert calls == [1]

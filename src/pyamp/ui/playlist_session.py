@@ -142,6 +142,7 @@ class PlaylistSession(QObject):
         names = self._saved.names()
         index = next(i for i, n in enumerate(names) if n.casefold() == self._active.casefold())
         self._autosave.stop()
+        self._loader.cancel_all()  # stop reading the file before it goes
         self._saved.delete(self._active)
         self._active = None  # nothing left to save it to
         remaining = self._saved.names()

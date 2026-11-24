@@ -190,10 +190,14 @@ class TrackAnalyser(QObject):
             self._enqueue.emit(timeline)
         return timeline
 
-    def shutdown(self) -> None:
+    def cancel_all(self) -> None:
+        """Stop analysing (whatever was being analysed starts afresh next time)."""
         for timeline in self._timelines.values():
             timeline.cancelled.set()
         self._timelines.clear()
+
+    def shutdown(self) -> None:
+        self.cancel_all()
         self._thread.quit()
         self._thread.wait(3000)
 
@@ -231,6 +235,8 @@ class AnalysedSpectrum(QObject):
         self._band_count = band_count
         self._clock = clock
         self._timeline: LevelTimeline | None = None
+        self._location: Path | None = None  # the current file, analysed while active
+        self._active = True
         self._playing = False
         self._position_ms = 0
         self._position_at = clock()
@@ -260,6 +266,24 @@ class AnalysedSpectrum(QObject):
             levels = np.clip(row + self._offsets, 0.0, 1.0)
             self._bus.publish(SpectrumUpdated(tuple(float(v) for v in levels)))
 
+    def set_active(self, active: bool) -> None:
+        """Pause analysing and publishing (e.g. while nothing shows the visualiser).
+
+        Decoding a whole file a second time is the costly part; it stops at once and
+        restarts for the current file on resuming.
+        """
+        if active == self._active:
+            return
+        self._active = active
+        if active:
+            self._analyse_current()
+            if self._playing:
+                self._timer.start()
+        else:
+            self._timer.stop()
+            self._analyser.cancel_all()
+            self._timeline = None
+
     def shutdown(self) -> None:
         self._timer.stop()
 
@@ -267,14 +291,19 @@ class AnalysedSpectrum(QObject):
         # Streams aren't analysed: a live stream has no end, and fetching it twice wastes
         # bandwidth (the Qt backend taps the PCM it plays instead).
         location = event.track.location if event.track else None
-        self._timeline = self._analyser.analyse(location) if isinstance(location, Path) else None
+        self._location = location if isinstance(location, Path) else None
+        self._analyse_current()
         self._position_ms, self._position_at = 0, self._clock()
+
+    def _analyse_current(self) -> None:
+        location = self._location if self._active else None
+        self._timeline = self._analyser.analyse(location) if location is not None else None
 
     def _on_state(self, event: PlaybackStateChanged) -> None:
         # Freeze the interpolated position at the moment the state changes.
         self._position_ms, self._position_at = round(self.position() * 1000), self._clock()
         self._playing = event.state is PlaybackState.PLAYING
-        if self._playing:
+        if self._playing and self._active:
             self._timer.start()
         else:
             self._timer.stop()  # SpectrumService already clears the bars

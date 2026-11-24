@@ -62,3 +62,17 @@ def test_service_publishes_levels(bus: EventBus) -> None:
     bus.publish(AudioFrame(sine(440), RATE))
     assert len(updates) == 1
     assert len(updates[0].levels) == service.band_count == 8
+
+
+def test_service_pauses_while_inactive(bus: EventBus) -> None:
+    service = SpectrumService(bus, SpectrumAnalyzer(band_count=8, fft_size=256))
+    published: list[SpectrumUpdated] = []
+    bus.subscribe(SpectrumUpdated, published.append)
+    loud = np.sin(np.arange(256) / 3).astype(np.float32)
+    service.set_active(False)
+    assert published == [SpectrumUpdated((0.0,) * 8)]  # bars drop at once
+    bus.publish(AudioFrame(loud, 44_100))
+    assert len(published) == 1  # no analysis while nobody can see it
+    service.set_active(True)
+    bus.publish(AudioFrame(loud, 44_100))
+    assert any(published[-1].levels)

@@ -166,6 +166,9 @@ class FakeAnalyser:
         self.requested.append(path)
         return self.timeline
 
+    def cancel_all(self) -> None:
+        self.requested.append(Path("cancelled"))
+
 
 class Clock:
     def __init__(self) -> None:
@@ -244,6 +247,29 @@ def test_new_track_is_analysed(
     assert service.timeline is ramp
     bus.publish(TrackChanged(None, None))
     assert service.timeline is None
+    service.shutdown()
+
+
+def test_paused_while_nobody_can_see_it(
+    qt_app: QCoreApplication, bus: EventBus, ramp: LevelTimeline
+) -> None:
+    analyser = FakeAnalyser(ramp)
+    service = AnalysedSpectrum(bus, analyser, BANDS)  # type: ignore[arg-type]
+    published: list[SpectrumUpdated] = []
+    bus.subscribe(SpectrumUpdated, published.append)
+    bus.publish(TrackChanged(Track.from_path(Path("/m/one.mp3")), 0))
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+
+    service.set_active(False)  # the window was hidden
+    assert analyser.requested == [Path("/m/one.mp3"), Path("cancelled")]
+    bus.publish(TrackChanged(Track.from_path(Path("/m/two.mp3")), 1))
+    service.tick()
+    assert published == []
+    assert analyser.requested[-1] == Path("cancelled")  # the new track isn't decoded
+
+    service.set_active(True)  # shown again: analyse the track that's playing now
+    assert analyser.requested[-1] == Path("/m/two.mp3")
+    assert service.timeline is ramp
     service.shutdown()
 
 

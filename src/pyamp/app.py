@@ -181,6 +181,7 @@ class Application:
             ),
             DEFAULT_SKIN,
         )
+        self.window.visibility_changed.connect(self._set_visualiser_active)
         # Restore preferences *after* the UI exists, so widgets receive the events.
         self._apply_settings(self.settings)
         if not args.no_plugins:
@@ -213,6 +214,12 @@ class Application:
             self.analysed_spectrum.shutdown()
             self.track_analyser.shutdown()
         self.player.shutdown()
+
+    def _set_visualiser_active(self, seen: bool) -> None:
+        """The visualiser only works while the window can be seen (saves battery)."""
+        self.spectrum.set_active(seen)
+        if self.analysed_spectrum is not None:
+            self.analysed_spectrum.set_active(seen)
 
     def _window_handle(self) -> int | None:
         """The main window's native handle (plugins are loaded after the window exists)."""

@@ -114,6 +114,7 @@ class SpectrumService:
     def __init__(self, bus: EventBus, analyzer: SpectrumAnalyzer | None = None) -> None:
         self._bus = bus
         self._analyzer = analyzer or SpectrumAnalyzer()
+        self._active = True
         bus.subscribe(AudioFrame, self._on_frame)
         bus.subscribe(PlaybackStateChanged, self._on_state)
 
@@ -121,11 +122,24 @@ class SpectrumService:
     def band_count(self) -> int:
         return self._analyzer.band_count
 
+    def set_active(self, active: bool) -> None:
+        """Pause the analysis (e.g. while nothing shows it); the bars drop to zero."""
+        if active == self._active:
+            return
+        self._active = active
+        if not active:
+            self._clear()
+
     def _on_frame(self, event: AudioFrame) -> None:
+        if not self._active:
+            return
         levels = self._analyzer.analyze(event.samples, event.sample_rate)
         self._bus.publish(SpectrumUpdated(tuple(levels.tolist())))
 
     def _on_state(self, event: PlaybackStateChanged) -> None:
         if event.state is not PlaybackState.PLAYING:
-            self._analyzer.reset()
-            self._bus.publish(SpectrumUpdated((0.0,) * self._analyzer.band_count))
+            self._clear()
+
+    def _clear(self) -> None:
+        self._analyzer.reset()
+        self._bus.publish(SpectrumUpdated((0.0,) * self._analyzer.band_count))

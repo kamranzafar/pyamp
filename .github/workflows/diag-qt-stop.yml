@@ -27,20 +27,23 @@ jobs:
           pulseaudio --start --exit-idle-time=-1
       - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync --locked
-      - name: Run the whole Qt backend test file 30 times
+      - name: Qt backend file with coverage (x30), then the full suite with coverage (x10)
         shell: bash
         run: |
-          hangs=0
-          for i in $(seq 1 30); do
-            if ! uv run pytest -q -s -p no:cacheprovider -o faulthandler_timeout=60 \
-                -o faulthandler_exit_on_timeout=true tests/test_qt_backend.py > run.log 2>&1; then
-              hangs=$((hangs + 1))
-              echo "::group::run $i FAILED: last 400 lines"
-              tail -n 400 run.log
-              echo "::endgroup::"
-            fi
-          done
-          echo "hangs: $hangs of 30"
-          echo "::group::a passing run's log, for comparison"
-          uv run pytest -q -s -p no:cacheprovider tests/test_qt_backend.py 2>&1 | tail -n 200
-          echo "::endgroup::"
+          stress() {  # stress <times> <label> <pytest args...>
+            local times=$1 label=$2; shift 2; local hangs=0
+            for i in $(seq 1 "$times"); do
+              if ! uv run pytest -q -s -p no:cacheprovider -o faulthandler_timeout=60 \
+                  -o faulthandler_exit_on_timeout=true "$@" > run.log 2>&1; then
+                hangs=$((hangs + 1))
+                echo "::group::$label run $i FAILED: last 400 lines"
+                tail -n 400 run.log
+                echo "::endgroup::"
+              fi
+            done
+            echo "hangs ($label): $hangs of $times"
+          }
+          run() { if [ "$RUNNER_OS" = "Linux" ]; then dbus-run-session -- "$@"; else "$@"; fi; }
+          stress 30 "qt file + cov" tests/test_qt_backend.py --cov
+          export -f stress
+          run bash -c 'stress 10 "full suite + cov" --cov'

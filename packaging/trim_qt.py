@@ -9,6 +9,9 @@ Used by the macOS and Windows specs, on the Analysis's ``binaries`` and ``datas`
 * Image format plugins other than SVG (PyAmp's icons are SVG; PNG is built into Qt).
 * The touch-input ("generic") plugin and the "minimal" platform plugin. "offscreen" stays:
   the self-test and CI run the app without a screen.
+* Windows: ``opengl32sw.dll`` (~20 MB), Qt's software OpenGL used only when an app asks
+  for OpenGL without a working GPU driver. PyAmp never uses OpenGL (Widgets drawn by the
+  CPU, audio only, mpv's video off).
 
 Qt's network and TLS pieces stay: Qt Multimedia depends on them (``https://`` streams).
 """
@@ -38,6 +41,7 @@ _UNUSED = re.compile(
             r"/plugins/generic/",
             r"/plugins/platforms/(lib)?qminimal\.",
             r"/plugins/imageformats/(lib)?q(gif|icns|ico|jpeg|macheif|macjp2|tga|tiff|wbmp|webp)\.",
+            r"/opengl32sw\.dll$",
         ]
     )
 )

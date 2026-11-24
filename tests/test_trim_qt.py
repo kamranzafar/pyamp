@@ -55,6 +55,7 @@ WIN_PLUGINS = "PySide6/plugins"
         "PySide6\\Qt6QmlModels.dll",
         f"{WIN_PLUGINS}\\platforminputcontexts\\qtvirtualkeyboardplugin.dll".replace("/", "\\"),
         f"{WIN_PLUGINS}/imageformats/qwebp.dll",
+        "PySide6\\opengl32sw.dll",
     ],
 )
 def test_leaves_out_what_pyamp_never_uses(dest: str) -> None:

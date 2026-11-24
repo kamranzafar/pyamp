@@ -59,3 +59,28 @@ jobs:
           name: PyAmp-macos-${{ matrix.arch }}
           path: dist/*.dmg
           if-no-files-found: error
+
+  release:
+    name: Attach to the GitHub Release
+    # Only for version tags (v*), once the app is built and self-tested.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: app
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Shared with the Windows workflow: one at a time, so only the first creates the draft.
+    concurrency:
+      group: github-release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: PyAmp-macos-*
+          path: dist
+          merge-multiple: true
+      - name: Attach to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: packaging/publish_release.sh "$GITHUB_REF_NAME" dist/*.dmg

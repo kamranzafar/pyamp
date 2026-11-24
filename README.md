@@ -21,27 +21,34 @@
 ## Installing on macOS
 
 Download `PyAmp-<version>-macos-<arch>.dmg` from the
-[latest *Package (macOS)* workflow run](../../actions/workflows/package-macos.yml)
-(`x86_64` for Intel Macs, `arm64` for Apple Silicon) and drag **PyAmp** to
-Applications. libmpv is bundled, so the `mpv` backend, the equaliser and gapless
-playback work without installing anything else.
+[latest release](../../releases/latest) (`arm64` for Apple Silicon, `x86_64` for
+Intel Macs), open it and drag **PyAmp** to Applications. libmpv is bundled, so the
+`mpv` backend, the equaliser and gapless playback work without installing anything
+else.
 
-The app isn't notarised yet, so the first time macOS will refuse to open it:
-right-click PyAmp → **Open** → **Open**. If something doesn't work, run
+The app isn't notarised yet, so the first time macOS will refuse to open it. Open
+**System Settings → Privacy & Security**, scroll down to the message about PyAmp and
+click **Open Anyway** (on macOS 14 and earlier, right-clicking PyAmp → **Open** also
+works). If something doesn't work, run
 `/Applications/PyAmp.app/Contents/MacOS/PyAmp --self-test` and include the output
 in a bug report.
 
+Builds of every change (not just releases) are attached to the runs of the
+[*Package (macOS)*](../../actions/workflows/package-macos.yml) and
+[*Package (Windows)*](../../actions/workflows/package-windows.yml) workflows (sign in
+to GitHub to download them).
+
 ## Installing on Windows
 
-Download `PyAmp-windows-x86_64` from the
-[latest *Package (Windows)* workflow run](../../actions/workflows/package-windows.yml).
-It contains two files:
+Download one of these from the [latest release](../../releases/latest):
 
-- `PyAmp-<version>-windows-x86_64-setup.exe`: the installer. It installs for your
-  user only (no administrator rights), adds PyAmp to the Start menu and can be
-  removed from **Settings → Apps**.
-- `PyAmp-<version>-windows-x86_64.zip`: the portable version. Unzip it anywhere and
-  run `PyAmp.exe`.
+- **`PyAmp-<version>-windows-x86_64-setup.exe`** (recommended): the installer. It
+  installs for your user only (no administrator rights), adds PyAmp to the Start menu,
+  upgrades an earlier version in place and can be removed from **Settings → Apps**.
+- `PyAmp-<version>-windows-x86_64-portable.zip`: the portable version, e.g. for a USB
+  stick. **Extract it first** (right-click → **Extract All…**), then run `PyAmp.exe`
+  from the extracted folder; it doesn't run from inside the zip. To upgrade, replace
+  the whole folder.
 
 libmpv is bundled, so the `mpv` backend, the equaliser and gapless playback work
 without installing anything else. 64-bit Windows 10 or 11 (on ARM it runs under
@@ -261,6 +268,17 @@ the zip and the installer (`pyamp.iss`). On Windows the app folder has two progr
 `PyAmp.exe`, and `pyamp-console.exe` for `--version`, `--self-test` and diagnostics,
 since a windowed program can't print. Licences of bundled components are listed in
 `packaging/THIRD_PARTY_NOTICES.md`, which ships with the app.
+
+### Making a release
+
+1. Set the new version in `pyproject.toml` and `src/pyamp/__init__.py`, and merge it.
+2. Tag that commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+3. The package workflows build and self-test the apps, then attach the two `.dmg`s,
+   the Windows installer and the portable zip to a **draft** release
+   (`packaging/publish_release.sh`; it refuses files whose version doesn't match the
+   tag).
+4. Review the draft on the Releases page (notes are generated from the merged pull
+   requests) and publish it.
 
 ## Architecture
 

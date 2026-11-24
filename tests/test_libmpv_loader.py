@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import ast
 import ctypes.util
 import os
 from pathlib import Path
@@ -28,6 +29,7 @@ from types import ModuleType
 
 import pytest
 
+import pyamp
 from pyamp.audio import libmpv_loader as loader
 from pyamp.audio.libmpv_loader import ENV_VAR
 
@@ -368,3 +370,22 @@ def test_falls_back_when_the_preferred_one_fails_to_load(own_copy: Path) -> None
 def test_nothing_usable_lists_every_reason(own_copy: Path) -> None:
     with pytest.raises(OSError, match=r"no usable libmpv.*user folder.*broken.*system.*broken"):
         choose(preference="bundled", broken={"own", "system"})
+
+
+def test_no_library_is_looked_up_by_a_literal_name() -> None:
+    """PyInstaller bundles whatever ``find_library("<literal>")`` finds on the build
+    machine (e.g. Homebrew's ffmpeg, ~40 MB the app never uses); look names up through a
+    variable instead. Linux-only libraries are fine: the builds are macOS and Windows."""
+    linux_only = {"pipewire-0.3"}
+    literal_lookups = []
+    for path in Path(pyamp.__file__).parent.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "attr", getattr(node.func, "id", None)) == "find_library"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value not in linux_only
+            ):
+                literal_lookups.append(f"{path.name}:{node.lineno} {node.args[0].value!r}")
+    assert literal_lookups == []

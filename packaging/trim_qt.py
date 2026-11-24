@@ -49,5 +49,14 @@ def is_unused(dest: str) -> bool:
 
 
 def without_unused_qt[T: tuple[str, ...]](toc: Iterable[T]) -> list[T]:
-    """``toc`` (PyInstaller's (dest, source, kind) entries) minus :func:`is_unused` ones."""
-    return [entry for entry in toc if not is_unused(entry[0])]
+    """``toc`` (PyInstaller's (dest, source, kind) entries) minus :func:`is_unused` ones.
+
+    Also drops links to them: PyInstaller links each Qt library at the top of the app
+    (``Contents/Frameworks/QtQuick``), and a link left pointing at nothing makes macOS's
+    signature check (``codesign --verify --strict``) fail.
+    """
+    return [
+        entry
+        for entry in toc
+        if not is_unused(entry[0]) and not (entry[2] == "SYMLINK" and is_unused(entry[1]))
+    ]

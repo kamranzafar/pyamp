@@ -97,3 +97,12 @@ def test_filters_pyinstaller_entries() -> None:
         (f"{MAC_QT}/QtCore.framework/Versions/A/QtCore", "/src/QtCore", "BINARY"),
     ]
     assert trim_qt.without_unused_qt(toc) == toc[1:]
+
+
+def test_drops_links_to_what_it_leaves_out() -> None:
+    # PyInstaller links each Qt library at the top of the app; a dangling link fails
+    # macOS's signature check.
+    quick = f"{MAC_QT}/QtQuick.framework/Versions/A/QtQuick"
+    core = f"{MAC_QT}/QtCore.framework/Versions/A/QtCore"
+    toc = [("QtQuick", quick, "SYMLINK"), ("QtCore", core, "SYMLINK")]
+    assert trim_qt.without_unused_qt(toc) == toc[1:]

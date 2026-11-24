@@ -29,9 +29,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pytest
-from numpy.typing import NDArray
 from PySide6.QtCore import QCoreApplication
 
 from pyamp.core.equalizer import Equalizer
@@ -39,50 +37,12 @@ from pyamp.core.events import EventBus, PlaybackStateChanged, TrackChanged
 from pyamp.core.models import PlaybackState, ReplayGainMode, Track
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
+from tests.conftest import BackendRecorder as Recorder
 
 try:
     from pyamp.audio.mpv_backend import EQ_LABEL, MpvAudioBackend, equalizer_graph
 except OSError as exc:  # no libmpv on this machine
     pytest.skip(f"libmpv not available: {exc}", allow_module_level=True)
-
-
-class Recorder:
-    """A BackendListener that records every callback and the thread it ran on."""
-
-    def __init__(self) -> None:
-        self.events: list[tuple[str, object]] = []
-        self.threads: set[int] = set()
-
-    def _record(self, name: str, value: object = None) -> None:
-        self.threads.add(threading.get_ident())
-        self.events.append((name, value))
-
-    def names(self) -> list[str]:
-        return [name for name, _ in self.events]
-
-    def values(self, name: str) -> list[object]:
-        return [value for n, value in self.events if n == name]
-
-    def on_state_changed(self, state: PlaybackState) -> None:
-        self._record("state", state)
-
-    def on_position_changed(self, position_ms: int) -> None:
-        self._record("position", position_ms)
-
-    def on_duration_changed(self, duration_ms: int) -> None:
-        self._record("duration", duration_ms)
-
-    def on_end_of_track(self) -> None:
-        self._record("end")
-
-    def on_track_advanced(self, path: Path) -> None:
-        self._record("advanced", path)
-
-    def on_error(self, message: str) -> None:
-        self._record("error", message)
-
-    def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
-        self._record("audio")
 
 
 def wait_until(condition: Callable[[], bool], timeout: float = 10.0) -> None:

@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -160,3 +161,42 @@ def player(backend: FakeBackend, playlist: Playlist, bus: EventBus) -> Player:
 def qt_app() -> Iterator[QCoreApplication]:
     """A Qt application object, needed for signals, threads and widgets (offscreen)."""
     yield QApplication.instance() or QApplication([])
+
+
+class BackendRecorder:
+    """A BackendListener that records every callback and the thread it ran on."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, object]] = []
+        self.threads: set[int] = set()
+
+    def _record(self, name: str, value: object = None) -> None:
+        self.threads.add(threading.get_ident())
+        self.events.append((name, value))
+
+    def names(self) -> list[str]:
+        return [name for name, _ in self.events]
+
+    def values(self, name: str) -> list[object]:
+        return [value for n, value in self.events if n == name]
+
+    def on_state_changed(self, state: PlaybackState) -> None:
+        self._record("state", state)
+
+    def on_position_changed(self, position_ms: int) -> None:
+        self._record("position", position_ms)
+
+    def on_duration_changed(self, duration_ms: int) -> None:
+        self._record("duration", duration_ms)
+
+    def on_end_of_track(self) -> None:
+        self._record("end")
+
+    def on_track_advanced(self, path: Path) -> None:
+        self._record("advanced", path)
+
+    def on_error(self, message: str) -> None:
+        self._record("error", message)
+
+    def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
+        self._record("audio")

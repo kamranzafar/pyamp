@@ -8,11 +8,15 @@ PYAMP_NOTICES         THIRD_PARTY_NOTICES.md to put in Contents/Resources
 """
 
 import os
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 import pyamp
+
+sys.path.insert(0, str(Path(SPECPATH).resolve().parent))  # noqa: F821  (packaging/)
+from trim_qt import without_unused_qt  # noqa: E402
 
 ROOT = Path(SPECPATH).resolve().parents[1]  # noqa: F821  (SPECPATH is set by PyInstaller)
 LIBMPV = Path(os.environ["PYAMP_BUNDLE_LIBMPV"])
@@ -45,6 +49,10 @@ a = Analysis(  # noqa: F821
     excludes=["jeepney", "tkinter", "pytest"],  # jeepney is Linux-only (MPRIS)
     noarchive=False,
 )
+# Leave out the parts of Qt PyAmp never uses (see packaging/trim_qt.py).
+a.binaries = without_unused_qt(a.binaries)
+a.datas = without_unused_qt(a.datas)
+
 pyz = PYZ(a.pure)  # noqa: F821
 
 exe = EXE(  # noqa: F821

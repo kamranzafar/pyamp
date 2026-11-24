@@ -198,7 +198,21 @@ def check_track_analysis() -> str:
     return f"{len(timeline.rows)} rows, 1 kHz in band {loudest}"
 
 
+def check_icons() -> str:
+    """PyAmp's icons are SVGs: drawing them needs Qt's SVG plugins (kept in the builds)."""
+    from pyamp.ui.icons import app_icon, menubar_icon  # noqa: PLC0415
+
+    for name, icon in (("app", app_icon()), ("menu bar", menubar_icon())):
+        image = icon.pixmap(64, 64).toImage()
+        if image.isNull() or all(
+            image.pixelColor(x, y).alpha() == 0 for x in range(0, 64, 4) for y in range(0, 64, 4)
+        ):
+            raise RuntimeError(f"the {name} icon didn't draw (is Qt's SVG support missing?)")
+    return "app and menu bar icons drawn"
+
+
 CHECKS: Sequence[tuple[str, Check]] = (
+    ("icons", check_icons),
     ("libmpv", check_libmpv),
     ("qt backend", check_qt_backend),
     ("mpv playback", check_mpv_playback),

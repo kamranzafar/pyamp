@@ -125,6 +125,10 @@ class AudioBackend(ABC):
     def set_listener(self, listener: BackendListener) -> None:
         self._listener = listener
 
+    def detach_listener(self) -> None:
+        """Stop reporting to the listener (e.g. once closed, for callbacks still queued)."""
+        self._listener = _NullListener()
+
     @abstractmethod
     def load(self, location: Location) -> None:
         """Prepare a file or stream for playback, replacing the current source."""

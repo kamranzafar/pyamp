@@ -277,6 +277,9 @@ class MpvAudioBackend(AudioBackend):
 
     def close(self) -> None:
         self._closed = True
+        # Events mpv reported just before closing may still be queued for the main thread;
+        # delivered now they'd make the player call into an mpv that's gone (a crash).
+        self.detach_listener()
         self._mpv.terminate()
 
     def report_audio_info(self) -> None:

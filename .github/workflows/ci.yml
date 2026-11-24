@@ -62,9 +62,15 @@ jobs:
         # Gives QtMultimedia an output device ("Dummy Output"), so the Qt backend's
         # playback tests run instead of skipping.
         if: runner.os == 'Linux'
+        # PulseAudio suspends an idle output after a few seconds. Paused in a test, Qt's
+        # FFmpeg backend then didn't restart audio on resume and QMediaPlayer.stop() hung
+        # (CI log: "Sink #0 State: SUSPENDED", then "Free audio output" and no new one).
+        # Keep the dummy output awake.
         run: |
           pulseaudio --start --exit-idle-time=-1
+          pactl unload-module module-suspend-on-idle || echo "suspend-on-idle wasn't loaded"
           pactl info | grep -E "Server Name|Default Sink"
+          pactl list short modules | grep -c suspend-on-idle || true  # 0: unloaded
       - name: Qt backend tests, with Qt Multimedia's debug log
         # QMediaPlayer.stop() has hung a few times on CI (virtual audio devices). These tests
         # run only here, uncaptured, so Qt's log survives a hang and shows which step blocks.

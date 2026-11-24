@@ -20,6 +20,10 @@ dependencies = [
     "pyside6-addons>=6.8",      # QtMultimedia (QAudioBufferOutput needs Qt >= 6.8)
     "pyside6-essentials>=6.8",  # QtCore / QtGui / QtWidgets
     "jeepney>=0.8 ; sys_platform == 'linux'",
+    # Windows media controls (SMTC): media keys, volume flyout, lock screen.
+    "winrt-runtime>=4.2 ; sys_platform == 'win32'",
+    "winrt-Windows.Media>=4!10.0.28000 ; sys_platform == 'win32'",
+    "winrt-Windows.Media.Interop>=4.0 ; sys_platform == 'win32'",
     "mpv>=1.0.7",
 ]
 
@@ -82,8 +86,9 @@ module = ["mutagen", "mutagen.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# pyobjc, jeepney and python-mpv ship no type information.
-module = ["MediaPlayer", "jeepney", "jeepney.*", "mpv"]
+# pyobjc, jeepney and python-mpv ship no type information; winrt is only installed on
+# Windows (and type-checked there by its own stubs).
+module = ["MediaPlayer", "jeepney", "jeepney.*", "mpv", "winrt", "winrt.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

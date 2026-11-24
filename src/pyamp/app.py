@@ -150,7 +150,9 @@ class Application:
         self.loader = BackgroundTrackLoader(
             TrackLoader(MutagenMetadataReader(), self.playlist_formats)
         )
-        self.plugins = PluginManager(PluginContext(self.bus, self.player, self.playlist))
+        self.plugins = PluginManager(
+            PluginContext(self.bus, self.player, self.playlist, window_handle=self._window_handle)
+        )
         self.playlists = PlaylistSession(
             self.playlist,
             saved_playlists or SavedPlaylists(),
@@ -205,6 +207,11 @@ class Application:
             self.analysed_spectrum.shutdown()
             self.track_analyser.shutdown()
         self.player.shutdown()
+
+    def _window_handle(self) -> int | None:
+        """The main window's native handle (plugins are loaded after the window exists)."""
+        window = getattr(self, "window", None)
+        return int(window.winId()) if window is not None else None
 
     def _create_backend(self, requested: str | None) -> AudioBackend:
         """Create the requested backend and remember its name, so ``--backend`` sticks."""

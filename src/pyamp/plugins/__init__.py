@@ -31,7 +31,7 @@ and playlist, which is everything needed to build scrobblers, notifications,
 remote controls, extra backends, and so on.
 """
 
-from pyamp.plugins.base import Plugin, PluginContext
+from pyamp.plugins.base import Plugin, PluginContext, PluginUi
 from pyamp.plugins.manager import PluginManager
 
-__all__ = ["Plugin", "PluginContext", "PluginManager"]
+__all__ = ["Plugin", "PluginContext", "PluginManager", "PluginUi"]

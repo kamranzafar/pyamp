@@ -31,6 +31,22 @@ from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 
 
+class PluginUi(Protocol):
+    """What a plugin may add to the user interface."""
+
+    def add_menu_action(
+        self,
+        menu: str,
+        text: str,
+        triggered: Callable[[], object],
+        shortcut: str | None = None,
+    ) -> None:
+        """Add a menu item, in the menu titled ``menu`` (created before Help if needed)."""
+
+    def dialog_parent(self) -> object:
+        """The widget to parent a plugin's windows and dialogs to (the main window)."""
+
+
 @dataclass(frozen=True, slots=True)
 class PluginContext:
     """The application services a plugin is allowed to use."""
@@ -40,6 +56,8 @@ class PluginContext:
     playlist: Playlist
     #: The main window's native handle (an HWND on Windows), once it exists.
     window_handle: Callable[[], int | None] = field(default=lambda: None)
+    #: The user interface, once it exists (None when running without one).
+    ui: Callable[[], PluginUi | None] = field(default=lambda: None)
 
 
 @runtime_checkable

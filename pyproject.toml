@@ -88,8 +88,10 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# A test that hangs prints every thread's stack after this many seconds.
+# A test that hangs prints every thread's stack after this many seconds, then the
+# run stops (rather than holding a CI runner until the job times out).
 faulthandler_timeout = 60
+faulthandler_exit_on_timeout = true
 
 [tool.coverage.run]
 source = ["pyamp"]

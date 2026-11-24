@@ -400,7 +400,8 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
 
 - **Code signing** for the Windows and macOS builds, so SmartScreen and Gatekeeper
   don't warn.
-- **Last.fm scrobbling**, as an optional plugin.
+- **Smaller downloads**: bundle only the Qt modules and plugins PyAmp uses, so the
+  apps shrink from about 170 MB.
 - **DLNA/UPnP media servers** (plugin): find media servers on the local network (NAS,
   MiniDLNA, Plex/Jellyfin DLNA), browse them and play from them.
 

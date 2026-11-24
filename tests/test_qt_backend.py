@@ -40,7 +40,7 @@ from PySide6.QtMultimedia import (
 
 from pyamp.audio.qt_backend import QtAudioBackend, audio_buffer_to_mono
 from pyamp.core.models import PlaybackState
-from tests.test_mpv_backend import Recorder
+from tests.conftest import BackendRecorder as Recorder
 
 Fmt = QAudioFormat.SampleFormat
 

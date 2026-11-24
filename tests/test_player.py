@@ -29,6 +29,7 @@ import pytest
 from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import (
     AudioFrame,
+    AudioInfoChanged,
     EqualizerChanged,
     EventBus,
     PlaybackStateChanged,
@@ -393,3 +394,13 @@ def test_a_failing_resolver_plays_the_location_as_is(
     player.set_location_resolver(broken)
     player.play()
     assert backend.loaded == [tracks[0].location]
+
+
+def test_audio_info_is_published_in_kbps_when_it_changes(player: Player, bus: EventBus) -> None:
+    published: list[AudioInfoChanged] = []
+    bus.subscribe(AudioInfoChanged, published.append)
+    player.on_audio_info(320_400, 44_100)
+    player.on_audio_info(320_000, 44_100)  # same once rounded: not repeated
+    player.on_audio_info(0, 0)
+    assert published == [AudioInfoChanged(320, 44_100), AudioInfoChanged(0, 0)]
+    assert player.audio_info == AudioInfoChanged(0, 0)

@@ -88,6 +88,8 @@ class QtAudioBackend(AudioBackend):
         self._linear_volume = 1.0
         self._error_reported = False
         self._gain = 1.0
+        self._bitrate = 0  # of the playing audio: from metadata, and from the PCM tap
+        self._sample_rate = 0
         self._player.setAudioBufferOutput(self._tap)
 
         self._player.playbackStateChanged.connect(self._on_playback_state)
@@ -102,6 +104,7 @@ class QtAudioBackend(AudioBackend):
 
     def load(self, location: Location) -> None:
         self._error_reported = False
+        self._set_audio_info(bitrate=0, sample_rate=0)  # until the new source reports
         if isinstance(location, StreamUrl):
             self._player.setSource(QUrl(location.url))
         else:
@@ -146,6 +149,8 @@ class QtAudioBackend(AudioBackend):
     # -- Qt signal handlers ------------------------------------------------- #
 
     def _on_playback_state(self, state: QMediaPlayer.PlaybackState) -> None:
+        if state is QMediaPlayer.PlaybackState.StoppedState:
+            self._set_audio_info(bitrate=0, sample_rate=0)
         self._listener.on_state_changed(_STATE_MAP[state])
 
     # Look the listener up on every call: it may be replaced after construction.
@@ -160,6 +165,8 @@ class QtAudioBackend(AudioBackend):
             self._listener.on_end_of_track()
 
     def _on_metadata(self) -> None:
+        bitrate = self._player.metaData().value(QMediaMetaData.Key.AudioBitRate)
+        self._set_audio_info(bitrate=int(bitrate) if isinstance(bitrate, int) else 0)
         # For streams, Qt's FFmpeg backend reports the station's current title here.
         if self._player.source().isLocalFile():
             return
@@ -175,6 +182,20 @@ class QtAudioBackend(AudioBackend):
             self._listener.on_error(message or error.name)
 
     def _on_audio_buffer(self, buffer: QAudioBuffer) -> None:
+        rate = buffer.format().sampleRate()
+        if rate != self._sample_rate:
+            self._set_audio_info(sample_rate=rate)
         samples = audio_buffer_to_mono(buffer)
         if samples is not None:
-            self._listener.on_audio_frame(samples, buffer.format().sampleRate())
+            self._listener.on_audio_frame(samples, rate)
+
+    def _set_audio_info(
+        self, *, bitrate: int | None = None, sample_rate: int | None = None
+    ) -> None:
+        old = (self._bitrate, self._sample_rate)
+        if bitrate is not None:
+            self._bitrate = bitrate
+        if sample_rate is not None:
+            self._sample_rate = sample_rate
+        if (self._bitrate, self._sample_rate) != old:
+            self._listener.on_audio_info(self._bitrate, self._sample_rate)

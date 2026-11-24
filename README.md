@@ -75,6 +75,10 @@ uv run pyamp --log-level INFO     # see plugin activity, e.g. "Now playing: ..."
 
 Drag and drop files or folders onto the window to add them.
 
+Under the track title, the display shows the bitrate and sample rate of what's playing
+(e.g. `320 kbps · 44.1 kHz`), as the audio engine reports them; for VBR files and
+streams on the `mpv` backend the bitrate follows the music as it plays.
+
 ### Playlists
 
 Keep as many playlists as you like and switch between them with the selector above

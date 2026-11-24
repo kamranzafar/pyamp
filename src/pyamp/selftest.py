@@ -77,6 +77,9 @@ class _Recorder:
     def on_error(self, message: str) -> None:
         self.errors.append(message)
 
+    def on_audio_info(self, bitrate: int, sample_rate: int) -> None:
+        pass
+
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
         pass
 

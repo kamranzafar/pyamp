@@ -24,7 +24,9 @@ No Qt here: :class:`pyamp.ui.playlist_session.PlaylistSession` decides when to s
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import sys
+import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import platformdirs
@@ -36,6 +38,33 @@ from pyamp.library.playlist_formats import M3UFormat
 SUFFIX = ".m3u8"
 MAX_NAME_LENGTH = 100
 _FORBIDDEN = set('/\\:*?"<>|')
+
+
+#: How long to keep retrying a file operation that Windows refuses because the file is
+#: open elsewhere (e.g. the background loader reading it): reads take milliseconds.
+LOCK_RETRY_S = 1.0
+_LOCK_RETRY_STEP_S = 0.05
+
+
+def retry_while_locked[T](
+    operation: Callable[[], T],
+    *,
+    platform: str = sys.platform,
+    sleep: Callable[[float], None] = time.sleep,
+) -> T:
+    """Run a delete/rename/replace, retrying briefly while Windows reports the file in use.
+
+    Windows won't delete or replace a file another thread has open; macOS and Linux will.
+    """
+    attempts = 1 if platform != "win32" else int(LOCK_RETRY_S / _LOCK_RETRY_STEP_S)
+    for attempt in range(attempts):
+        try:
+            return operation()
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            sleep(_LOCK_RETRY_STEP_S)
+    raise AssertionError("unreachable")
 
 
 class PlaylistNameError(ValueError):
@@ -95,7 +124,7 @@ class SavedPlaylists:
         # Write-then-rename, so a crash never leaves a half-written playlist.
         tmp = target.with_name(f".{target.name}.tmp")
         self._format.write(tmp, tracks)
-        tmp.replace(target)
+        retry_while_locked(lambda: tmp.replace(target))
 
     def read_paths(self, name: str) -> list[Path]:
         found = self._find(name)
@@ -111,13 +140,13 @@ class SavedPlaylists:
         clash = self._find(new)
         if clash is not None and clash != source:
             raise PlaylistNameError(f'There is already a playlist called "{clash.stem}".')
-        source.rename(self.directory / f"{new}{SUFFIX}")
+        retry_while_locked(lambda: source.rename(self.directory / f"{new}{SUFFIX}"))
         return new
 
     def delete(self, name: str) -> None:
         found = self._find(name)
         if found is not None:
-            found.unlink()
+            retry_while_locked(found.unlink)
 
     def _find(self, name: str) -> Path | None:
         wanted = name.strip().casefold()

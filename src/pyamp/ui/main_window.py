@@ -49,8 +49,14 @@ from PySide6.QtWidgets import (
 
 from pyamp import APP_NAME
 from pyamp.config import Settings
-from pyamp.core.events import EventBus, PlaybackError, PlaylistChanged, TrackChanged
-from pyamp.core.models import Track, format_duration
+from pyamp.core.events import (
+    EventBus,
+    PlaybackError,
+    PlaylistChanged,
+    StreamTitleChanged,
+    TrackChanged,
+)
+from pyamp.core.models import Location, StreamUrl, Track, format_duration, parse_location
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist, SortKey
 from pyamp.library.metadata import AUDIO_EXTENSIONS
@@ -62,7 +68,7 @@ from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
 from pyamp.ui.equalizer_window import EqualizerWindow
 from pyamp.ui.jump_dialog import JumpDialog
 from pyamp.ui.menu_bar import IS_MACOS, PLACE, MenuBarIcon
-from pyamp.ui.playlist_model import PlaylistModel
+from pyamp.ui.playlist_model import PlaylistModel, dropped_locations
 from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import Skin
 from pyamp.ui.widgets.lcd import LcdPanel
@@ -136,6 +142,7 @@ class MainWindow(QMainWindow):
         services.loader.job_finished.connect(self._on_load_finished)
 
         self._quitting = False
+        self._window_track_label = ""
         self._hidden_by_close = False
         app = QApplication.instance()
         if isinstance(app, QApplication):
@@ -155,6 +162,7 @@ class MainWindow(QMainWindow):
         self._build_menus()
 
         services.bus.subscribe(TrackChanged, self._on_track_changed)
+        services.bus.subscribe(StreamTitleChanged, self._on_stream_title)
         services.bus.subscribe(PlaylistChanged, lambda _: self._update_summary())
         services.bus.subscribe(
             PlaybackError,
@@ -206,6 +214,7 @@ class MainWindow(QMainWindow):
             file_menu, "Add &Files…", self._add_files, QKeySequence.StandardKey.Open
         )
         self._add_menu_action(file_menu, "Add F&older…", self._add_folder, "Ctrl+Shift+O")
+        self._add_menu_action(file_menu, "Add &URL…", self.add_url, "Ctrl+U")
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "&Import Playlist…", self._import_playlist, "Ctrl+L")
         self._add_menu_action(
@@ -389,8 +398,10 @@ class MainWindow(QMainWindow):
 
     # -- User intents ------------------------------------------------------- #
 
-    def add_paths(self, paths: Iterable[Path], *, autoplay: bool | None = None) -> LoadJob:
-        """Queue files/folders/playlists for loading in the background. Returns immediately.
+    def add_paths(self, paths: Iterable[Location], *, autoplay: bool | None = None) -> LoadJob:
+        """Queue files/folders/playlists/streams for loading in the background.
+
+        Returns immediately.
 
         ``autoplay=None`` means "start playing if there is nothing to play yet".
         """
@@ -401,6 +412,19 @@ class MainWindow(QMainWindow):
             self._autoplay_jobs.add(job)
         self._update_summary()
         return job
+
+    def add_url(self) -> None:
+        """Add a stream: internet radio (or a station's .pls/.m3u), or an audio file URL."""
+        text, ok = QInputDialog.getText(
+            self, "Add URL", "Stream or playlist URL (http:// or https://):"
+        )
+        if not ok or not text.strip():
+            return
+        location = parse_location(text)
+        if not isinstance(location, StreamUrl):
+            QMessageBox.warning(self, "Add URL", "Enter an http:// or https:// address.")
+            return
+        self.add_paths([location])
 
     def _add_files(self) -> None:
         patterns = " ".join(f"*{ext}" for ext in sorted(AUDIO_EXTENSIONS))
@@ -473,8 +497,12 @@ class MainWindow(QMainWindow):
         if event.track is None or event.index is None:
             self.setWindowTitle(APP_NAME)
         else:
-            self.setWindowTitle(f"{event.index + 1}. {event.track.display_title} - {APP_NAME}")
+            self._window_track_label = f"{event.index + 1}. {event.track.display_title}"
+            self.setWindowTitle(f"{self._window_track_label} - {APP_NAME}")
             self._playlist_view.scrollTo(self._playlist_view.model().index(event.index, 0))
+
+    def _on_stream_title(self, event: StreamTitleChanged) -> None:
+        self.setWindowTitle(f"{event.title} — {self._window_track_label} - {APP_NAME}")
 
     def _on_tracks_loaded(self, job: LoadJob, tracks: list[Track]) -> None:
         first_new = len(self._s.playlist)
@@ -503,7 +531,7 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        paths = [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
+        paths = dropped_locations(event.mimeData().urls())
         if paths:
             event.acceptProposedAction()
             self.add_paths(paths)

@@ -40,6 +40,7 @@ from pyamp.core.events import (
     PlaylistChanged,
     PlayModeChanged,
     PositionChanged,
+    StreamTitleChanged,
     TrackChanged,
     Unsubscribe,
     VolumeChanged,
@@ -183,6 +184,7 @@ class MediaSession:
             bus.subscribe(PlayModeChanged, self._on_change),
             bus.subscribe(VolumeChanged, self._on_change),
             bus.subscribe(PlaylistChanged, self._on_change),
+            bus.subscribe(StreamTitleChanged, self._on_change),
             bus.subscribe(PositionChanged, self._on_position),
         ]
 
@@ -218,6 +220,9 @@ class MediaSession:
 
     def _snapshot(self) -> NowPlaying:
         track = self._playlist.current_track
+        if track is not None and track.is_stream and self._player.stream_title:
+            # Internet radio: the song is the title, the station goes where the album would.
+            track = replace(track, title=self._player.stream_title, album=track.title)
         # Asking the play order for the next index could reshuffle as a side effect,
         # so "can go next/previous" simply means there is something to play.
         has_tracks = len(self._playlist) > 0

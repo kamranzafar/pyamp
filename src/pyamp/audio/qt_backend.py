@@ -86,6 +86,7 @@ class QtAudioBackend(AudioBackend):
         self._tap = QAudioBufferOutput()
         self._player.setAudioOutput(self._output)
         self._linear_volume = 1.0
+        self._error_reported = False
         self._gain = 1.0
         self._player.setAudioBufferOutput(self._tap)
 
@@ -100,6 +101,7 @@ class QtAudioBackend(AudioBackend):
     # -- AudioBackend ------------------------------------------------------- #
 
     def load(self, location: Location) -> None:
+        self._error_reported = False
         if isinstance(location, StreamUrl):
             self._player.setSource(QUrl(location.url))
         else:
@@ -166,7 +168,10 @@ class QtAudioBackend(AudioBackend):
             self._listener.on_stream_title(title)
 
     def _on_error(self, error: QMediaPlayer.Error, message: str) -> None:
-        if error is not QMediaPlayer.Error.NoError:
+        # A stream that drops makes Qt's FFmpeg backend repeat the error many times;
+        # report it once per track.
+        if error is not QMediaPlayer.Error.NoError and not self._error_reported:
+            self._error_reported = True
             self._listener.on_error(message or error.name)
 
     def _on_audio_buffer(self, buffer: QAudioBuffer) -> None:

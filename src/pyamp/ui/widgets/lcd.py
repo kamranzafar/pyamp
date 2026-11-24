@@ -32,6 +32,7 @@ from pyamp.core.events import (
     PlaybackStateChanged,
     PositionChanged,
     SpectrumUpdated,
+    StreamTitleChanged,
     TrackChanged,
 )
 from pyamp.core.models import PlaybackState, format_duration
@@ -70,6 +71,7 @@ class LcdPanel(QFrame):
         self._state = PlaybackState.STOPPED
         self._position_ms = 0
         self._duration_ms = 0
+        self._track_label = ""
         self._show_remaining = show_remaining
 
         mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
@@ -108,6 +110,7 @@ class LcdPanel(QFrame):
         self._blink.timeout.connect(lambda: self._time.setVisible(not self._time.isVisible()))
 
         bus.subscribe(TrackChanged, self._on_track)
+        bus.subscribe(StreamTitleChanged, self._on_stream_title)
         bus.subscribe(PlaybackStateChanged, self._on_state)
         bus.subscribe(PositionChanged, self._on_position)
         bus.subscribe(SpectrumUpdated, lambda e: self._spectrum.set_levels(e.levels))
@@ -123,11 +126,17 @@ class LcdPanel(QFrame):
         self._render_time()
 
     def _on_track(self, event: TrackChanged) -> None:
+        self._track_label = ""
         if event.track is None or event.index is None:
             self._title.set_text("")
             return
         length = f" ({format_duration(event.track.duration_ms)})" if event.track.duration_ms else ""
-        self._title.set_text(f"{event.index + 1}. {event.track.display_title}{length}")
+        self._track_label = f"{event.index + 1}. {event.track.display_title}"
+        self._title.set_text(f"{self._track_label}{length}")
+
+    def _on_stream_title(self, event: StreamTitleChanged) -> None:
+        if self._track_label:  # "3. Groove Salad — Artist - Song"
+            self._title.set_text(f"{self._track_label} — {event.title}")
 
     def _on_state(self, event: PlaybackStateChanged) -> None:
         self._state = event.state

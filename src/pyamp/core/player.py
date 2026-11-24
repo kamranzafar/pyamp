@@ -77,6 +77,7 @@ class Player:
         self._active = False
         self._queued: tuple[int, Location] | None = None
         self._stream_title = ""
+        self._live = False
 
         backend.set_listener(self)
         backend.set_volume(self._volume)
@@ -88,6 +89,11 @@ class Player:
     @property
     def state(self) -> PlaybackState:
         return self._state
+
+    @property
+    def is_live(self) -> bool:
+        """Whether the current track is a live stream (internet radio): no length, no seeking."""
+        return self._live
 
     @property
     def stream_title(self) -> str:
@@ -155,6 +161,8 @@ class Player:
         self._backend.load(track.location)
         self._backend.play()
         self._stream_title = ""
+        # A stream without a known length (internet radio) is live: no duration, no seeking.
+        self._live = track.is_stream and not track.duration_ms
         self._bus.publish(TrackChanged(track, index))
         self._queue_next()
 
@@ -184,6 +192,8 @@ class Player:
             self.play_index(index)
 
     def seek(self, position_ms: int) -> None:
+        if self._live:
+            return
         upper = self._duration_ms or position_ms
         self._backend.seek(max(0, min(position_ms, upper)))
 
@@ -261,6 +271,10 @@ class Player:
         self._bus.publish(PositionChanged(position_ms, self._duration_ms))
 
     def on_duration_changed(self, duration_ms: int) -> None:
+        # For live streams backends report how much they've buffered, which keeps growing;
+        # it isn't a length, so a live track's duration stays 0.
+        if self._live:
+            duration_ms = 0
         self._duration_ms = duration_ms
         self._bus.publish(PositionChanged(self._position_ms, duration_ms))
 
@@ -292,6 +306,8 @@ class Player:
         self._position_ms = self._duration_ms = 0
         self._apply_track_gain(track)
         self._stream_title = ""
+        # A stream without a known length (internet radio) is live: no duration, no seeking.
+        self._live = track.is_stream and not track.duration_ms
         self._bus.publish(TrackChanged(track, index))
         self._queue_next()
 

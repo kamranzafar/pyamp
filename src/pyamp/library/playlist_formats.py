@@ -48,6 +48,17 @@ class PlaylistEntry:
 
     location: Location
     title: str | None = None
+    #: The length the playlist gives it (0 if unknown); keeps streams seekable.
+    duration_ms: int = 0
+
+
+def _seconds_to_ms(text: str) -> int:
+    """A playlist's length in seconds as milliseconds (0 for "-1", blank or junk)."""
+    try:
+        seconds = float(text)
+    except ValueError:
+        return 0
+    return int(seconds * 1000) if seconds > 0 else 0
 
 
 class PlaylistFormat(ABC):
@@ -76,16 +87,19 @@ class M3UFormat(PlaylistFormat):
     def parse(self, text: str, base: Path | StreamUrl) -> list[PlaylistEntry]:
         entries: list[PlaylistEntry] = []
         title: str | None = None
+        duration_ms = 0
         for raw in text.splitlines():
             line = raw.strip()
             if line.upper().startswith("#EXTINF:"):
                 # "#EXTINF:<seconds>,<title>": the title is whatever follows the comma.
-                title = line.partition(",")[2].strip() or None
+                seconds, _, rest = line[len("#EXTINF:") :].partition(",")
+                title = rest.strip() or None
+                duration_ms = _seconds_to_ms(seconds.split()[0] if seconds.split() else "")
             elif line and not line.startswith("#"):
                 location = parse_location(line, base)
                 if location is not None:
-                    entries.append(PlaylistEntry(location, title))
-                title = None
+                    entries.append(PlaylistEntry(location, title, duration_ms))
+                title, duration_ms = None, 0
         return entries
 
     def write(self, path: Path, tracks: Sequence[Track]) -> None:
@@ -118,7 +132,13 @@ class PLSFormat(PlaylistFormat):
         for n, entry in numbered:
             location = parse_location(entry, base)
             if location is not None:
-                entries.append(PlaylistEntry(location, values.get(f"title{n}") or None))
+                entries.append(
+                    PlaylistEntry(
+                        location,
+                        values.get(f"title{n}") or None,
+                        _seconds_to_ms(values.get(f"length{n}", "")),
+                    )
+                )
         return entries
 
     def write(self, path: Path, tracks: Sequence[Track]) -> None:

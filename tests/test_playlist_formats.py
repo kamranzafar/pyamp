@@ -46,12 +46,15 @@ def test_round_trip_with_files_and_streams(tmp_path: Path, name: str) -> None:
         Track(location=tmp_path / "a.mp3", title="A", artist="X", duration_ms=61_000),
         Track(location=tmp_path / "sub dir" / "b.flac", title="B"),
         Track.for_stream(StreamUrl("https://radio.example/live?q=1"), "Groove Salad"),
+        Track.for_stream(StreamUrl("https://music.example/rest/stream?id=7"), "Song", 185_000),
     ]
     playlist_file = tmp_path / name
     registry.write(playlist_file, tracks)
     entries = registry.read(playlist_file)
     assert [e.location for e in entries] == [t.location for t in tracks]
-    assert [e.title for e in entries] == ["X - A", "B", "Groove Salad"]
+    assert [e.title for e in entries] == ["X - A", "B", "Groove Salad", "Song"]
+    # Lengths come back (whole seconds), so a server's tracks stay seekable after a reload.
+    assert [e.duration_ms for e in entries] == [61_000, 0, 0, 185_000]
 
 
 def test_m3u_resolves_relative_paths_and_keeps_urls(tmp_path: Path) -> None:

@@ -222,3 +222,13 @@ def test_fetch_text_limits_size(server: Server) -> None:
         fetch_text(f"{server.url}/huge.m3u", max_bytes=1000)
     with pytest.raises(ValueError):
         fetch_text("ftp://example.com/x.m3u")
+
+
+def test_a_stream_keeps_the_length_its_playlist_gives(loader: TrackLoader, tmp_path: Path) -> None:
+    playlist_file = tmp_path / "server.m3u8"
+    playlist_file.write_text(
+        "#EXTM3U\n#EXTINF:185,Band - Song\nhttps://music.example/rest/stream?id=7\n"
+        "#EXTINF:-1,Radio\nhttps://radio.example/live\n"
+    )
+    tracks = loader.load([playlist_file])
+    assert [(t.title, t.duration_ms) for t in tracks] == [("Band - Song", 185_000), ("Radio", 0)]

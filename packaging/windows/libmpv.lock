@@ -1,0 +1,7 @@
+# libmpv bundled into PyAmp for Windows: shinchiro/mpv-winbuild-cmake's x86_64 "mpv-dev"
+# build (one libmpv-2.dll with FFmpeg built in, including the filters the equaliser needs).
+# Upstream deletes builds after about 30 days, so the download is PyAmp's own unmodified
+# copy, attached to the libmpv-windows-<date> pre-release; upstream:
+#   https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261111
+# Format: <arch> <sha256> <url>. build.ps1 refuses a download whose hash doesn't match.
+x86_64 273c079b11ea5575822f972756f4c9a71149a5c10130353abeb8586738938452 https://github.com/kamranzafar/pyamp/releases/download/libmpv-windows-20261111/mpv-dev-x86_64-20261111-git-bcde6b93cc.7z

@@ -324,7 +324,7 @@ def test_unsupported_platform_has_no_adapter(commands: MediaCommands) -> None:
 def test_plugin_runs_session_with_adapter(
     bus: EventBus, player: Player, playlist: Playlist, adapter: RecordingAdapter
 ) -> None:
-    plugin = MediaSessionPlugin(lambda commands: adapter)
+    plugin = MediaSessionPlugin(lambda commands, **_: adapter)
     manager = PluginManager(PluginContext(bus, player, playlist))
     manager.register(plugin)
     assert plugin.active
@@ -337,7 +337,7 @@ def test_plugin_runs_session_with_adapter(
 
 
 def test_plugin_is_inert_without_adapter(bus: EventBus, player: Player, playlist: Playlist) -> None:
-    plugin = MediaSessionPlugin(lambda commands: None)
+    plugin = MediaSessionPlugin(lambda commands, **_: None)
     manager = PluginManager(PluginContext(bus, player, playlist))
     manager.register(plugin)
     assert manager.active_plugins == (plugin,)

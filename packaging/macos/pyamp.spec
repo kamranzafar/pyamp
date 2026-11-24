@@ -23,7 +23,7 @@ NOTICES = Path(os.environ["PYAMP_NOTICES"])
 libmpv_binaries = [(str(lib), "libmpv") for lib in sorted(LIBMPV.glob("*.dylib"))]
 
 a = Analysis(  # noqa: F821
-    [str(ROOT / "packaging" / "macos" / "launcher.py")],
+    [str(ROOT / "packaging" / "launcher.py")],
     pathex=[str(ROOT / "src")],
     binaries=libmpv_binaries,
     datas=[

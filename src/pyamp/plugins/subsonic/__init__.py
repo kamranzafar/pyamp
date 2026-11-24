@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# PyAmp - a lightweight, Winamp-inspired music player
+# Copyright (C) 2026 Kamran Zafar
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
+"""Subsonic plugin: browse and play your music library from a Subsonic-compatible server
+(Navidrome, Airsonic, Gonic, ...).
+
+Songs are added to the playlist as streams with their tags and length. Their URLs carry no
+login, so saved playlists hold no secrets; the plugin adds a fresh login as each one plays.
+"""
+
+from __future__ import annotations
+
+from PySide6.QtWidgets import QDialog, QWidget
+
+from pyamp.core.models import Track
+from pyamp.plugins.base import PluginContext
+from pyamp.plugins.subsonic.client import SubsonicClient
+from pyamp.plugins.subsonic.credentials import Account, AccountStore
+from pyamp.plugins.subsonic.ui import BrowserWindow, ServerDialog
+
+MENU = "&Library"
+
+
+class SubsonicPlugin:
+    name = "subsonic"
+
+    def __init__(self, accounts: AccountStore | None = None) -> None:
+        self._accounts = accounts or AccountStore()
+        self._context: PluginContext | None = None
+        self.client: SubsonicClient | None = None
+        self.browser: BrowserWindow | None = None
+
+    def activate(self, context: PluginContext) -> None:
+        self._context = context
+        account = self._accounts.load()
+        if account is not None:
+            password = self._accounts.password(account)
+            if password is not None:
+                self._use(SubsonicClient(account.server, account.username, password))
+        ui = context.ui()
+        if ui is not None:
+            ui.add_menu_action(MENU, "Subsonic &Browser…", self.show_browser, "Ctrl+B")
+            ui.add_menu_action(MENU, "Subsonic &Server…", self.show_server_dialog)
+
+    def deactivate(self) -> None:
+        self._close_browser()
+        if self._context is not None:
+            self._context.player.set_location_resolver(None)
+        self.client = None
+
+    # -- Menu commands ------------------------------------------------------ #
+
+    def show_server_dialog(self) -> bool:
+        """Ask for the server and login; True once connected."""
+        account = self._accounts.load()
+        dialog = ServerDialog(
+            account.server if account else "",
+            account.username if account else "",
+            has_keychain=self._accounts.has_keychain(),
+            parent=self._parent(),
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted or dialog.client is None:
+            return False
+        client = dialog.client
+        chosen = Account(client.server, client.username)
+        if account is not None and account != chosen:
+            self._accounts.forget_password(account)
+        self._accounts.save(chosen)
+        if dialog.remember.isChecked():
+            self._accounts.save_password(chosen, dialog.password.text())
+        else:
+            self._accounts.forget_password(chosen)
+        self._use(client)
+        return True
+
+    def show_browser(self) -> BrowserWindow | None:
+        if self.client is None and not self.show_server_dialog():
+            return None
+        assert self.client is not None
+        if self.browser is None:
+            self.browser = BrowserWindow(self.client, self.add_tracks, parent=self._parent())
+        self.browser.show()
+        self.browser.raise_()
+        self.browser.activateWindow()
+        return self.browser
+
+    def add_tracks(self, tracks: list[Track], play: bool) -> None:
+        assert self._context is not None
+        first = len(self._context.playlist)
+        self._context.playlist.add(tracks)
+        if play:
+            self._context.player.play_index(first)
+
+    # -- Internals ---------------------------------------------------------- #
+
+    def _use(self, client: SubsonicClient) -> None:
+        assert self._context is not None
+        self.client = client
+        self._context.player.set_location_resolver(client.authorise)
+        self._close_browser()  # it was showing the old server
+
+    def _close_browser(self) -> None:
+        if self.browser is not None:
+            self.browser.close()
+            self.browser.deleteLater()
+            self.browser = None
+
+    def _parent(self) -> QWidget | None:
+        ui = self._context.ui() if self._context else None
+        parent = ui.dialog_parent() if ui else None
+        return parent if isinstance(parent, QWidget) else None

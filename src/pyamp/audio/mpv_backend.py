@@ -37,7 +37,6 @@ import functools
 import locale
 import logging
 import threading
-from pathlib import Path
 from typing import Any, ClassVar
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -50,7 +49,7 @@ from pyamp.audio.libmpv_loader import (
     missing_filters,
 )
 from pyamp.core.equalizer import BANDS_HZ, Equalizer
-from pyamp.core.models import PlaybackState, ReplayGainMode
+from pyamp.core.models import Location, PlaybackState, ReplayGainMode, parse_location
 
 log = logging.getLogger(__name__)
 
@@ -127,6 +126,7 @@ class _Bridge(QObject):
     position = Signal(int)
     duration = Signal(int)
     advanced = Signal(str)
+    stream_title = Signal(str)
     end_of_track = Signal()
     error = Signal(str)
 
@@ -137,6 +137,7 @@ class _Bridge(QObject):
         self.position.connect(self._on_position)
         self.duration.connect(self._on_duration)
         self.advanced.connect(self._on_advanced)
+        self.stream_title.connect(self._on_stream_title)
         self.end_of_track.connect(self._on_end_of_track)
         self.error.connect(self._on_error)
 
@@ -155,7 +156,13 @@ class _Bridge(QObject):
 
     @Slot(str)
     def _on_advanced(self, path: str) -> None:
-        self._backend.listener.on_track_advanced(Path(path))
+        location = parse_location(path)
+        if location is not None:
+            self._backend.listener.on_track_advanced(location)
+
+    @Slot(str)
+    def _on_stream_title(self, title: str) -> None:
+        self._backend.listener.on_stream_title(title)
 
     @Slot()
     def _on_end_of_track(self) -> None:
@@ -196,6 +203,7 @@ class MpvAudioBackend(AudioBackend):
         self._mpv.observe_property("idle-active", self._observe_idle)
         self._mpv.observe_property("time-pos", self._observe_position)
         self._mpv.observe_property("duration", self._observe_duration)
+        self._mpv.observe_property("metadata", self._observe_metadata)
         self._mpv.register_event_callback(self._on_event)
 
     @property
@@ -204,16 +212,16 @@ class MpvAudioBackend(AudioBackend):
 
     # -- AudioBackend ------------------------------------------------------- #
 
-    def load(self, path: Path) -> None:
+    def load(self, location: Location) -> None:
         with self._lock:
             self._pending_loads += 1
         self._mpv.playlist_clear()
-        self._mpv.loadfile(str(path), "replace")
+        self._mpv.loadfile(str(location), "replace")
 
-    def queue_next(self, path: Path | None) -> None:
+    def queue_next(self, location: Location | None) -> None:
         self._mpv.playlist_clear()  # drops everything except the current entry
-        if path is not None:
-            self._mpv.loadfile(str(path), "append")
+        if location is not None:
+            self._mpv.loadfile(str(location), "append")
 
     def play(self) -> None:
         self._mpv.pause = False
@@ -283,6 +291,12 @@ class MpvAudioBackend(AudioBackend):
 
     def _observe_duration(self, _name: str, seconds: float | None) -> None:
         self._bridge.duration.emit(int((seconds or 0) * 1000))
+
+    def _observe_metadata(self, _name: str, metadata: dict[str, str] | None) -> None:
+        # Internet radio (Icecast/Shoutcast) sends the current song as ICY metadata.
+        title = {key.lower(): value for key, value in (metadata or {}).items()}.get("icy-title")
+        if title:
+            self._bridge.stream_title.emit(title.strip())
 
     def _on_event(self, event: Any) -> None:
         event_id = event.event_id.value

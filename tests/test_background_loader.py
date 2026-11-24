@@ -102,7 +102,7 @@ def test_loads_off_main_thread_and_delivers_on_main_thread(
     wait_until(lambda: rec.finished == [job])
 
     main = threading.get_ident()
-    assert [t.path for t in rec.tracks] == files
+    assert [t.location for t in rec.tracks] == files
     assert main not in reader.threads  # tag reading happened on the worker
     assert rec.slot_threads == {main}  # but results arrived on the main thread
     assert job.loaded == 3
@@ -137,7 +137,7 @@ def test_jobs_complete_in_submission_order(loader: BackgroundTrackLoader, tmp_pa
     loader.submit([tmp_path / "a"])
     loader.submit([tmp_path / "b"])
     wait_until(lambda: len(rec.finished) == 2)
-    assert [t.path for t in rec.tracks] == first + second
+    assert [t.location for t in rec.tracks] == first + second
 
 
 def test_cancel_drops_pending_and_in_flight_batches(

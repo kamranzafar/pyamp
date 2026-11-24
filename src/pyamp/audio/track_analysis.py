@@ -264,7 +264,10 @@ class AnalysedSpectrum(QObject):
         self._timer.stop()
 
     def _on_track(self, event: TrackChanged) -> None:
-        self._timeline = self._analyser.analyse(event.track.path) if event.track else None
+        # Streams aren't analysed: a live stream has no end, and fetching it twice wastes
+        # bandwidth (the Qt backend taps the PCM it plays instead).
+        location = event.track.location if event.track else None
+        self._timeline = self._analyser.analyse(location) if isinstance(location, Path) else None
         self._position_ms, self._position_at = 0, self._clock()
 
     def _on_state(self, event: PlaybackStateChanged) -> None:

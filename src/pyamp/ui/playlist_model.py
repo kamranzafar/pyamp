@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -34,12 +34,13 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     Qt,
     QTimer,
+    QUrl,
     Signal,
 )
 from PySide6.QtGui import QColor
 
 from pyamp.core.events import EventBus, PlaylistChanged, TrackChanged
-from pyamp.core.models import format_duration
+from pyamp.core.models import Location, StreamUrl, format_duration, parse_location
 from pyamp.core.playlist import Playlist
 from pyamp.ui.skin import Skin
 
@@ -48,6 +49,17 @@ type _Index = QModelIndex | QPersistentModelIndex
 TITLE_COLUMN, TIME_COLUMN = 0, 1
 #: Rows being dragged within the playlist (private to PyAmp).
 ROWS_MIME = "application/x-pyamp-rows"
+
+
+def dropped_locations(urls: Iterable[QUrl]) -> list[Location]:
+    """Files and http(s) streams from a drop (e.g. from Finder, or a link from a browser)."""
+    locations: list[Location] = []
+    for url in urls:
+        if url.isLocalFile():
+            locations.append(Path(url.toLocalFile()))
+        elif isinstance(location := parse_location(url.toString()), StreamUrl):
+            locations.append(location)
+    return locations
 
 
 class PlaylistModel(QAbstractTableModel):
@@ -87,13 +99,15 @@ class PlaylistModel(QAbstractTableModel):
             case Qt.ItemDataRole.DisplayRole if column == TITLE_COLUMN:
                 return f"{row + 1}. {track.display_title}"
             case Qt.ItemDataRole.DisplayRole if column == TIME_COLUMN:
-                return format_duration(track.duration_ms) if track.duration_ms else ""
+                if track.duration_ms:
+                    return format_duration(track.duration_ms)
+                return "LIVE" if track.is_stream else ""
             case Qt.ItemDataRole.TextAlignmentRole if column == TIME_COLUMN:
                 return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             case Qt.ItemDataRole.ForegroundRole if row == self._playlist.current_index:
                 return self._current_color
             case Qt.ItemDataRole.ToolTipRole:
-                return str(track.path)
+                return str(track.location)
         return None
 
     # -- Drag & drop ---------------------------------------------------------- #
@@ -132,7 +146,7 @@ class PlaylistModel(QAbstractTableModel):
             QTimer.singleShot(0, lambda: self.rows_moved.emit(self._playlist.move(rows, row)))
             return True
         if data.hasUrls():
-            paths = [Path(u.toLocalFile()) for u in data.urls() if u.isLocalFile()]
+            paths = dropped_locations(data.urls())
             if paths:
                 self.files_dropped.emit(paths)
                 return True

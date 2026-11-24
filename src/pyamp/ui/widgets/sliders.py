@@ -57,7 +57,7 @@ class SeekSlider(JumpSlider):
         self.setToolTip("Seek")
         self.sliderReleased.connect(lambda: self.seek_requested.emit(self.value()))
         bus.subscribe(PositionChanged, self._on_position)
-        bus.subscribe(TrackChanged, lambda _: self.setRange(0, 0))
+        bus.subscribe(TrackChanged, lambda _: self._set_length(0))
 
     def mousePressEvent(self, ev: QMouseEvent) -> None:
         super().mousePressEvent(ev)
@@ -69,9 +69,14 @@ class SeekSlider(JumpSlider):
         if self.isSliderDown():
             return  # don't fight the user while they drag
         self.blockSignals(True)
-        self.setRange(0, event.duration_ms)
+        self._set_length(event.duration_ms)
         self.setValue(event.position_ms)
         self.blockSignals(False)
+
+    def _set_length(self, duration_ms: int) -> None:
+        # Nothing to seek in (live stream, or no track): disabled, and the skin hides the knob.
+        self.setRange(0, duration_ms)
+        self.setEnabled(duration_ms > 0)
 
 
 class VolumeSlider(JumpSlider):

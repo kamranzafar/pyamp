@@ -141,6 +141,17 @@ class SavedPlaylistsChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class StreamTitleChanged:
+    """What a stream (e.g. an internet radio station) says it's playing now.
+
+    Published only while a stream is the current track; a new track resets it
+    (consumers treat :class:`TrackChanged` as "no stream title yet").
+    """
+
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
 class PlaybackError:
     message: str
     track: Track | None = None

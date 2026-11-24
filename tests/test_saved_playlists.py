@@ -58,7 +58,7 @@ def test_create_picks_unique_names(saved: SavedPlaylists) -> None:
 def test_save_and_read_round_trip(saved: SavedPlaylists, tmp_path: Path) -> None:
     songs = tracks(tmp_path, "a", "b")
     saved.save("Mix", songs)
-    assert saved.read_paths("mix") == [t.path for t in songs]  # names are case-insensitive
+    assert saved.read_paths("mix") == [t.location for t in songs]  # names are case-insensitive
 
 
 def test_save_replaces_atomically(saved: SavedPlaylists, tmp_path: Path) -> None:

@@ -39,8 +39,9 @@ from PySide6.QtMultimedia import (
 )
 
 from pyamp.audio.qt_backend import QtAudioBackend, audio_buffer_to_mono
-from pyamp.core.models import PlaybackState
+from pyamp.core.models import PlaybackState, StreamUrl
 from tests.conftest import BackendRecorder as Recorder
+from tests.radio import RadioStation
 
 Fmt = QAudioFormat.SampleFormat
 
@@ -173,7 +174,9 @@ def test_only_end_of_media_ends_the_track(backend: QtAudioBackend, recorder: Rec
 def test_errors_are_reported_with_a_message(backend: QtAudioBackend, recorder: Recorder) -> None:
     backend._on_error(QMediaPlayer.Error.NoError, "")
     backend._on_error(QMediaPlayer.Error.FormatError, "Unsupported format")
-    backend._on_error(QMediaPlayer.Error.ResourceError, "")
+    backend._on_error(QMediaPlayer.Error.FormatError, "Unsupported format")  # repeated: once
+    backend.load(Path("/m/next.mp3"))  # a new track may report its own error
+    backend._on_error(QMediaPlayer.Error.ResourceError, "")  # no message: the error's name
     assert recorder.values("error") == ["Unsupported format", "ResourceError"]
 
 
@@ -233,3 +236,30 @@ def test_unplayable_file_reports_an_error(
     backend.load(broken)
     backend.play()
     wait_until(lambda: bool(recorder.values("error")))
+
+
+@pytest.mark.usefixtures("needs_audio_output")
+def test_plays_a_stream(backend: QtAudioBackend, recorder: Recorder) -> None:
+    backend.set_volume(0.0)
+    with RadioStation() as station:
+        backend.load(StreamUrl(f"{station.url}/plain.wav"))
+        backend.play()
+        wait_until(lambda: PlaybackState.PLAYING in recorder.values("state"))
+        wait_until(lambda: "audio" in recorder.names())  # decoded PCM reaches the visualiser
+        backend.stop()
+    assert recorder.values("error") == []
+
+
+@pytest.mark.usefixtures("needs_audio_output")
+def test_a_failing_stream_reports_one_error(backend: QtAudioBackend, recorder: Recorder) -> None:
+    backend.set_volume(0.0)
+    with RadioStation(seconds=1.0) as station:  # the station "goes off air" after 1 s
+        backend.load(StreamUrl(f"{station.url}/live"))
+        backend.play()
+        wait_until(lambda: PlaybackState.PLAYING in recorder.values("state"))
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            QCoreApplication.processEvents()
+            time.sleep(0.02)
+        backend.stop()
+    assert len(recorder.values("error")) <= 1

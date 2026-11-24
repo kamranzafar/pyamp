@@ -31,39 +31,40 @@ import configparser
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
-from urllib.parse import urlparse
-from urllib.request import url2pathname
 
-from pyamp.core.models import Track
+from pyamp.core.models import Location, StreamUrl, Track, parse_location
 
 
 class UnsupportedPlaylistError(ValueError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class PlaylistEntry:
+    """One playlist entry: a file or a stream, with the title the playlist gives it."""
+
+    location: Location
+    title: str | None = None
+
+
 class PlaylistFormat(ABC):
     extensions: ClassVar[tuple[str, ...]]
     description: ClassVar[str]
 
+    def read(self, path: Path) -> list[PlaylistEntry]:
+        """The entries of a playlist file, with paths made absolute."""
+        return self.parse(path.read_text(encoding="utf-8", errors="replace"), path.parent)
+
     @abstractmethod
-    def read(self, path: Path) -> list[Path]:
-        """Return the absolute paths of the entries in the playlist file."""
+    def parse(self, text: str, base: Path | StreamUrl) -> list[PlaylistEntry]:
+        """The entries of a playlist's text; relative entries resolve against ``base``
+        (the playlist's folder, or its URL for a playlist downloaded from the web)."""
 
     @abstractmethod
     def write(self, path: Path, tracks: Sequence[Track]) -> None: ...
-
-    @staticmethod
-    def _resolve(entry: str, base: Path) -> Path | None:
-        entry = entry.strip()
-        if entry.startswith("file://"):
-            # url2pathname decodes %20 etc. and, on Windows, turns /C:/x into C:\x.
-            entry = url2pathname(urlparse(entry).path)
-        if not entry or "://" in entry:  # skip blanks and stream URLs for now
-            return None
-        candidate = Path(entry).expanduser()
-        return candidate if candidate.is_absolute() else (base / candidate).resolve()
 
 
 class M3UFormat(PlaylistFormat):
@@ -72,16 +73,27 @@ class M3UFormat(PlaylistFormat):
     extensions = (".m3u", ".m3u8")
     description = "M3U playlist"
 
-    def read(self, path: Path) -> list[Path]:
-        text = path.read_text(encoding="utf-8", errors="replace")
-        entries = (line for line in text.splitlines() if not line.startswith("#"))
-        return [p for e in entries if (p := self._resolve(e, path.parent))]
+    def parse(self, text: str, base: Path | StreamUrl) -> list[PlaylistEntry]:
+        entries: list[PlaylistEntry] = []
+        title: str | None = None
+        for raw in text.splitlines():
+            line = raw.strip()
+            if line.upper().startswith("#EXTINF:"):
+                # "#EXTINF:<seconds>,<title>": the title is whatever follows the comma.
+                title = line.partition(",")[2].strip() or None
+            elif line and not line.startswith("#"):
+                location = parse_location(line, base)
+                if location is not None:
+                    entries.append(PlaylistEntry(location, title))
+                title = None
+        return entries
 
     def write(self, path: Path, tracks: Sequence[Track]) -> None:
         lines = ["#EXTM3U"]
         for track in tracks:
-            lines.append(f"#EXTINF:{track.duration_ms // 1000},{track.display_title}")
-            lines.append(str(track.path))
+            seconds = track.duration_ms // 1000 if track.duration_ms else -1
+            lines.append(f"#EXTINF:{seconds},{track.display_title}")
+            lines.append(str(track.location))
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -90,24 +102,30 @@ class PLSFormat(PlaylistFormat):
     description = "PLS playlist"
     _FILE_KEY = re.compile(r"^file(\d+)$", re.IGNORECASE)
 
-    def read(self, path: Path) -> list[Path]:
+    def parse(self, text: str, base: Path | StreamUrl) -> list[PlaylistEntry]:
         parser = configparser.ConfigParser(interpolation=None, strict=False)
-        parser.read_string(path.read_text(encoding="utf-8", errors="replace"))
+        parser.read_string(text)
         section = next((s for s in parser.sections() if s.lower() == "playlist"), None)
         if section is None:
             return []
+        values = {key.lower(): value for key, value in parser.items(section)}
         numbered = sorted(
             (int(m.group(1)), value)
-            for key, value in parser.items(section)
+            for key, value in values.items()
             if (m := self._FILE_KEY.match(key))
         )
-        return [p for _, entry in numbered if (p := self._resolve(entry, path.parent))]
+        entries = []
+        for n, entry in numbered:
+            location = parse_location(entry, base)
+            if location is not None:
+                entries.append(PlaylistEntry(location, values.get(f"title{n}") or None))
+        return entries
 
     def write(self, path: Path, tracks: Sequence[Track]) -> None:
         lines = ["[playlist]"]
         for n, track in enumerate(tracks, start=1):
             lines += [
-                f"File{n}={track.path}",
+                f"File{n}={track.location}",
                 f"Title{n}={track.display_title}",
                 f"Length{n}={track.duration_ms // 1000 if track.duration_ms else -1}",
             ]
@@ -126,16 +144,16 @@ class PlaylistFormatRegistry:
     def default(cls) -> PlaylistFormatRegistry:
         return cls([M3UFormat(), PLSFormat()])
 
-    def supports(self, path: Path) -> bool:
+    def supports(self, path: Path | StreamUrl) -> bool:
         return path.suffix.lower() in self._by_extension
 
-    def for_path(self, path: Path) -> PlaylistFormat:
+    def for_path(self, path: Path | StreamUrl) -> PlaylistFormat:
         try:
             return self._by_extension[path.suffix.lower()]
         except KeyError:
             raise UnsupportedPlaylistError(f"unsupported playlist type: {path.suffix}") from None
 
-    def read(self, path: Path) -> list[Path]:
+    def read(self, path: Path) -> list[PlaylistEntry]:
         return self.for_path(path).read(path)
 
     def write(self, path: Path, tracks: Sequence[Track]) -> None:

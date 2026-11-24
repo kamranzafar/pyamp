@@ -37,11 +37,10 @@ import logging
 import threading
 import time
 from collections.abc import Iterable
-from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
-from pyamp.core.models import Track
+from pyamp.core.models import Location, Track
 from pyamp.library.loader import TrackLoader
 
 log = logging.getLogger(__name__)
@@ -54,7 +53,7 @@ SHUTDOWN_TIMEOUT_MS = 3000
 class LoadJob:
     """Handle for one load request. Lets the requester track or cancel it."""
 
-    def __init__(self, paths: Iterable[Path]) -> None:
+    def __init__(self, paths: Iterable[Location]) -> None:
         self.paths = tuple(paths)
         self.loaded = 0  # only touched on the main thread
         self.done = False  # True once the worker has fully finished (main thread)
@@ -136,7 +135,7 @@ class BackgroundTrackLoader(QObject):
     def busy(self) -> bool:
         return any(not job.cancelled for job in self._jobs)
 
-    def submit(self, paths: Iterable[Path]) -> LoadJob:
+    def submit(self, paths: Iterable[Location]) -> LoadJob:
         job = LoadJob(paths)
         self._jobs.append(job)
         self._pool.start(_LoadTask(self._loader, job, self._signals))

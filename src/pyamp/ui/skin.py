@@ -71,6 +71,9 @@ class Skin:
             width: 14px; margin: -4px 0; border-radius: 2px;
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d8d0a0, stop:1 #8a8060);
         }}
+        QSlider::handle:horizontal:disabled, QSlider::sub-page:horizontal:disabled {{
+            background: transparent;
+        }}
         QTableView {{
             background: {self.panel}; color: {self.playlist_text};
             selection-background-color: {self.selection}; selection-color: {self.playlist_text};

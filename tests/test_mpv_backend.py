@@ -34,10 +34,11 @@ from PySide6.QtCore import QCoreApplication
 
 from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import EventBus, PlaybackStateChanged, TrackChanged
-from pyamp.core.models import PlaybackState, ReplayGainMode, Track
+from pyamp.core.models import PlaybackState, ReplayGainMode, StreamUrl, Track
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 from tests.conftest import BackendRecorder as Recorder
+from tests.radio import RadioStation
 
 try:
     from pyamp.audio.mpv_backend import EQ_LABEL, MpvAudioBackend, equalizer_graph
@@ -313,3 +314,17 @@ def test_missing_filters_are_reported_not_applied(
     [message] = recorder.values("error")
     assert "lacks the volume filter" in str(message)
     assert "--libmpv bundled" in str(message)
+
+
+# -- Streams ------------------------------------------------------------------------------ #
+
+
+def test_plays_a_radio_stream_and_reports_its_song(
+    backend: MpvAudioBackend, recorder: Recorder
+) -> None:
+    with RadioStation(title="Massive Attack - Teardrop") as station:
+        backend.load(StreamUrl(f"{station.url}/live"))
+        backend.play()
+        wait_until(lambda: PlaybackState.PLAYING in recorder.values("state"))
+        wait_until(lambda: "Massive Attack - Teardrop" in recorder.values("stream_title"))
+        assert recorder.values("error") == []

@@ -41,8 +41,8 @@ class SortKey(StrEnum):
 _SORT_KEYS: dict[SortKey, Callable[[Track], tuple[object, ...]]] = {
     SortKey.TITLE: lambda t: (t.title.casefold(),),
     SortKey.ARTIST: lambda t: (t.artist.casefold(), t.album.casefold(), t.title.casefold()),
-    SortKey.ALBUM: lambda t: (t.album.casefold(), t.path.name.casefold()),
-    SortKey.FILENAME: lambda t: (t.path.name.casefold(),),
+    SortKey.ALBUM: lambda t: (t.album.casefold(), t.name.casefold()),
+    SortKey.FILENAME: lambda t: (t.name.casefold(),),
     SortKey.DURATION: lambda t: (t.duration_ms,),
 }
 
@@ -164,10 +164,10 @@ class Playlist(Sequence[Track]):
         """Drop repeated files (keeping the playing copy, else the first). Returns how many."""
         keep: dict[object, int] = {}
         for i, track in enumerate(self._tracks):
-            keep.setdefault(track.path, i)
+            keep.setdefault(track.location, i)
         if self._current is not None:
-            keep[self._tracks[self._current].path] = self._current
-        doomed = [i for i in range(len(self._tracks)) if keep[self._tracks[i].path] != i]
+            keep[self._tracks[self._current].location] = self._current
+        doomed = [i for i in range(len(self._tracks)) if keep[self._tracks[i].location] != i]
         self.remove(doomed)
         return len(doomed)
 

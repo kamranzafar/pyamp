@@ -172,6 +172,20 @@ for each change, which can cause a tiny audible blip), and the settings are
 remembered. Boosting bands can clip loud tracks; lower the preamp if you hear
 distortion.
 
+### Streams and internet radio
+
+**File → Add URL…** (`Ctrl+U`) adds an `http://` or `https://` stream: an internet
+radio station, a station's `.pls`/`.m3u` (downloaded and expanded), or an audio file
+on a web server. Links dragged from a browser work too, and playlists keep their
+streams (with their names) alongside files.
+
+While a station plays, the LCD, window title, menu bar menu and system media widgets
+show the current song as the station announces it (Icecast/Shoutcast "ICY" titles;
+the `mpv` backend only, Qt Multimedia doesn't pass them on). Live streams have no
+length, so seeking is off and the playlist shows **LIVE**. On the `mpv` backend the
+visualiser stays still for streams (it analyses files, not live streams); the Qt
+backend's visualiser works for both.
+
 ### Media keys and system controls
 
 PyAmp works with your keyboard's media keys, headphone buttons and the system's
@@ -253,7 +267,8 @@ src/pyamp/
 │   ├── metadata.py     Tag reading via mutagen
 │   ├── playlist_formats.py  M3U / PLS read & write
 │   ├── saved_playlists.py   Named playlists stored as .m3u8 files
-│   └── loader.py       Files/folders/playlists → Tracks
+│   ├── remote.py       Downloads remote playlists (a station's .pls)
+│   └── loader.py       Files/folders/playlists/streams → Tracks
 ├── media_session/      OS media controls (used by the media-session plugin)
 │   ├── session.py      Player ⇄ NowPlaying snapshots and OS commands (pure)
 │   ├── macos.py        MediaPlayer framework: Now Playing + remote commands
@@ -353,8 +368,10 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
 - **Code signing** for the Windows and macOS builds, so SmartScreen and Gatekeeper
   don't warn.
 - **Last.fm scrobbling**, as an optional plugin.
-- **Internet radio** (maybe): add a stream URL, keep URLs in playlist files (they're
-  currently skipped) and show the station's current song.
+- **DLNA/UPnP media servers** (plugin): find media servers on the local network (NAS,
+  MiniDLNA, Plex/Jellyfin DLNA), browse them and play from them.
+- **Subsonic-compatible servers** (plugin): Navidrome, Airsonic, Gonic and others, for
+  your own music library from anywhere.
 
 Not planned, to keep PyAmp lightweight:
 

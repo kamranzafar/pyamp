@@ -38,7 +38,7 @@ def matches(tracks: Sequence[Track], query: str) -> list[int]:
     words = query.casefold().split()
     found = []
     for index, track in enumerate(tracks):
-        haystack = f"{track.display_title} {track.path.name}".casefold()
+        haystack = f"{track.display_title} {track.name}".casefold()
         if all(word in haystack for word in words):
             found.append(index)
     return found

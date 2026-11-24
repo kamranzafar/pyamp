@@ -81,7 +81,7 @@ class MutagenMetadataReader:
         info = getattr(audio, "info", None)
         length = getattr(info, "length", 0) or 0
         return Track(
-            path=path,
+            location=path,
             title=fields.get("title") or path.stem,
             artist=fields.get("artist", ""),
             album=fields.get("album", ""),

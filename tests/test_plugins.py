@@ -152,7 +152,7 @@ def test_now_playing_plugin_logs_and_unsubscribes(
 ) -> None:
     caplog.set_level(logging.INFO, logger="pyamp.plugins.now_playing")
     plugins.register(NowPlayingLogPlugin())
-    track = Track(path=Path("/m/a.mp3"), title="Song", artist="Band")
+    track = Track(location=Path("/m/a.mp3"), title="Song", artist="Band")
 
     bus.publish(TrackChanged(track, 0))
     assert "Now playing: Band - Song" in caplog.text

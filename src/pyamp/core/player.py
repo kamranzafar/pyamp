@@ -32,6 +32,7 @@ from pyamp.audio.backend import AudioBackend
 from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import (
     AudioFrame,
+    AudioInfoChanged,
     EqualizerChanged,
     EventBus,
     PlaybackError,
@@ -82,6 +83,7 @@ class Player:
         self._queued: tuple[int, Location] | None = None
         self._stream_title = ""
         self._live = False
+        self._audio_info = AudioInfoChanged(0, 0)
         self._resolver: LocationResolver | None = None
         # What the backend was given -> the playlist location it stands for, so a gapless
         # backend reporting the location it moved on to can be matched to the playlist.
@@ -107,6 +109,11 @@ class Player:
     def stream_title(self) -> str:
         """The current stream's "now playing" title ("" if none, or not a stream)."""
         return self._stream_title
+
+    @property
+    def audio_info(self) -> AudioInfoChanged:
+        """The playing audio's bitrate and sample rate (0 where unknown)."""
+        return self._audio_info
 
     @property
     def position_ms(self) -> int:
@@ -348,6 +355,12 @@ class Player:
         if track is not None and track.is_stream and title != self._stream_title:
             self._stream_title = title
             self._bus.publish(StreamTitleChanged(title))
+
+    def on_audio_info(self, bitrate: int, sample_rate: int) -> None:
+        info = AudioInfoChanged(round(max(bitrate, 0) / 1000), max(sample_rate, 0))
+        if info != self._audio_info:
+            self._audio_info = info
+            self._bus.publish(info)
 
     def on_error(self, message: str) -> None:
         track = self._playlist.current_track

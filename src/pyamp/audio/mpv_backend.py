@@ -127,6 +127,7 @@ class _Bridge(QObject):
     duration = Signal(int)
     advanced = Signal(str)
     stream_title = Signal(str)
+    audio_info = Signal(int, int)  # bitrate (bits/s), sample rate (Hz)
     end_of_track = Signal()
     error = Signal(str)
 
@@ -138,6 +139,7 @@ class _Bridge(QObject):
         self.duration.connect(self._on_duration)
         self.advanced.connect(self._on_advanced)
         self.stream_title.connect(self._on_stream_title)
+        self.audio_info.connect(self._on_audio_info)
         self.end_of_track.connect(self._on_end_of_track)
         self.error.connect(self._on_error)
 
@@ -163,6 +165,10 @@ class _Bridge(QObject):
     @Slot(str)
     def _on_stream_title(self, title: str) -> None:
         self._backend.listener.on_stream_title(title)
+
+    @Slot(int, int)
+    def _on_audio_info(self, bitrate: int, sample_rate: int) -> None:
+        self._backend.listener.on_audio_info(bitrate, sample_rate)
 
     @Slot()
     def _on_end_of_track(self) -> None:
@@ -193,6 +199,8 @@ class MpvAudioBackend(AudioBackend):
         self._idle = True
         self._last_position = -1.0
         self._equalizer: Equalizer | None = None  # what's currently in mpv's filter chain
+        self._bitrate = 0  # of the playing audio, as mpv last reported it (its thread)
+        self._sample_rate = 0
 
         # libmpv refuses to start unless LC_NUMERIC is "C" (mpv_create returns NULL and
         # python-mpv then crashes). python-mpv sets it on import, but creating the Qt
@@ -204,6 +212,8 @@ class MpvAudioBackend(AudioBackend):
         self._mpv.observe_property("time-pos", self._observe_position)
         self._mpv.observe_property("duration", self._observe_duration)
         self._mpv.observe_property("metadata", self._observe_metadata)
+        self._mpv.observe_property("audio-bitrate", self._observe_bitrate)
+        self._mpv.observe_property("audio-params", self._observe_audio_params)
         self._mpv.register_event_callback(self._on_event)
 
     @property
@@ -297,6 +307,22 @@ class MpvAudioBackend(AudioBackend):
         title = {key.lower(): value for key, value in (metadata or {}).items()}.get("icy-title")
         if title:
             self._bridge.stream_title.emit(title.strip())
+
+    def _observe_bitrate(self, _name: str, bitrate: float | None) -> None:
+        # Varies as VBR files and streams play; mpv updates it about once a second.
+        self._report_audio_info(bitrate=int(bitrate or 0))
+
+    def _observe_audio_params(self, _name: str, params: dict[str, Any] | None) -> None:
+        self._report_audio_info(sample_rate=int((params or {}).get("samplerate") or 0))
+
+    def _report_audio_info(
+        self, *, bitrate: int | None = None, sample_rate: int | None = None
+    ) -> None:
+        if bitrate is not None:
+            self._bitrate = bitrate
+        if sample_rate is not None:
+            self._sample_rate = sample_rate
+        self._bridge.audio_info.emit(self._bitrate, self._sample_rate)
 
     def _on_event(self, event: Any) -> None:
         event_id = event.event_id.value

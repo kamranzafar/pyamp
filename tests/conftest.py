@@ -202,5 +202,8 @@ class BackendRecorder:
     def on_error(self, message: str) -> None:
         self._record("error", message)
 
+    def on_audio_info(self, bitrate: int, sample_rate: int) -> None:
+        self._record("audio_info", (bitrate, sample_rate))
+
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
         self._record("audio")

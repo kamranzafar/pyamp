@@ -328,3 +328,13 @@ def test_plays_a_radio_stream_and_reports_its_song(
         wait_until(lambda: PlaybackState.PLAYING in recorder.values("state"))
         wait_until(lambda: "Massive Attack - Teardrop" in recorder.values("stream_title"))
         assert recorder.values("error") == []
+
+
+def test_reports_bitrate_and_sample_rate_while_playing(
+    backend: MpvAudioBackend, recorder: Recorder, tmp_path: Path
+) -> None:
+    backend.load(write_wav(tmp_path / "a.wav", 5))  # 8 kHz, 16-bit mono: 128 kbps
+    backend.play()
+    wait_until(lambda: any(info == (128_000, 8000) for info in recorder.values("audio_info")))
+    backend.stop()
+    wait_until(lambda: recorder.values("audio_info")[-1] == (0, 0))  # nothing playing

@@ -20,12 +20,13 @@
 
 from __future__ import annotations
 
+import pytest
 from PySide6.QtCore import QCoreApplication, QRect
 
-from pyamp.core.events import EventBus, PlaybackStateChanged
+from pyamp.core.events import AudioInfoChanged, EventBus, PlaybackStateChanged
 from pyamp.core.models import PlaybackState
 from pyamp.ui.skin import DEFAULT_SKIN
-from pyamp.ui.widgets.lcd import LcdPanel
+from pyamp.ui.widgets.lcd import LcdPanel, audio_info_text
 
 
 def test_pause_blink_does_not_shift_layout(qt_app: QCoreApplication, bus: EventBus) -> None:
@@ -43,3 +44,25 @@ def test_pause_blink_does_not_shift_layout(qt_app: QCoreApplication, bus: EventB
     shown = geometries()
     panel._time.setVisible(False)  # what the blink timer does
     assert geometries() == shown
+
+
+@pytest.mark.parametrize(
+    ("info", "text"),
+    [
+        (AudioInfoChanged(320, 44_100), "320 kbps · 44.1 kHz"),
+        (AudioInfoChanged(128, 48_000), "128 kbps · 48 kHz"),
+        (AudioInfoChanged(0, 22_050), "22.1 kHz"),  # a stream that hasn't said its bitrate
+        (AudioInfoChanged(96, 0), "96 kbps"),
+        (AudioInfoChanged(0, 0), ""),  # nothing playing
+    ],
+)
+def test_audio_info_text(info: AudioInfoChanged, text: str) -> None:
+    assert audio_info_text(info) == text
+
+
+def test_lcd_shows_the_audio_info(qt_app: QCoreApplication, bus: EventBus) -> None:
+    lcd = LcdPanel(bus, DEFAULT_SKIN, band_count=8)
+    bus.publish(AudioInfoChanged(256, 44_100))
+    assert lcd._audio_info.text() == "256 kbps · 44.1 kHz"
+    bus.publish(AudioInfoChanged(0, 0))
+    assert lcd._audio_info.text() == ""

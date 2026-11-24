@@ -47,12 +47,15 @@ Fmt = QAudioFormat.SampleFormat
 
 
 def buffer(
-    samples: np.ndarray, sample_format: QAudioFormat.SampleFormat, channels: int
+    samples: np.ndarray,
+    sample_format: QAudioFormat.SampleFormat,
+    channels: int,
+    rate: int = 8000,
 ) -> QAudioBuffer:
     fmt = QAudioFormat()
     fmt.setSampleFormat(sample_format)
     fmt.setChannelCount(channels)
-    fmt.setSampleRate(8000)
+    fmt.setSampleRate(rate)
     return QAudioBuffer(samples.tobytes(), fmt)
 
 
@@ -183,7 +186,18 @@ def test_errors_are_reported_with_a_message(backend: QtAudioBackend, recorder: R
 def test_audio_buffers_feed_the_visualiser(backend: QtAudioBackend, recorder: Recorder) -> None:
     backend._on_audio_buffer(buffer(np.zeros(16, "<i2"), Fmt.Int16, 1))
     backend._on_audio_buffer(buffer(np.zeros(4, "<i2"), Fmt.Unknown, 1))  # skipped
-    assert recorder.names() == ["audio"]
+    assert [n for n in recorder.names() if n == "audio"] == ["audio"]
+
+
+def test_sample_rate_comes_from_the_audio_and_resets_per_track(
+    backend: QtAudioBackend, recorder: Recorder
+) -> None:
+    for _ in range(3):
+        backend._on_audio_buffer(buffer(np.zeros(16, "<i2"), Fmt.Int16, 2, rate=44_100))
+    assert recorder.values("audio_info") == [(0, 44_100)]  # once, not per buffer
+    backend.load(Path("/m/next.mp3"))
+    backend._on_audio_buffer(buffer(np.zeros(16, "<i2"), Fmt.Int16, 2, rate=48_000))
+    assert recorder.values("audio_info") == [(0, 44_100), (0, 0), (0, 48_000)]
 
 
 # -- Real playback (needs an audio output device) ------------------------------------ #

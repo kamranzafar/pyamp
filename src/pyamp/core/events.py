@@ -141,6 +141,18 @@ class SavedPlaylistsChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class AudioInfoChanged:
+    """What's playing: bitrate in kbps and sample rate in Hz (0 where unknown).
+
+    Follows the audio, not the track: it carries on unchanged into a next track of the
+    same format, and is 0, 0 once nothing plays.
+    """
+
+    bitrate_kbps: int
+    sample_rate_hz: int
+
+
+@dataclass(frozen=True, slots=True)
 class StreamTitleChanged:
     """What a stream (e.g. an internet radio station) says it's playing now.
 

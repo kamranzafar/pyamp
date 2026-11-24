@@ -54,6 +54,14 @@ class BackendListener(Protocol):
         ...
 
     def on_error(self, message: str) -> None: ...
+    def on_audio_info(self, bitrate: int, sample_rate: int) -> None:
+        """The playing audio's bitrate (bits/s) and sample rate (Hz); 0 if unknown.
+
+        Reported when either changes (VBR files and streams may vary as they play), and
+        as 0, 0 once nothing is playing. Optional.
+        """
+        ...
+
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
         """Mono float32 PCM in [-1, 1] that is currently being played (optional)."""
         ...
@@ -81,6 +89,9 @@ class _NullListener:
         pass
 
     def on_error(self, message: str) -> None:
+        pass
+
+    def on_audio_info(self, bitrate: int, sample_rate: int) -> None:
         pass
 
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:

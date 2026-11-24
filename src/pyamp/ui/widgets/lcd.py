@@ -27,6 +27,7 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase, QMouseEvent
 from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QWidget
 
 from pyamp.core.events import (
+    AudioInfoChanged,
     EventBus,
     PlaybackError,
     PlaybackStateChanged,
@@ -46,6 +47,16 @@ _STATUS_GLYPHS = {
     PlaybackState.STOPPED: "■",
 }
 BLINK_MS = 500
+
+
+def audio_info_text(info: AudioInfoChanged) -> str:
+    """Winamp-style ``320 kbps · 44.1 kHz`` (whichever parts are known)."""
+    parts = []
+    if info.bitrate_kbps:
+        parts.append(f"{info.bitrate_kbps} kbps")
+    if info.sample_rate_hz:
+        parts.append(f"{round(info.sample_rate_hz / 1000, 1):g} kHz")
+    return " · ".join(parts)
 
 
 class ClickableLabel(QLabel):
@@ -93,16 +104,14 @@ class LcdPanel(QFrame):
         policy.setRetainSizeWhenHidden(True)
         self._time.setSizePolicy(policy)
         self._title = MarqueeLabel(QColor(skin.lcd), mono)
+        small = QFont(mono)
+        small.setPointSizeF(max(mono.pointSizeF() * 0.8, 8.0))
+        self._audio_info = QLabel()
+        self._audio_info.setFont(small)
+        self._audio_info.setStyleSheet(lcd_style)
+        self._audio_info.setToolTip("Bitrate and sample rate of what's playing")
         self._spectrum = SpectrumWidget(band_count, skin)
-
-        layout = QGridLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setHorizontalSpacing(10)
-        layout.addWidget(self._status, 0, 0)
-        layout.addWidget(self._time, 0, 1)
-        layout.addWidget(self._title, 0, 2)
-        layout.addWidget(self._spectrum, 1, 0, 1, 3)
-        layout.setColumnStretch(2, 1)
+        self._lay_out()
 
         # Winamp blinks the time display while paused.
         self._blink = QTimer(self)
@@ -113,9 +122,23 @@ class LcdPanel(QFrame):
         bus.subscribe(StreamTitleChanged, self._on_stream_title)
         bus.subscribe(PlaybackStateChanged, self._on_state)
         bus.subscribe(PositionChanged, self._on_position)
+        bus.subscribe(AudioInfoChanged, lambda e: self._audio_info.setText(audio_info_text(e)))
         bus.subscribe(SpectrumUpdated, lambda e: self._spectrum.set_levels(e.levels))
         bus.subscribe(PlaybackError, lambda e: self._title.set_text(f"Error: {e.message}"))
         self._render_time()
+
+    def _lay_out(self) -> None:
+        layout = QGridLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setHorizontalSpacing(10)
+        layout.setVerticalSpacing(2)
+        # The big time spans the title and the small audio line under it.
+        layout.addWidget(self._status, 0, 0, 2, 1)
+        layout.addWidget(self._time, 0, 1, 2, 1)
+        layout.addWidget(self._title, 0, 2)
+        layout.addWidget(self._audio_info, 1, 2)
+        layout.addWidget(self._spectrum, 2, 0, 1, 3)
+        layout.setColumnStretch(2, 1)
 
     @property
     def show_remaining(self) -> bool:

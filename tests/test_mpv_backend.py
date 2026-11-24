@@ -338,3 +338,19 @@ def test_reports_bitrate_and_sample_rate_while_playing(
     wait_until(lambda: any(info == (128_000, 8000) for info in recorder.values("audio_info")))
     backend.stop()
     wait_until(lambda: recorder.values("audio_info")[-1] == (0, 0))  # nothing playing
+
+
+def test_sample_rate_stays_when_changing_to_a_song_of_the_same_format(
+    backend: MpvAudioBackend, recorder: Recorder, tmp_path: Path
+) -> None:
+    # mpv reports the sample rate as gone on loading the next file, and (same format)
+    # never reports it back; the backend reads it rather than trusting the notification.
+    backend.load(write_wav(tmp_path / "a.wav", 5))
+    backend.play()
+    wait_until(lambda: (128_000, 8000) in recorder.values("audio_info"))
+    backend.load(write_wav(tmp_path / "b.wav", 5))  # the user picks another song
+    backend.play()
+    wait_until(lambda: PlaybackState.PLAYING in recorder.values("state"))
+    count = len(recorder.values("audio_info"))
+    wait_until(lambda: len(recorder.values("audio_info")) > count)
+    wait_until(lambda: recorder.values("audio_info")[-1] == (128_000, 8000))

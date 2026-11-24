@@ -127,7 +127,7 @@ class _Bridge(QObject):
     duration = Signal(int)
     advanced = Signal(str)
     stream_title = Signal(str)
-    audio_info = Signal(int, int)  # bitrate (bits/s), sample rate (Hz)
+    audio_changed = Signal()  # bitrate or sample rate may have changed
     end_of_track = Signal()
     error = Signal(str)
 
@@ -139,7 +139,7 @@ class _Bridge(QObject):
         self.duration.connect(self._on_duration)
         self.advanced.connect(self._on_advanced)
         self.stream_title.connect(self._on_stream_title)
-        self.audio_info.connect(self._on_audio_info)
+        self.audio_changed.connect(self._on_audio_changed)
         self.end_of_track.connect(self._on_end_of_track)
         self.error.connect(self._on_error)
 
@@ -166,9 +166,9 @@ class _Bridge(QObject):
     def _on_stream_title(self, title: str) -> None:
         self._backend.listener.on_stream_title(title)
 
-    @Slot(int, int)
-    def _on_audio_info(self, bitrate: int, sample_rate: int) -> None:
-        self._backend.listener.on_audio_info(bitrate, sample_rate)
+    @Slot()
+    def _on_audio_changed(self) -> None:
+        self._backend.report_audio_info()
 
     @Slot()
     def _on_end_of_track(self) -> None:
@@ -199,8 +199,7 @@ class MpvAudioBackend(AudioBackend):
         self._idle = True
         self._last_position = -1.0
         self._equalizer: Equalizer | None = None  # what's currently in mpv's filter chain
-        self._bitrate = 0  # of the playing audio, as mpv last reported it (its thread)
-        self._sample_rate = 0
+        self._closed = False
 
         # libmpv refuses to start unless LC_NUMERIC is "C" (mpv_create returns NULL and
         # python-mpv then crashes). python-mpv sets it on import, but creating the Qt
@@ -212,8 +211,8 @@ class MpvAudioBackend(AudioBackend):
         self._mpv.observe_property("time-pos", self._observe_position)
         self._mpv.observe_property("duration", self._observe_duration)
         self._mpv.observe_property("metadata", self._observe_metadata)
-        self._mpv.observe_property("audio-bitrate", self._observe_bitrate)
-        self._mpv.observe_property("audio-params", self._observe_audio_params)
+        self._mpv.observe_property("audio-bitrate", self._observe_audio)
+        self._mpv.observe_property("audio-params", self._observe_audio)
         self._mpv.register_event_callback(self._on_event)
 
     @property
@@ -277,7 +276,24 @@ class MpvAudioBackend(AudioBackend):
             self._equalizer = equalizer
 
     def close(self) -> None:
+        self._closed = True
         self._mpv.terminate()
+
+    def report_audio_info(self) -> None:
+        """Tell the listener the playing audio's bitrate and sample rate (main thread).
+
+        Read from mpv rather than taken from its change notifications: on loading a file
+        with the same format, mpv reports the sample rate as gone and never back.
+        """
+        if self._closed:
+            return
+        try:
+            bitrate = self._mpv.audio_bitrate
+            params = self._mpv.audio_params
+        except (AttributeError, RuntimeError):  # mpv has nothing playing
+            bitrate, params = None, None
+        sample_rate = params.get("samplerate") if isinstance(params, dict) else None
+        self._listener.on_audio_info(int(bitrate or 0), int(sample_rate or 0))
 
     # -- mpv event thread --------------------------------------------------- #
 
@@ -308,21 +324,11 @@ class MpvAudioBackend(AudioBackend):
         if title:
             self._bridge.stream_title.emit(title.strip())
 
-    def _observe_bitrate(self, _name: str, bitrate: float | None) -> None:
-        # Varies as VBR files and streams play; mpv updates it about once a second.
-        self._report_audio_info(bitrate=int(bitrate or 0))
-
-    def _observe_audio_params(self, _name: str, params: dict[str, Any] | None) -> None:
-        self._report_audio_info(sample_rate=int((params or {}).get("samplerate") or 0))
-
-    def _report_audio_info(
-        self, *, bitrate: int | None = None, sample_rate: int | None = None
-    ) -> None:
-        if bitrate is not None:
-            self._bitrate = bitrate
-        if sample_rate is not None:
-            self._sample_rate = sample_rate
-        self._bridge.audio_info.emit(self._bitrate, self._sample_rate)
+    def _observe_audio(self, _name: str, _value: object) -> None:
+        # The bitrate varies as VBR files and streams play (mpv updates it about once a
+        # second). The values are read on the main thread: reading mpv properties from
+        # its own event thread can hang mpv while it shuts down.
+        self._bridge.audio_changed.emit()
 
     def _on_event(self, event: Any) -> None:
         event_id = event.event_id.value

@@ -26,13 +26,17 @@ from importlib.metadata import entry_points
 from pathlib import Path
 
 import pytest
+from PySide6.QtWidgets import QMenu
 
+from pyamp.app import Application
 from pyamp.core.events import EventBus, TrackChanged
 from pyamp.core.models import Track
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 from pyamp.plugins import PluginContext, PluginManager, manager
 from pyamp.plugins.now_playing import NowPlayingLogPlugin
+from pyamp.ui.main_window import MainWindow
+from tests.test_playlist_ui import app  # noqa: F401  (fixture: the real app, offscreen)
 
 
 class RecordingPlugin:
@@ -145,6 +149,7 @@ def test_entry_points_are_loaded_honouring_disabled_and_failures(
 def test_builtin_plugin_is_registered_as_entry_point() -> None:
     names = {ep.name: ep.value for ep in entry_points(group=manager.ENTRY_POINT_GROUP)}
     assert names.get("now-playing-log") == "pyamp.plugins.now_playing:NowPlayingLogPlugin"
+    assert names.get("subsonic") == "pyamp.plugins.subsonic:SubsonicPlugin"
 
 
 def test_now_playing_plugin_logs_and_unsubscribes(
@@ -161,3 +166,20 @@ def test_now_playing_plugin_logs_and_unsubscribes(
     caplog.clear()
     bus.publish(TrackChanged(track, 0))
     assert caplog.text == ""
+
+
+def test_plugins_can_add_menus_before_help(app: Application) -> None:  # noqa: F811
+    ui = app.plugins._context.ui()
+    assert isinstance(ui, MainWindow)
+    calls: list[str] = []
+    ui.add_menu_action("&Library", "Browse…", lambda: calls.append("browse"), "Ctrl+B")
+    ui.add_menu_action("&Library", "Server…", lambda: calls.append("server"))
+    titles = [a.text() for a in ui.menuBar().actions()]
+    assert titles[-2:] == ["&Library", "&Help"]
+    library = next(a.menu() for a in ui.menuBar().actions() if a.text() == "&Library")
+    assert isinstance(library, QMenu)
+    browse, server = library.actions()
+    assert browse.shortcut().toString() == "Ctrl+B"
+    server.trigger()
+    assert calls == ["server"]
+    assert ui.dialog_parent() is ui

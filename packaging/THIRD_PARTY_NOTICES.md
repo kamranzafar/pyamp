@@ -57,3 +57,5 @@ The combination is distributed under the GPL, compatible with PyAmp's GPL-3.0-or
 | NumPy | BSD-3-Clause | <https://numpy.org> |
 | platformdirs | MIT | <https://github.com/tox-dev/platformdirs> |
 | PyObjC (macOS) | MIT | <https://github.com/ronaldoussoren/pyobjc> |
+| keyring (with jaraco.classes, jaraco.context, jaraco.functools, more-itertools) | MIT | <https://github.com/jaraco/keyring> |
+| pywin32-ctypes (Windows) | BSD-3-Clause | <https://github.com/enthought/pywin32-ctypes> |

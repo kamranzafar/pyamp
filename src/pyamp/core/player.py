@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -52,6 +53,9 @@ log = logging.getLogger(__name__)
 #: Pressing "previous" later than this restarts the current track instead.
 RESTART_THRESHOLD_MS = 3000
 
+type LocationResolver = Callable[[Location], Location]
+"""Turns a playlist location into the one the backend plays (e.g. adds a server login)."""
+
 
 class Player:
     """High-level playback API used by the UI, keyboard shortcuts and plugins.
@@ -78,6 +82,10 @@ class Player:
         self._queued: tuple[int, Location] | None = None
         self._stream_title = ""
         self._live = False
+        self._resolver: LocationResolver | None = None
+        # What the backend was given -> the playlist location it stands for, so a gapless
+        # backend reporting the location it moved on to can be matched to the playlist.
+        self._resolved: dict[Location, Location] = {}
 
         backend.set_listener(self)
         backend.set_volume(self._volume)
@@ -158,7 +166,8 @@ class Player:
         self._active = True
         self._queued = None
         self._apply_track_gain(track)
-        self._backend.load(track.location)
+        self._resolved.clear()
+        self._backend.load(self._resolve(track.location))
         self._backend.play()
         self._stream_title = ""
         # A stream without a known length (internet radio) is live: no duration, no seeking.
@@ -233,6 +242,24 @@ class Player:
         self._backend.stop()
         self._backend.close()
 
+    def set_location_resolver(self, resolver: LocationResolver | None) -> None:
+        """Have ``resolver`` rewrite each location just before the backend gets it.
+
+        Playlists keep the plain location; the resolver can add what shouldn't be saved,
+        such as a media server's login. Applies from the next track loaded.
+        """
+        self._resolver = resolver
+
+    def _resolve(self, location: Location) -> Location:
+        resolved = location
+        if self._resolver is not None:
+            try:
+                resolved = self._resolver(location)
+            except Exception:
+                log.exception("Location resolver failed for %s; playing it as is", location)
+        self._resolved[resolved] = location
+        return resolved
+
     def _publish_mode(self) -> None:
         self._bus.publish(PlayModeChanged(self._shuffle, self._repeat))
 
@@ -257,7 +284,7 @@ class Player:
         queued = None if index is None else (index, self._playlist[index].location)
         if queued != self._queued:
             self._queued = queued
-            self._backend.queue_next(queued[1] if queued else None)
+            self._backend.queue_next(self._resolve(queued[1]) if queued else None)
 
     # -- BackendListener ---------------------------------------------------- #
 
@@ -290,6 +317,8 @@ class Player:
             self.play_index(index)
 
     def on_track_advanced(self, location: Location) -> None:
+        location = self._resolved.get(location, location)
+        self._resolved.clear()  # the backend won't report this one again
         queued, self._queued = self._queued, None
         index: int | None
         if queued is not None and queued[1] == location and self._points_to(queued[0], location):

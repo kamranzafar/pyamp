@@ -25,6 +25,7 @@ dependencies = [
     "winrt-Windows.Media>=4!10.0.28000 ; sys_platform == 'win32'",
     "winrt-Windows.Media.Interop>=4.0 ; sys_platform == 'win32'",
     "mpv>=1.0.7",
+    "keyring>=25",  # Subsonic plugin: the server password, in the system keychain
 ]
 
 [project.scripts]
@@ -35,6 +36,7 @@ pyamp = "pyamp.app:main"
 [project.entry-points."pyamp.plugins"]
 now-playing-log = "pyamp.plugins.now_playing:NowPlayingLogPlugin"
 media-session = "pyamp.plugins.media_session:MediaSessionPlugin"
+subsonic = "pyamp.plugins.subsonic:SubsonicPlugin"
 
 [build-system]
 requires = ["uv_build>=0.13.9,<0.14.0"]

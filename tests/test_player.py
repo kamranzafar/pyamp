@@ -35,7 +35,15 @@ from pyamp.core.events import (
     ReplayGainChanged,
     TrackChanged,
 )
-from pyamp.core.models import PlaybackState, RepeatMode, ReplayGain, ReplayGainMode, Track
+from pyamp.core.models import (
+    Location,
+    PlaybackState,
+    RepeatMode,
+    ReplayGain,
+    ReplayGainMode,
+    StreamUrl,
+    Track,
+)
 from pyamp.core.play_order import ShuffleOrder
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
@@ -343,3 +351,45 @@ def test_equalizer_setting_kept_without_backend_support(
     assert backend.equalizers == []  # nothing to apply it to
     assert player.equalizer == eq  # but the setting is remembered
     assert events == [EqualizerChanged(eq)]
+
+
+def _signed(location: Location) -> Location:
+    return StreamUrl(f"{location}?key=1") if isinstance(location, StreamUrl) else location
+
+
+def test_resolver_rewrites_what_the_backend_loads(
+    player: Player, playlist: Playlist, backend: FakeBackend
+) -> None:
+    song = Track.for_stream(StreamUrl("https://music.example/rest/stream"), "Song")
+    playlist.add([song])
+    player.set_location_resolver(_signed)
+    player.play()
+    assert backend.loaded == [StreamUrl("https://music.example/rest/stream?key=1")]
+    assert playlist.current_track == song  # the playlist keeps the plain location
+
+
+def test_resolved_advance_is_matched_to_the_playlist(
+    gplayer: Player, playlist: Playlist, gapless: FakeGaplessBackend
+) -> None:
+    songs = [Track.for_stream(StreamUrl(f"https://music.example/{n}"), str(n)) for n in range(3)]
+    playlist.add(songs)
+    gplayer.set_location_resolver(_signed)
+    gplayer.play()
+    assert gapless.next_up == StreamUrl("https://music.example/1?key=1")
+    gapless.advance()  # reports the resolved URL, as mpv does
+    assert playlist.current_track == songs[1]
+    assert gapless.next_up == StreamUrl("https://music.example/2?key=1")
+
+
+def test_a_failing_resolver_plays_the_location_as_is(
+    player: Player, playlist: Playlist, backend: FakeBackend
+) -> None:
+    tracks = make_tracks(1)
+    playlist.add(tracks)
+
+    def broken(location: Location) -> Location:
+        raise RuntimeError("keychain locked")
+
+    player.set_location_resolver(broken)
+    player.play()
+    assert backend.loaded == [tracks[0].location]

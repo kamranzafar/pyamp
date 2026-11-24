@@ -42,13 +42,19 @@ a = Analysis(  # noqa: F821
     binaries=libmpv_binaries,
     datas=[
         *copy_metadata("pyamp"),  # entry points: plugins are discovered through them
+        *copy_metadata("keyring"),  # keyring finds its keychain backends the same way
         *collect_data_files("pyamp"),  # icons (pyamp/resources)
         (str(ROOT / "LICENSE"), "."),
         (str(ROOT / "ADDITIONAL-TERMS.md"), "."),
         (str(NOTICES), "."),
     ],
     # Imported lazily (registry, plugins, platform adapters), so list them explicitly.
-    hiddenimports=[*collect_submodules("pyamp"), "PySide6.QtMultimedia", "mpv"],
+    hiddenimports=[
+        *collect_submodules("pyamp"),
+        *collect_submodules("keyring.backends"),
+        "PySide6.QtMultimedia",
+        "mpv",
+    ],
     excludes=["jeepney", "tkinter", "pytest", "MediaPlayer", "objc"],
     noarchive=False,
 )

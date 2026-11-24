@@ -67,7 +67,7 @@ class TrackLoader:
         """Audio files to read tags from, and ready-made tracks for streams."""
         for location in locations:
             if isinstance(location, StreamUrl):
-                yield from self._stream(location, None, depth=0)
+                yield from self._stream(location, None, 0, depth=0)
             elif location.is_dir():
                 yield from sorted(
                     p for p in location.rglob("*") if p.is_file() and is_audio_file(p)
@@ -85,14 +85,16 @@ class TrackLoader:
     def _entries(self, entries: Iterable[PlaylistEntry], depth: int) -> Iterator[Path | Track]:
         for entry in entries:
             if isinstance(entry.location, StreamUrl):
-                yield from self._stream(entry.location, entry.title, depth)
+                yield from self._stream(entry.location, entry.title, entry.duration_ms, depth)
             elif entry.location.is_file():
                 yield entry.location
 
-    def _stream(self, url: StreamUrl, title: str | None, depth: int) -> Iterator[Path | Track]:
+    def _stream(
+        self, url: StreamUrl, title: str | None, duration_ms: int, depth: int
+    ) -> Iterator[Path | Track]:
         """A stream, or the entries of a remote playlist (how radio stations publish)."""
         if not self._formats.supports(url):
-            yield Track.for_stream(url, title)
+            yield Track.for_stream(url, title, duration_ms)
             return
         if depth >= MAX_REMOTE_DEPTH:
             log.warning("Not following %s: too many nested remote playlists", url)

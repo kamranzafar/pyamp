@@ -110,6 +110,7 @@ class MainWindow(QMainWindow):
         self._equalizer_window: EqualizerWindow | None = None
         self._jump_dialog: JumpDialog | None = None
         self._about_dialog: AboutDialog | None = None
+        self._plugin_menus: dict[str, QMenu] = {}
         self.setWindowTitle(APP_NAME)
         self.setStyleSheet(skin.stylesheet())
         self.setAcceptDrops(True)
@@ -275,10 +276,30 @@ class MainWindow(QMainWindow):
             self.show_icon_action.setToolTip(f"This desktop has no {PLACE.lower()}")
         self._sync_view_menu()
 
-        help_menu = menu_bar.addMenu("&Help")
+        help_menu = self._help_menu = menu_bar.addMenu("&Help")
         self.about_action = self._add_menu_action(help_menu, f"&About {APP_NAME}", self.show_about)
         # macOS shows it as "About PyAmp" in the application menu, where users look for it.
         self.about_action.setMenuRole(QAction.MenuRole.AboutRole)
+
+    # -- PluginUi ----------------------------------------------------------- #
+
+    def add_menu_action(
+        self,
+        menu: str,
+        text: str,
+        triggered: Callable[[], object],
+        shortcut: str | None = None,
+    ) -> None:
+        """Add a plugin's menu item, to its own menu just before Help."""
+        target = self._plugin_menus.get(menu)
+        if target is None:
+            target = QMenu(menu, self)
+            self.menuBar().insertMenu(self._help_menu.menuAction(), target)
+            self._plugin_menus[menu] = target
+        self._add_menu_action(target, text, triggered, shortcut)
+
+    def dialog_parent(self) -> QWidget:
+        return self
 
     def show_about(self) -> AboutDialog:
         if self._about_dialog is None:

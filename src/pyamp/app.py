@@ -151,7 +151,13 @@ class Application:
             TrackLoader(MutagenMetadataReader(), self.playlist_formats)
         )
         self.plugins = PluginManager(
-            PluginContext(self.bus, self.player, self.playlist, window_handle=self._window_handle)
+            PluginContext(
+                self.bus,
+                self.player,
+                self.playlist,
+                window_handle=self._window_handle,
+                ui=lambda: getattr(self, "window", None),
+            )
         )
         self.playlists = PlaylistSession(
             self.playlist,

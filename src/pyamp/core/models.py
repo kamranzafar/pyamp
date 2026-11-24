@@ -167,9 +167,9 @@ class Track:
         return cls(location=path, title=path.stem)
 
     @classmethod
-    def for_stream(cls, url: StreamUrl, title: str | None = None) -> Track:
-        """A stream, titled from its playlist entry or else its URL."""
-        return cls(location=url, title=title or url.stem or url.name)
+    def for_stream(cls, url: StreamUrl, title: str | None = None, duration_ms: int = 0) -> Track:
+        """A stream, titled from its playlist entry or else its URL (0 length: live)."""
+        return cls(location=url, title=title or url.stem or url.name, duration_ms=duration_ms)
 
     @property
     def is_stream(self) -> bool:

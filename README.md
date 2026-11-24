@@ -186,6 +186,21 @@ length, so seeking is off and the playlist shows **LIVE**. On the `mpv` backend 
 visualiser stays still for streams (it analyses files, not live streams); the Qt
 backend's visualiser works for both.
 
+### Subsonic servers
+
+PyAmp can play your own music library from a Subsonic-compatible server: Navidrome,
+Airsonic(-Advanced), Gonic and others. **Library → Subsonic Server…** asks for the
+server's address, your username and password, and checks them. **Library → Subsonic
+Browser…** (`Ctrl+B`) then lists your artists, their albums and your playlists, and
+searches the library; **Add** puts the selected songs (or all of them) in the playlist,
+**Play** (or a double-click) also starts them.
+
+Songs are added with their tags and length, so they show like local files and can be
+seeked. The password is kept in the system keychain (macOS Keychain, Windows Credential
+Manager or Secret Service on Linux), never in a file; without a keychain PyAmp asks
+for it each session. Saved playlists keep the server's songs without your login (PyAmp
+adds it as each one plays), so they're safe to share or back up.
+
 ### Media keys and system controls
 
 PyAmp works with your keyboard's media keys, headphone buttons and the system's
@@ -275,6 +290,7 @@ src/pyamp/
 │   ├── windows.py      System Media Transport Controls (pywinrt)
 │   └── mpris.py        MPRIS over D-Bus (jeepney), served on the Qt main thread
 ├── plugins/            Entry-point based plugin system, now-playing log, media session
+│   └── subsonic/       Subsonic client, keychain account store, server and browser windows
 └── ui/                 PySide6 front-end
     ├── skin.py         All colours in one place (seam for .wsz skins)
     ├── actions.py      Playback commands as QActions
@@ -359,7 +375,13 @@ Register it in your package's `pyproject.toml`:
 my-scrobbler = "my_package:MyScrobbler"
 ```
 
-See `src/pyamp/plugins/now_playing.py` for a working example.
+`ctx.ui()` gives plugins with windows a place in the menu bar
+(`add_menu_action("&Library", "My Window…", show)`) and a parent for their windows, and
+`ctx.player.set_location_resolver()` lets one rewrite what the player loads (the Subsonic
+plugin adds its login there).
+
+See `src/pyamp/plugins/now_playing.py` for a small example, and `plugins/subsonic/` for
+one with windows.
 
 ## Roadmap
 
@@ -370,8 +392,6 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
 - **Last.fm scrobbling**, as an optional plugin.
 - **DLNA/UPnP media servers** (plugin): find media servers on the local network (NAS,
   MiniDLNA, Plex/Jellyfin DLNA), browse them and play from them.
-- **Subsonic-compatible servers** (plugin): Navidrome, Airsonic, Gonic and others, for
-  your own music library from anywhere.
 
 Not planned, to keep PyAmp lightweight:
 

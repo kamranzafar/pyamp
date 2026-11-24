@@ -359,6 +359,12 @@ def import_mpv(
     raise OSError("no usable libmpv found. " + "; ".join(failures or ["nothing to try"]))
 
 
+#: Looked up by this name rather than a literal in the call: PyInstaller bundles any
+#: library named literally in ``find_library("...")``, so a build machine with its own
+#: ffmpeg (e.g. Homebrew's) would ship ~40 MB the app never uses (it uses libmpv's).
+AVFILTER = "avfilter"
+
+
 def find_avfilter(source: LibmpvSource, platform: str = sys.platform) -> Path | None:
     """The ffmpeg filter library (libavfilter) that the loaded libmpv uses, if known."""
     if source.path is not None and source.tier != "system":
@@ -366,7 +372,7 @@ def find_avfilter(source: LibmpvSource, platform: str = sys.platform) -> Path | 
         found = sorted(source.path.parent.glob(patterns.get(platform, "libavfilter.so*")))
         if found:
             return found[0]
-    system = ctypes.util.find_library("avfilter")
+    system = ctypes.util.find_library(AVFILTER)
     return Path(system) if system else None
 
 

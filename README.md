@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
   <br>
   <img src="https://img.shields.io/badge/python-3.13%2B-3776ab?logo=python&amp;logoColor=white" alt="Python 3.13+">
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="Platforms: macOS, Linux">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platforms: macOS, Windows, Linux">
   <img src="https://img.shields.io/badge/UI-PySide6%20%28Qt%206%29-41cd52?logo=qt&amp;logoColor=white" alt="UI: PySide6 (Qt 6)">
   <img src="https://img.shields.io/badge/audio-Qt%20Multimedia%20%7C%20mpv-6a3ba1" alt="Audio: Qt Multimedia or mpv">
   <br>
@@ -30,6 +30,28 @@ The app isn't notarised yet, so the first time macOS will refuse to open it:
 right-click PyAmp → **Open** → **Open**. If something doesn't work, run
 `/Applications/PyAmp.app/Contents/MacOS/PyAmp --self-test` and include the output
 in a bug report.
+
+## Installing on Windows
+
+Download `PyAmp-windows-x86_64` from the
+[latest *Package (Windows)* workflow run](../../actions/workflows/package-windows.yml).
+It contains two files:
+
+- `PyAmp-<version>-windows-x86_64-setup.exe`: the installer. It installs for your
+  user only (no administrator rights), adds PyAmp to the Start menu and can be
+  removed from **Settings → Apps**.
+- `PyAmp-<version>-windows-x86_64.zip`: the portable version. Unzip it anywhere and
+  run `PyAmp.exe`.
+
+libmpv is bundled, so the `mpv` backend, the equaliser and gapless playback work
+without installing anything else. 64-bit Windows 10 or 11 (on ARM it runs under
+emulation).
+
+The builds aren't code-signed yet, so Windows SmartScreen will warn the first time
+("Windows protected your PC"): click **More info** → **Run anyway**. If something
+doesn't work, run `pyamp-console.exe --self-test` from PyAmp's folder (the
+installer puts it in `%LOCALAPPDATA%\Programs\PyAmp`) and include the output in a
+bug report.
 
 ## Running
 
@@ -188,6 +210,7 @@ uv run ruff format .   # format
 uv run mypy            # strict type checking
 uv run pre-commit install  # run ruff and mypy on every commit
 packaging/macos/build.sh   # build dist/PyAmp.app and a .dmg (macOS)
+pwsh packaging/windows/build.ps1  # build dist\PyAmp, a zip and a setup.exe (Windows; needs 7-Zip and Inno Setup)
 uv run python packaging/make_icons.py  # regenerate .icns/.ico/.png after editing the icon SVG
 uv run python docs/make_header.py      # regenerate the README header SVG
 ```
@@ -197,9 +220,12 @@ one-colour menu bar/tray icon is `icon-menubar.svg`; the platform files in `pack
 are generated from them.
 
 `build.sh` downloads the libmpv pinned in `packaging/macos/libmpv.lock` (checked
-against its SHA-256), bundles it with PyInstaller and makes a disk image. Licences of
-bundled components are listed in `packaging/THIRD_PARTY_NOTICES.md`, which ships
-inside the app.
+against its SHA-256), bundles it with PyInstaller and makes a disk image.
+`build.ps1` does the same on Windows with `packaging/windows/libmpv.lock`, then makes
+the zip and the installer (`pyamp.iss`). On Windows the app folder has two programs:
+`PyAmp.exe`, and `pyamp-console.exe` for `--version`, `--self-test` and diagnostics,
+since a windowed program can't print. Licences of bundled components are listed in
+`packaging/THIRD_PARTY_NOTICES.md`, which ships with the app.
 
 ## Architecture
 
@@ -321,8 +347,8 @@ See `src/pyamp/plugins/now_playing.py` for a working example.
 
 PyAmp aims to stay small: a fast player for local files, not a media centre.
 
-- **Windows**: an installer, with the system media controls (SMTC) so media keys
-  and the volume flyout work as they do on macOS and Linux.
+- **Code signing** for the Windows and macOS builds, so SmartScreen and Gatekeeper
+  don't warn.
 - **Last.fm scrobbling**, as an optional plugin.
 - **Internet radio** (maybe): add a stream URL, keep URLs in playlist files (they're
   currently skipped) and show the station's current song.

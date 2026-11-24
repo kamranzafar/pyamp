@@ -26,7 +26,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QUrl
+from PySide6.QtCore import QCoreApplication, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QLabel, QTextBrowser
 
@@ -73,6 +73,18 @@ def test_dialog_shows_version_copyright_and_licence(qt_app: QCoreApplication) ->
     assert isinstance(terms, QTextBrowser)
     assert "No misrepresentation of origin" in terms.toPlainText()  # rendered Markdown
     assert DEFAULT_SKIN.lcd.lower() in terms.toHtml().lower()  # links in the skin's colour
+    dialog.close()
+
+
+def test_about_tab_fits_without_scrolling(qt_app: QCoreApplication) -> None:
+    dialog = AboutDialog(DEFAULT_SKIN)
+    dialog.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+    dialog.show()
+    QCoreApplication.processEvents()
+    viewport = dialog.about_scroll.viewport()
+    needed = dialog.about_layout.totalHeightForWidth(viewport.width())
+    assert needed <= viewport.height()
+    assert not dialog.about_scroll.verticalScrollBar().isVisible()
     dialog.close()
 
 

@@ -354,3 +354,21 @@ def test_sample_rate_stays_when_changing_to_a_song_of_the_same_format(
     count = len(recorder.values("audio_info"))
     wait_until(lambda: len(recorder.values("audio_info")) > count)
     wait_until(lambda: recorder.values("audio_info")[-1] == (128_000, 8000))
+
+
+def test_events_still_queued_after_close_are_dropped(qt_app: QCoreApplication) -> None:
+    backend = MpvAudioBackend(ao="null")
+    recorder = Recorder()
+    backend.set_listener(recorder)
+
+    # Reported by mpv's thread just before closing (so queued for the main thread)...
+    def report() -> None:
+        backend._bridge.end_of_track.emit()
+        backend._bridge.state.emit(PlaybackState.STOPPED)
+
+    thread = threading.Thread(target=report)
+    thread.start()
+    thread.join()
+    backend.close()
+    QCoreApplication.processEvents()  # ...and delivered after it
+    assert recorder.events == []  # a player would otherwise call into the closed mpv

@@ -41,7 +41,8 @@ from tests.test_background_loader import wait_until
 from tests.test_playlist_ui import app  # noqa: F401  (fixture: the real app, offscreen)
 
 STATION = Track.for_stream(StreamUrl("https://radio.example/groove"), "Groove Salad")
-SONG = Track(location=Path("/m/song.mp3"), title="Song", duration_ms=60_000)
+# resolve() so it is absolute on Windows too (C:\m\song.mp3)
+SONG = Track(location=Path("/m/song.mp3").resolve(), title="Song", duration_ms=60_000)
 
 
 def test_stream_titles_are_published_for_streams_only(

@@ -178,16 +178,18 @@ def test_a_stations_pls_is_downloaded_and_expanded(loader: TrackLoader, server: 
     ]
 
 
-def test_a_remote_playlist_cannot_point_at_local_files(
-    loader: TrackLoader, server: Server, tmp_path: Path
-) -> None:
-    secret = touch(tmp_path / "private.mp3")
-    server.files["/list.m3u"] = (f"{secret}\nhttp://ok.example/live\n".encode(), "audio/mpegurl")
+def test_a_remote_playlist_cannot_point_at_local_files(loader: TrackLoader, server: Server) -> None:
+    server.files["/list.m3u"] = (
+        b"/home/me/private.mp3\nC:\\Users\\me\\private.mp3\nhttp://ok.example/live\n",
+        "audio/mpegurl",
+    )
     tracks = loader.load([StreamUrl(f"{server.url}/list.m3u")])
-    # The path is taken as a URL on the playlist's own server, never as a local file.
-    assert all(isinstance(t.location, StreamUrl) for t in tracks)
-    assert str(tracks[0].location).startswith(server.url)
-    assert str(tracks[1].location) == "http://ok.example/live"
+    # A rooted path is taken as a URL on the playlist's own server; a drive path isn't a
+    # valid URL so it's dropped. Neither is ever read as a local file.
+    assert [str(t.location) for t in tracks] == [
+        f"{server.url}/home/me/private.mp3",
+        "http://ok.example/live",
+    ]
 
 
 def test_a_missing_remote_playlist_adds_nothing(loader: TrackLoader, server: Server) -> None:

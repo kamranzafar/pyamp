@@ -1,0 +1,80 @@
+name: Package (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "packaging/**"
+      - ".github/workflows/package-windows.yml"
+      - "src/pyamp/audio/libmpv_loader.py"
+      - "src/pyamp/selftest.py"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: PyAmp for Windows (x86_64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+      - run: uv sync --locked --group packaging
+
+      - name: Make sure Inno Setup is installed
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and
+              -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Build app, zip and installer
+        run: packaging/windows/build.ps1 -Out dist
+
+      - name: Self-test the built app
+        env:
+          PYAMP_SELFTEST_TRACEBACK: "1"
+        run: |
+          $exe = "dist\PyAmp\pyamp-console.exe"
+          $version = & $exe --version
+          $version
+          if (-not ($version -match "\(bundled\)")) { throw "the app did not use its bundled libmpv" }
+          & $exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw "self-test failed" }
+          if (-not (Test-Path "dist\PyAmp\PyAmp.exe")) { throw "PyAmp.exe missing" }
+
+      - name: Install, self-test the installed copy, uninstall
+        env:
+          PYAMP_SELFTEST_TRACEBACK: "1"
+        run: |
+          $setup = Get-ChildItem dist\*-setup.exe | Select-Object -First 1
+          $p = Start-Process $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited with $($p.ExitCode)" }
+          $dir = "$env:LOCALAPPDATA\Programs\PyAmp"
+          if (-not (Test-Path "$dir\PyAmp.exe")) { throw "not installed to $dir" }
+          $shortcut = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\PyAmp.lnk"
+          if (-not (Test-Path $shortcut)) { throw "Start menu shortcut missing" }
+          & "$dir\pyamp-console.exe" --self-test
+          if ($LASTEXITCODE -ne 0) { throw "self-test of the installed app failed" }
+          $p = Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstaller exited with $($p.ExitCode)" }
+          Start-Sleep -Seconds 3  # the uninstaller finishes removing itself in the background
+          if (Test-Path "$dir\PyAmp.exe") { throw "uninstall left PyAmp.exe behind" }
+          if (Test-Path $shortcut) { throw "uninstall left the Start menu shortcut behind" }
+          Write-Host "install, self-test and uninstall: ok"
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: PyAmp-windows-x86_64
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
+          if-no-files-found: error

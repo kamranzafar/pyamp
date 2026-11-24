@@ -28,6 +28,24 @@ versions: <https://github.com/media-kit/libmpv-darwin-build/tree/v0.7.3>.
 | Mbed TLS | Apache-2.0 | <https://github.com/Mbed-TLS/mbedtls> |
 | libxml2 | MIT | <https://gitlab.gnome.org/GNOME/libxml2> |
 
+## Audio engine (Windows: `_internal\libmpv\libmpv-2.dll`)
+
+Prebuilt by [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake),
+build **20261111** (`mpv-dev-x86_64-20261111-git-bcde6b93cc`), unmodified. It is one DLL
+with mpv and FFmpeg (built with GPL components) and their libraries linked in. Build
+recipe, the exact components and their versions:
+<https://github.com/shinchiro/mpv-winbuild-cmake/tree/master/packages>. PyAmp keeps a
+copy of the archive at
+<https://github.com/kamranzafar/pyamp/releases/tag/libmpv-windows-20261111>.
+
+| Component | Licence | Source |
+|---|---|---|
+| mpv (libmpv) | GPL-2.0-or-later | <https://github.com/mpv-player/mpv> |
+| FFmpeg (GPL build) | GPL | <https://ffmpeg.org/download.html> |
+| Other linked libraries (libass, FreeType, HarfBuzz, FriBidi, dav1d, libvpx, Opus, Vorbis, …) | Their own (see the build recipe) | Listed in the build recipe above |
+
+The combination is distributed under the GPL, compatible with PyAmp's GPL-3.0-or-later.
+
 ## Application runtime
 
 | Component | Licence | Source |

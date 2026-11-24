@@ -17,7 +17,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
-"""Entry point PyInstaller freezes into PyAmp.app."""
+"""Entry point PyInstaller freezes into the packaged app (macOS and Windows)."""
 
 import sys
 

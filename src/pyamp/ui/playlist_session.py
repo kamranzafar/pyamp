@@ -23,18 +23,24 @@ Every edit to the open playlist is written back to its file shortly afterwards
 (debounced), on switching to another playlist, and on quit. While a playlist is
 still loading nothing is saved, so a partly loaded list never overwrites the
 complete file.
+
+Auto-saves are written on a background thread from a snapshot of the tracks (a large
+playlist takes a noticeable moment to write). There is one writer thread, so files are
+written in order, and every other save, rename or delete waits for it first.
 """
 
 from __future__ import annotations
 
 import logging
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QThreadPool, QTimer
 
 from pyamp.config import Settings
 from pyamp.core.events import EventBus, PlaylistChanged, SavedPlaylistsChanged
+from pyamp.core.models import Track
 from pyamp.core.playlist import Playlist
 from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
@@ -70,7 +76,9 @@ class PlaylistSession(QObject):
         self._autosave = QTimer(self)
         self._autosave.setSingleShot(True)
         self._autosave.setInterval(AUTOSAVE_MS)
-        self._autosave.timeout.connect(self.save_now)
+        self._autosave.timeout.connect(self._save_in_background)
+        self._writer = QThreadPool(self)
+        self._writer.setMaxThreadCount(1)  # one at a time, in order
         bus.subscribe(PlaylistChanged, self._on_playlist_changed)
         loader.job_finished.connect(self._on_job_finished)
 
@@ -100,14 +108,29 @@ class PlaylistSession(QObject):
         self._open(target)
 
     def save_now(self) -> None:
-        """Write the open playlist to its file (skipped while it's still loading)."""
+        """Write the open playlist to its file now (skipped while it's still loading)."""
         self._autosave.stop()
+        self.wait_for_saves()
         if self._active is None or self.loading:
             return
+        self._write(self._active, list(self._playlist))
+
+    def wait_for_saves(self) -> None:
+        """Block until background saves have been written."""
+        self._writer.waitForDone()
+
+    def _save_in_background(self) -> None:
+        if self._active is None or self.loading:
+            return
+        name, tracks = self._active, list(self._playlist)  # tracks are immutable
+        self._writer.start(lambda: self._write(name, tracks))
+
+    def _write(self, name: str, tracks: Sequence[Track]) -> None:
+        """Runs on the main or the writer thread: touches only the file."""
         try:
-            self._saved.save(self._active, list(self._playlist))
+            self._saved.save(name, tracks)
         except OSError:
-            log.exception("Could not save playlist %r", self._active)
+            log.exception("Could not save playlist %r", name)
 
     def shutdown(self) -> None:
         if self.loading:
@@ -142,6 +165,7 @@ class PlaylistSession(QObject):
         names = self._saved.names()
         index = next(i for i, n in enumerate(names) if n.casefold() == self._active.casefold())
         self._autosave.stop()
+        self.wait_for_saves()  # so a late auto-save can't bring the file back
         self._loader.cancel_all()  # stop reading the file before it goes
         self._saved.delete(self._active)
         self._active = None  # nothing left to save it to

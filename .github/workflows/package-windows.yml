@@ -49,6 +49,10 @@ jobs:
           & $exe --self-test
           if ($LASTEXITCODE -ne 0) { throw "self-test failed" }
           if (-not (Test-Path "dist\PyAmp\PyAmp.exe")) { throw "PyAmp.exe missing" }
+          # Parts of Qt PyAmp never uses are left out (packaging/trim_qt.py).
+          foreach ($unused in "opengl32sw.dll", "Qt6Quick.dll", "Qt6Qml.dll", "plugins\platforminputcontexts") {
+            if (Test-Path "dist\PyAmp\_internal\PySide6\$unused") { throw "$unused should have been left out" }
+          }
 
       - name: Install, self-test the installed copy, uninstall
         env:

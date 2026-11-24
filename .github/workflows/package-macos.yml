@@ -52,6 +52,11 @@ jobs:
           icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" dist/PyAmp.app/Contents/Info.plist)
           test -f "dist/PyAmp.app/Contents/Resources/$icon" || { echo "::error::app icon missing"; exit 1; }
           echo "app icon: $icon"
+          # Parts of Qt PyAmp never uses are left out (packaging/trim_qt.py).
+          qt=dist/PyAmp.app/Contents/Frameworks/PySide6/Qt
+          for unused in lib/QtQuick.framework lib/QtQml.framework plugins/platforminputcontexts; do
+            if [ -e "$qt/$unused" ]; then echo "::error::$unused should have been left out"; exit 1; fi
+          done
 
       - name: Upload
         uses: actions/upload-artifact@v7

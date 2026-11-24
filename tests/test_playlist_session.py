@@ -241,16 +241,21 @@ def test_shutdown_saves_pending_edits(
 
 
 class SlowSaves(SavedPlaylists):
-    """Saves that take a while, and record which thread wrote them."""
+    """Background saves of tracks wait for :attr:`release`; every save is recorded.
+
+    (Opening a playlist may also auto-save it while it's still empty, depending on how
+    quickly it loads; those aren't held up, and tests look for the save they expect.)
+    """
 
     def __init__(self, directory: Path) -> None:
         super().__init__(directory)
-        self.threads: list[str] = []
+        self.saves: list[tuple[bool, int]] = []  # (on the main thread, how many tracks)
         self.release = threading.Event()
 
     def save(self, name: str, tracks: Sequence[Track]) -> None:
-        self.threads.append(threading.current_thread().name)
-        if threading.current_thread() is not threading.main_thread():
+        on_main = threading.current_thread() is threading.main_thread()
+        self.saves.append((on_main, len(tracks)))
+        if tracks and not on_main:
             self.release.wait(5)
         super().save(name, tracks)
 
@@ -267,9 +272,9 @@ def test_auto_saves_are_written_off_the_main_thread(
     session.start()
     wait_until(lambda: loaded(session))
     playlist.add([Track.from_path(f) for f in make_files(tmp_path / "add", 3)])
-    wait_until(lambda: len(saved.threads) == 2)  # creating "Default", then the auto-save
-    assert saved.threads[0] == "MainThread"
-    assert saved.threads[1] != "MainThread"  # the window carried on meanwhile
+    # The auto-save of the three tracks is under way on another thread, and the main
+    # thread (the window) carried on meanwhile.
+    wait_until(lambda: (False, 3) in saved.saves)
     assert saved.read_paths("Default") == []
     saved.release.set()
     session.wait_for_saves()
@@ -289,7 +294,7 @@ def test_deleting_waits_for_a_pending_auto_save(
     session.new("Doomed")
     wait_until(lambda: loaded(session))
     playlist.add([Track.from_path(f) for f in make_files(tmp_path / "add", 1)])
-    wait_until(lambda: any(t != "MainThread" for t in saved.threads))  # auto-save under way
+    wait_until(lambda: (False, 1) in saved.saves)  # the auto-save is under way
     threading.Timer(0.1, saved.release.set).start()
     session.delete()
     session.wait_for_saves()

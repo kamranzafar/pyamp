@@ -32,6 +32,7 @@ is allowed and how repeat-one behaves.
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from typing import Protocol
 
 
@@ -44,8 +45,17 @@ class PlayOrder(Protocol):
         """Index to play before ``current``, or ``None`` if the start was reached."""
         ...
 
+    def appended(self, start: int, length: int, current: int | None) -> None:
+        """Tracks ``start`` to ``length - 1`` were added at the end of the playlist."""
+        ...
+
+    def rearranged(self, new_index: Sequence[int | None], previous: int | None) -> None:
+        """Tracks were removed or moved: old index ``i`` is now ``new_index[i]`` (None if
+        removed). ``previous`` is the index of the current track before the change."""
+        ...
+
     def reset(self) -> None:
-        """Forget any internal state; called whenever the playlist changes."""
+        """Forget any internal state (the playlist was replaced or cleared)."""
         ...
 
 
@@ -70,8 +80,15 @@ class SequentialOrder:
             return current - 1
         return length - 1 if wrap else None
 
+    # Stateless: playlist changes don't affect it.
+    def appended(self, start: int, length: int, current: int | None) -> None:
+        pass
+
+    def rearranged(self, new_index: Sequence[int | None], previous: int | None) -> None:
+        pass
+
     def reset(self) -> None:
-        """Stateless; nothing to reset."""
+        pass
 
 
 class ShuffleOrder:
@@ -79,7 +96,9 @@ class ShuffleOrder:
 
     Uses a shuffled permutation rather than picking randomly each time, so
     "previous" retraces the actual history and no track is played twice
-    before all have been played.
+    before all have been played. Editing the playlist keeps that promise: added tracks
+    are shuffled into the part not played yet, and removed or moved tracks keep their
+    place in the order.
     """
 
     def __init__(self, rng: random.Random | None = None) -> None:
@@ -111,8 +130,45 @@ class ShuffleOrder:
             return self._sequence[position - 1]
         return self._sequence[-1] if wrap else None
 
+    def appended(self, start: int, length: int, current: int | None) -> None:
+        if not self._sequence:
+            return  # not shuffled yet; built when first needed
+        if len(self._sequence) != start:
+            self._sequence.clear()  # out of step (shouldn't happen): start afresh
+            return
+        played = self._played_count(current)
+        # Inserting each at a uniformly random place among the unplayed tracks keeps that
+        # part a uniformly random order.
+        for index in range(start, length):
+            self._sequence.insert(self._rng.randint(played, len(self._sequence)), index)
+
+    def rearranged(self, new_index: Sequence[int | None], previous: int | None) -> None:
+        if not self._sequence:
+            return
+        if len(self._sequence) != len(new_index):
+            self._sequence.clear()
+            return
+        played_count = self._played_count(previous)
+        played = [j for i in self._sequence[:played_count] if (j := new_index[i]) is not None]
+        unplayed = [j for i in self._sequence[played_count:] if (j := new_index[i]) is not None]
+        if previous is not None and new_index[previous] is None:
+            # The playing track went away, so nothing is current: what comes "next" (from
+            # no current track) is the first track not played yet.
+            self._sequence = unplayed + played
+        else:
+            self._sequence = played + unplayed
+
     def reset(self) -> None:
         self._sequence.clear()
+
+    def _played_count(self, current: int | None) -> int:
+        """How many tracks of the order have been played (up to and including ``current``)."""
+        if current is None:
+            return 0
+        try:
+            return self._sequence.index(current) + 1
+        except ValueError:
+            return 0
 
     def _ensure_sequence(self, length: int, current: int | None) -> None:
         if len(self._sequence) == length:

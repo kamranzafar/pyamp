@@ -59,6 +59,7 @@ class Playlist(Sequence[Track]):
         self._bus = bus
         self._tracks: list[Track] = []
         self._current: int | None = None
+        self._total_ms = 0  # kept up to date, so it's cheap to show while loading
         self._order: PlayOrder = order or SequentialOrder()
 
     # -- Sequence protocol -------------------------------------------------- #
@@ -71,6 +72,11 @@ class Playlist(Sequence[Track]):
 
     def __iter__(self) -> Iterator[Track]:
         return iter(self._tracks)
+
+    @property
+    def total_duration_ms(self) -> int:
+        """The length of all tracks together (live streams count as 0)."""
+        return self._total_ms
 
     # -- Cursor ------------------------------------------------------------- #
 
@@ -111,24 +117,35 @@ class Playlist(Sequence[Track]):
         if new_tracks:
             first_new = len(self._tracks)
             self._tracks.extend(new_tracks)
+            self._total_ms += sum(t.duration_ms for t in new_tracks)
+            self._order.appended(first_new, len(self._tracks), self._current)
             self._changed(appended_from=first_new)
 
     def remove(self, indices: Iterable[int]) -> None:
         doomed = {i for i in indices if 0 <= i < len(self._tracks)}
         if not doomed:
             return
+        new_index: list[int | None] = []
+        kept = 0
+        for i in range(len(self._tracks)):
+            new_index.append(None if i in doomed else kept)
+            kept += i not in doomed
+        self._order.rearranged(new_index, self._current)
         if self._current is not None:
             if self._current in doomed:
                 self._current = None
             else:
                 self._current -= sum(1 for i in doomed if i < self._current)
+        self._total_ms -= sum(self._tracks[i].duration_ms for i in doomed)
         self._tracks = [t for i, t in enumerate(self._tracks) if i not in doomed]
         self._changed()
 
     def replace(self, tracks: Iterable[Track]) -> None:
         """Swap in a whole new list (e.g. another saved playlist). Clears the cursor."""
         self._tracks = list(tracks)
+        self._total_ms = sum(t.duration_ms for t in self._tracks)
         self._current = None
+        self._order.reset()
         self._changed()
 
     def move(self, rows: Iterable[int], to: int) -> list[int]:
@@ -176,16 +193,21 @@ class Playlist(Sequence[Track]):
         if order == list(range(len(self._tracks))):
             return
         self._tracks = [self._tracks[i] for i in order]
+        new_index: list[int | None] = [None] * len(order)
+        for new, old in enumerate(order):
+            new_index[old] = new
+        self._order.rearranged(new_index, self._current)
         if self._current is not None:
-            self._current = order.index(self._current)  # the playing track keeps playing
+            self._current = new_index[self._current]  # the playing track keeps playing
         self._changed()
 
     def clear(self) -> None:
         if self._tracks:
             self._tracks.clear()
+            self._total_ms = 0
             self._current = None
+            self._order.reset()
             self._changed()
 
     def _changed(self, *, appended_from: int | None = None) -> None:
-        self._order.reset()
         self._bus.publish(PlaylistChanged(appended_from))

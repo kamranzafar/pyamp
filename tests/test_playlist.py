@@ -73,7 +73,97 @@ class TestShuffleOrder:
             assert order.next_index(current, 3, wrap=True) != current
 
 
+class TestShuffleSurvivesEdits:
+    """Editing the playlist mustn't reshuffle: history and "once each" are kept."""
+
+    @staticmethod
+    def shuffled(bus: EventBus, n: int, seed: int = 7) -> Playlist:
+        playlist = Playlist(bus, ShuffleOrder(random.Random(seed)))
+        playlist.add(make_tracks(n))
+        return playlist
+
+    @staticmethod
+    def play_next(playlist: Playlist) -> Track | None:
+        index = playlist.next_index(wrap=False)
+        return None if index is None else playlist.set_current(index)
+
+    def test_adding_tracks_keeps_the_history(self, bus: EventBus) -> None:
+        playlist = self.shuffled(bus, 6)
+        heard = [self.play_next(playlist) for _ in range(3)]
+        playlist.add(make_tracks(9)[6:])
+        assert playlist.previous_index(wrap=False) is not None
+        assert playlist[playlist.previous_index(wrap=False) or 0] == heard[1]
+        rest: list[Track | None] = []
+        while (track := self.play_next(playlist)) is not None:
+            rest.append(track)
+        assert len(heard + rest) == len(playlist)  # each track once...
+        assert set(heard + rest) == set(playlist)  # ...including the added ones
+
+    def test_removing_and_sorting_keep_the_order(self, bus: EventBus) -> None:
+        playlist = self.shuffled(bus, 8)
+        heard = [self.play_next(playlist) for _ in range(3)]
+        upcoming_before = self.upcoming(playlist)
+        playlist.remove([playlist.index(heard[0]), playlist.index(upcoming_before[-1])])
+        playlist.sort(SortKey.TITLE, descending=True)
+        assert playlist.current_track == heard[2]
+        assert playlist[playlist.previous_index(wrap=False) or 0] == heard[1]
+        assert self.upcoming(playlist) == upcoming_before[:-1]
+
+    def test_removing_the_playing_track_moves_on_to_an_unplayed_one(self, bus: EventBus) -> None:
+        playlist = self.shuffled(bus, 6)
+        heard = [self.play_next(playlist) for _ in range(2)]
+        upcoming = self.upcoming(playlist)
+        playlist.remove([playlist.current_index or 0])
+        assert self.play_next(playlist) == upcoming[0]
+        assert heard[1] not in playlist
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_every_track_once_despite_edits(self, bus: EventBus, seed: int) -> None:
+        rng = random.Random(seed)
+        playlist = self.shuffled(bus, 10, seed)
+        extra = iter(make_tracks(40)[10:])
+        heard: list[Track] = []
+        while (track := self.play_next(playlist)) is not None:
+            heard.append(track)
+            action = rng.choice(["add", "remove", "sort", "move", "none"])
+            if action == "add":
+                playlist.add([next(extra) for _ in range(rng.randint(1, 3))])
+            elif action == "remove" and len(playlist) > 1:
+                victims = [i for i in range(len(playlist)) if i != playlist.current_index]
+                playlist.remove([rng.choice(victims)])
+            elif action == "sort":
+                playlist.sort(rng.choice(list(SortKey)), descending=rng.random() < 0.5)
+            elif action == "move":
+                playlist.move([rng.randrange(len(playlist))], rng.randrange(len(playlist) + 1))
+        assert len(heard) == len(set(heard))  # nothing twice
+        assert set(playlist) <= set(heard)  # and everything still listed was played
+
+    @staticmethod
+    def upcoming(playlist: Playlist) -> list[Track]:
+        """The tracks still to come, in order (without moving the cursor)."""
+        order = playlist.play_order
+        result, current = [], playlist.current_index
+        while (current := order.next_index(current, len(playlist), wrap=False)) is not None:
+            result.append(playlist[current])
+        return result
+
+
 class TestPlaylist:
+    def test_total_duration_follows_every_change(self, playlist: Playlist) -> None:
+        tracks = [
+            Track(location=Path(f"/m/{n}.mp3"), title=str(n), duration_ms=n * 1000)
+            for n in (1, 2, 3, 4)
+        ]
+        playlist.add(tracks)
+        assert playlist.total_duration_ms == 10_000
+        playlist.remove([1, 3])
+        playlist.sort(SortKey.TITLE, descending=True)
+        assert playlist.total_duration_ms == 4_000
+        playlist.replace(tracks[3:])
+        assert playlist.total_duration_ms == 4_000
+        playlist.clear()
+        assert playlist.total_duration_ms == 0
+
     def test_add_publishes_change(self, playlist: Playlist, bus: EventBus) -> None:
         changes: list[PlaylistChanged] = []
         bus.subscribe(PlaylistChanged, changes.append)

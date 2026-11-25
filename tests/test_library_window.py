@@ -28,8 +28,9 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QItemSelectionModel, QPoint, Qt, QTimer
+from PySide6.QtGui import QAction
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
+from PySide6.QtWidgets import QFileDialog, QMenu, QTreeWidgetItem
 
 from pyamp.config import Settings
 from pyamp.core.events import EventBus, LibraryChanged
@@ -54,13 +55,15 @@ PORTISHEAD = Group(GroupKind.ARTIST, "Portishead")
 class Calls:
     def __init__(self) -> None:
         self.played: list[tuple[list[str], int]] = []
-        self.added: list[list[str]] = []
+        self.added: list[tuple[list[str], str | None, str]] = []
+        self.playlists = ["Default", "Mix"]
 
     def play(self, tracks: Sequence[Track], start: int) -> None:
         self.played.append(([t.title for t in tracks], start))
 
-    def add(self, tracks: Sequence[Track]) -> None:
-        self.added.append([t.title for t in tracks])
+    def add(self, tracks: Sequence[Track], playlist: str | None, suggested: str) -> str:
+        self.added.append(([t.title for t in tracks], playlist, suggested))
+        return f"Added {len(tracks)} to {playlist}"
 
 
 def stream(title: str) -> Track:
@@ -168,7 +171,8 @@ def window(
         Settings(),
         DEFAULT_SKIN,
         play_tracks=calls.play,
-        add_tracks=calls.add,
+        add_to_playlist=calls.add,
+        playlist_names=lambda: calls.playlists,
     )
     settle(window)
     yield window
@@ -342,23 +346,67 @@ def test_the_track_menu_plays_and_adds(
     window.table.selectionModel().select(window.model.index(2, 0), flags.Select | flags.Rows)
     play, add = window.table_menu(2).actions()
     play.trigger()
-    add.trigger()
     assert calls.played == [(["Angel", "Teardrop", "Glory Box"], 2)]
-    assert calls.added == [["Angel", "Glory Box"]]
+    playlists = submenu(add)
+    assert [a.text() for a in playlists.actions()] == ["Default", "Mix", "", "&New Playlist…"]
+    playlists.actions()[1].trigger()
+    playlists.actions()[3].trigger()
+    assert calls.added == [
+        (["Angel", "Glory Box"], "Mix", ""),
+        (["Angel", "Glory Box"], None, ""),  # a new playlist: the window asks its name
+    ]
+    assert window.status.text() == "Added 2 to None"  # what the main window said
+
+
+def submenu(action: QAction) -> QMenu:
+    menu = action.menu()
+    assert isinstance(menu, QMenu)
+    return menu
+
+
+def add_menu(window: LibraryWindow, target: QTreeWidgetItem) -> list[str]:
+    menu = window.sidebar_menu(target)
+    assert menu is not None
+    return [a.text() for a in menu.actions()]
+
+
+def test_whole_albums_and_artists_can_be_added_to_playlists(
+    music: Path, window: LibraryWindow, calls: Calls, bus: EventBus
+) -> None:
+    refresh(window, bus)
+    assert window.sidebar_menu(item(window, 0, GroupKind.ARTIST)) is None  # a category
+    massive = item(window, 0, GroupKind.ARTIST, MASSIVE)
+    assert add_menu(window, massive) == ["&Add to Playlist"]
+    menu = window.sidebar_menu(massive)
+    assert menu is not None
+    playlists = submenu(menu.actions()[0])
+    playlists.actions()[1].trigger()  # Mix: the artist's tracks are fetched, then added
+    wait_until(lambda: len(calls.added) == 1)
+    playlists.actions()[3].trigger()  # New Playlist…, named after the artist
+    wait_until(lambda: len(calls.added) == 2)
+    assert calls.added == [
+        (["Angel", "Teardrop"], "Mix", "Massive Attack"),
+        (["Angel", "Teardrop"], None, "Massive Attack"),
+    ]
+    folder = item(window, 0, GroupKind.FOLDER, Group(GroupKind.FOLDER, str(music)))
+    assert add_menu(window, folder) == ["&Add to Playlist", "", "&Remove from Library"]
 
 
 def test_folders_can_be_removed_from_the_sidebar(
     music: Path, window: LibraryWindow, catalog: Catalog, bus: EventBus
 ) -> None:
     refresh(window, bus)
-    assert window.sidebar_menu(item(window, 0, GroupKind.ARTIST, MASSIVE)) is None
+    assert "&Remove from Library" not in add_menu(
+        window, item(window, 0, GroupKind.ARTIST, MASSIVE)
+    )
     assert window.sidebar_menu(window.sidebar_item(0)) is None
     assert window.sidebar_menu(None) is None
     menu = window.sidebar_menu(
         item(window, 0, GroupKind.FOLDER, Group(GroupKind.FOLDER, str(music)))
     )
     assert menu is not None
-    (remove,) = menu.actions()
+    remove = menu.actions()[-1]
+    assert remove.text() == "&Remove from Library"
     remove.trigger()
     settle(window)
     assert catalog.sources() == []

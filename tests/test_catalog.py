@@ -331,3 +331,13 @@ def test_a_library_from_a_newer_pyamp_is_set_aside(tmp_path: Path) -> None:
     with sqlite3.connect(path) as db:
         assert db.execute("PRAGMA user_version").fetchone() == (SCHEMA_VERSION,)
     db.close()
+
+
+def test_tracks_can_be_looked_up_by_path(catalog: Catalog, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pyamp.library.catalog._LOOKUP_BATCH", 2)  # several queries
+    tracks = [track(f"/m/{n}.mp3", artist="Band") for n in range(5)]
+    catalog.put((t, STAMP) for t in tracks)
+    wanted = [Path("/m/4.mp3"), Path("/m/0.mp3"), Path("/m/9.mp3"), Path("/m/0.mp3")]
+    found = catalog.tracks_at(wanted)
+    assert found == {Path("/m/4.mp3"): tracks[4], Path("/m/0.mp3"): tracks[0]}
+    assert catalog.tracks_at([]) == {}

@@ -130,7 +130,7 @@ def test_adds_its_menu_and_waits_to_be_set_up(
     assert [a.text() for a in menu.actions()][-1] == "Subsonic &Server…"
     assert "Subsonic" not in " ".join(a.text() for a in menu.actions()[:-1])
     assert plugin.source is None
-    assert len(app.sources) == 1  # just this computer
+    assert list(app.sources) == [app.local_source, app.playlists_source]  # no server yet
 
 
 def test_connects_and_remembers_the_password_in_the_keychain(
@@ -278,13 +278,13 @@ def test_the_server_is_a_source_in_the_library(
     remember(accounts, keychain, server)
     plugin = start(app, accounts)
     assert plugin.source is not None
-    assert list(app.sources) == [app.local_source, plugin.source]
+    assert list(app.sources) == [app.local_source, app.playlists_source, plugin.source]
     assert plugin.source.name == f"Subsonic — {server.url.removeprefix('http://')}"
     answer_dialog(monkeypatch, server.url, PASSWORD)
     assert plugin.show_server_dialog()  # connecting again replaces it
-    assert list(app.sources) == [app.local_source, plugin.source]
+    assert list(app.sources) == [app.local_source, app.playlists_source, plugin.source]
     plugin.deactivate()
-    assert list(app.sources) == [app.local_source]
+    assert list(app.sources) == [app.local_source, app.playlists_source]
 
 
 def test_browse_an_album_in_the_library_and_play_it(
@@ -297,12 +297,12 @@ def test_browse_an_album_in_the_library_and_play_it(
     start(app, accounts)
     window = app.window.show_library()
     settle(window)
-    assert labels(window, 1) == ["Artists", "Playlists"]
-    assert labels(window, 1, (ARTISTS, "")) == ["Massive Attack (1 album)"]
-    assert labels(window, 1, (ARTISTS, ""), (ARTIST, "ar1")) == [
+    assert labels(window, 2) == ["Artists", "Playlists"]
+    assert labels(window, 2, (ARTISTS, "")) == ["Massive Attack (1 album)"]
+    assert labels(window, 2, (ARTISTS, ""), (ARTIST, "ar1")) == [
         "Mezzanine (Massive Attack · 1998)"
     ]
-    pick(window, 1, (ARTISTS, ""), (ARTIST, "ar1"), (ALBUM, "al1"))
+    pick(window, 2, (ARTISTS, ""), (ARTIST, "ar1"), (ALBUM, "al1"))
     assert titles(window) == ["Teardrop", "Angel"]  # album order: by track number
     assert window.model.data(window.model.index(0, 6)) == "5:30"
 
@@ -326,14 +326,14 @@ def test_search_the_server_and_its_playlists(
     start(app, accounts)
     window = app.window.show_library()
     settle(window)
-    pick(window, 1)
+    pick(window, 2)
     assert titles(window) == []  # nothing to list until you search
     window.search.setText("tear")
     window.search.returnPressed.emit()
     settle(window)
     assert titles(window) == ["Teardrop"]
     window.search.setText("")
-    pick(window, 1, (PLAYLISTS, ""), (PLAYLIST, "p1"))
+    pick(window, 2, (PLAYLISTS, ""), (PLAYLIST, "p1"))
     assert titles(window) == ["Angel"]
 
 
@@ -349,7 +349,7 @@ def test_server_errors_are_shown_in_the_library(
     plugin.client._password = "changed on the server"
     window = app.window.show_library()
     settle(window)
-    item(window, 1, (ARTISTS, "")).setExpanded(True)
+    item(window, 2, (ARTISTS, "")).setExpanded(True)
     settle(window)
     assert window.status.text() == "Wrong username or password"
 
@@ -382,9 +382,9 @@ def test_clicking_an_artist_shows_its_albums_and_songs(
     start(app, accounts)
     window = app.window.show_library()
     settle(window)
-    artists = item(window, 1, (ARTISTS, ""))
+    artists = item(window, 2, (ARTISTS, ""))
     click(window, artists)
-    artist = item(window, 1, (ARTISTS, ""), (ARTIST, "ar1"))
+    artist = item(window, 2, (ARTISTS, ""), (ARTIST, "ar1"))
     click(window, artist)
     assert artist.isExpanded()
     assert artist.child(0) is not None

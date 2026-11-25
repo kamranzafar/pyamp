@@ -49,7 +49,7 @@ from pyamp.audio.registry import (
 from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.equalizer import Equalizer
-from pyamp.core.events import EventBus, LibraryChanged
+from pyamp.core.events import EventBus, LibraryChanged, SavedPlaylistsChanged
 from pyamp.core.models import RepeatMode, ReplayGainMode
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
@@ -59,6 +59,7 @@ from pyamp.library.loader import TrackLoader
 from pyamp.library.local_source import LocalSource
 from pyamp.library.metadata import MutagenMetadataReader
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
+from pyamp.library.playlists_source import PlaylistsSource
 from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.library.scanner import LibraryScanner
 from pyamp.library.sources import MediaSources
@@ -180,7 +181,7 @@ class Application:
         )
         self.playlists = PlaylistSession(
             self.playlist,
-            saved_playlists or SavedPlaylists(),
+            saved := saved_playlists or SavedPlaylists(),
             self.loader,
             self.bus,
             settings=self.settings,
@@ -203,6 +204,19 @@ class Application:
             DEFAULT_SKIN,
         )
         self.window.visibility_changed.connect(self._set_visualiser_active)
+        # The saved playlists, after this computer in the library; their commands use the
+        # window's dialogs.
+        self.playlists_source = PlaylistsSource(
+            saved,
+            self.catalog,
+            open_playlist=self.window.switch_playlist,
+            rename_playlist=self.window.rename_saved_playlist,
+            delete_playlist=self.window.delete_saved_playlist,
+        )
+        self.sources.add(self.playlists_source)
+        self.bus.subscribe(
+            SavedPlaylistsChanged, lambda _: self.sources.changed(self.playlists_source)
+        )
         # Restore preferences *after* the UI exists, so widgets receive the events.
         self._apply_settings(self.settings)
         if not args.no_plugins:

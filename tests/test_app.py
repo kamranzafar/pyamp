@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMenu
+from PySide6.QtWidgets import QInputDialog, QMenu, QMessageBox
 
 from pyamp import app as app_module
 from pyamp.app import Application, parse_args
@@ -364,16 +364,57 @@ def test_playing_from_the_library_leaves_other_playlists_alone(
     assert saved.read_paths("Default") == [mine.location]
 
 
-def test_adding_from_the_library_adds_to_the_open_playlist(
+def test_adding_from_the_library_to_playlists(
+    store: SettingsStore,
+    cleanup: list[Application],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    application.start([])
+    wait_until(lambda: not application.playlists.loading)
+    window = application.window
+    a, b = (Track.from_path(tmp_path / f"{n}.mp3") for n in "ab")
+
+    assert window.add_to_playlist([a], "Default") == "Added 1 track to Default"
+    assert list(application.playlist) == [a]  # the open playlist, in place
+    assert window.add_to_playlist([a, b], "default") == "Added 1 track to default (1 already in it)"
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *_, **kw: (f"{kw['text']} 1", True))
+    assert window.add_to_playlist([b], None, "Mezzanine") == "Added 1 track to Mezzanine 1"
+    saved = SavedPlaylists(store.directory / "playlists")
+    assert saved.read_paths("Mezzanine 1") == [b.location]
+    assert application.playlists.active == "Default"  # still open; nothing was switched
+
+    warnings: list[str] = []
+    monkeypatch.setattr(QInputDialog, "getText", lambda *_, **kw: ("bad/name", True))
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
+    assert window.add_to_playlist([b], None) is None
+    assert warnings and "can't" in warnings[0]
+    monkeypatch.setattr(QInputDialog, "getText", lambda *_, **kw: ("", False))
+    assert window.add_to_playlist([b], None) is None  # cancelled
+
+
+def test_the_library_lists_the_saved_playlists(
     store: SettingsStore, cleanup: list[Application], tmp_path: Path
 ) -> None:
     application = build(store)
     cleanup.append(application)
     application.start([])
     wait_until(lambda: not application.playlists.loading)
-    application.window.add_from_library([Track.from_path(tmp_path / "a.mp3")])
-    assert len(application.playlist) == 1
-    assert application.window.statusBar().currentMessage() == "Added 1 track to Default"
+    library = application.window.show_library()
+    assert [s.name for s in application.sources] == ["This Computer", "Playlists"]
+    playlists = library.sidebar_item(1)
+    assert playlists is not None
+    wait_until(
+        lambda: (
+            [playlists.child(i).text(0) for i in range(playlists.childCount())]  # type: ignore[union-attr]
+            == ["Default (0)"]
+        )
+    )
+    application.window.add_to_playlist([Track.from_path(tmp_path / "a.mp3")], "Default")
+    wait_until(lambda: playlists.childCount() == 1 and playlists.child(0).text(0) == "Default (1)")  # type: ignore[union-attr]
 
 
 def test_the_library_is_scanned_after_start_and_closed_on_quit(

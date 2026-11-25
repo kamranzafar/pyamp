@@ -334,6 +334,10 @@ class MainWindow(QMainWindow):
     def dialog_parent(self) -> QWidget:
         return self
 
+    def _front(self) -> QWidget:
+        """Where to show a dialog: the window in front (e.g. the library), else this one."""
+        return QApplication.activeWindow() or self
+
     def show_about(self) -> AboutDialog:
         if self._about_dialog is None:
             self._about_dialog = AboutDialog(self._skin, parent=self)
@@ -390,22 +394,29 @@ class MainWindow(QMainWindow):
             self._try(lambda: self._s.playlists.new(name), "New Playlist")
 
     def rename_playlist(self) -> None:
-        current = self._s.playlists.active or ""
-        name, ok = QInputDialog.getText(self, "Rename Playlist", "Name:", text=current)
-        if ok and name.strip() != current:
-            self._try(lambda: self._s.playlists.rename(name), "Rename Playlist")
+        """Rename the open playlist (a slot: takes no arguments)."""
+        self.rename_saved_playlist(self._s.playlists.active or "")
 
     def delete_playlist(self) -> None:
-        name = self._s.playlists.active
+        """Delete the open playlist (a slot: takes no arguments)."""
+        self.delete_saved_playlist(self._s.playlists.active or "")
+
+    def rename_saved_playlist(self, current: str) -> None:
+        name, ok = QInputDialog.getText(self._front(), "Rename Playlist", "Name:", text=current)
+        if ok and name.strip() != current:
+            self._try(lambda: self._s.playlists.rename(name, current), "Rename Playlist")
+
+    def delete_saved_playlist(self, name: str) -> None:
         answer = QMessageBox.question(
-            self,
+            self._front(),
             "Delete Playlist",
             f'Delete the playlist "{name}"?\n\nOnly the playlist is deleted; '
             "the music files stay where they are.",
         )
         if answer == QMessageBox.StandardButton.Yes:
-            self._autoplay_jobs.clear()
-            self._s.playlists.delete()
+            if name.casefold() == (self._s.playlists.active or "").casefold():
+                self._autoplay_jobs.clear()
+            self._s.playlists.delete(name)
 
     def remove_duplicates(self) -> None:
         removed = self._s.playlist.remove_duplicates()
@@ -446,7 +457,8 @@ class MainWindow(QMainWindow):
                 self._s.settings,
                 self._skin,
                 play_tracks=self.play_from_library,
-                add_tracks=self.add_from_library,
+                add_to_playlist=self.add_to_playlist,
+                playlist_names=lambda: self._s.playlists.names,
                 parent=self,
             )
         self._library_window.show()
@@ -460,13 +472,29 @@ class MainWindow(QMainWindow):
         self._s.playlists.open_tracks(LIBRARY_PLAYLIST, tracks)
         self._s.player.play_index(start)
 
-    def add_from_library(self, tracks: Sequence[Track]) -> None:
-        """Add ``tracks`` to the open playlist."""
-        self._s.playlist.add(tracks)
-        noun = "track" if len(tracks) == 1 else "tracks"
-        self.statusBar().showMessage(
-            f"Added {len(tracks)} {noun} to {self._s.playlists.active}", STATUS_TIMEOUT_MS
-        )
+    def add_to_playlist(
+        self, tracks: Sequence[Track], name: str | None, suggested: str = ""
+    ) -> str | None:
+        """Add ``tracks`` to the saved playlist ``name``, or to a new one (None: ask for its
+        name, suggesting ``suggested``). Returns what happened, for the user."""
+        if name is None:
+            text, ok = QInputDialog.getText(
+                self._front(), "New Playlist", "Name:", text=suggested or "New playlist"
+            )
+            if not ok:
+                return None
+            try:
+                name = self._s.playlists.create(text)
+            except PlaylistNameError as exc:
+                QMessageBox.warning(self._front(), "New Playlist", str(exc))
+                return None
+        added = self._s.playlists.add_to(name, tracks)
+        noun = "track" if added == 1 else "tracks"
+        message = f"Added {added} {noun} to {name}"
+        if skipped := len(tracks) - added:
+            message += f" ({skipped} already in it)"
+        self.statusBar().showMessage(message, STATUS_TIMEOUT_MS)
+        return message
 
     def _add_menu_action(
         self,

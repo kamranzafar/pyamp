@@ -117,8 +117,13 @@ starts, and when you click **Rescan**. Only files that changed are read again.
 
 - Double-click a track (or press Enter) to play the tracks shown, starting there. They
   play in a playlist called **Library**, so your other playlists stay as they are.
-- **Add to Playlist** (right-click) adds the selected tracks to the open playlist, or
-  drag them into it.
+- **Add to Playlist ▸** (right-click) adds the selected tracks to any saved playlist,
+  or to a **New Playlist…**. Right-click an artist, album or genre in the sidebar to
+  add all of it (a new playlist is named after it). Tracks already in the playlist are
+  skipped. Local files can also be dragged into the open playlist.
+- **Playlists**, in the sidebar, lists your saved playlists. Pick one to see its tracks
+  (with the library's tags; no music files are read); right-click it to open it in the
+  player, rename it or delete it.
 - Right-click a folder under **Folders** to remove it from the library. The files stay
   where they are: PyAmp only reads your music files, and never retags, renames or
   moves them.
@@ -338,6 +343,7 @@ src/pyamp/
 │   ├── scanner.py      Brings the index up to date, re-reading only changed files
 │   ├── sources.py      MediaSource: what the library window browses (local or a server)
 │   ├── local_source.py The local library as a source
+│   ├── playlists_source.py  The saved playlists as a source
 │   ├── remote.py       Downloads remote playlists (a station's .pls)
 │   └── loader.py       Files/folders/playlists/streams → Tracks
 ├── media_session/      OS media controls (used by the media-session plugin)
@@ -485,8 +491,6 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
   don't warn.
 - **Smaller downloads**: bundle only the Qt modules and plugins PyAmp uses, so the
   apps shrink from about 170 MB.
-- **Building playlists from the library**: create and edit saved playlists from the
-  library window, and add to playlists other than the open one.
 - **DLNA/UPnP media servers** (plugin): find media servers on the local network (NAS,
   MiniDLNA, Plex/Jellyfin DLNA), browse them and play from them.
 

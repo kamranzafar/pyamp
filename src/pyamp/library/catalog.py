@@ -44,6 +44,8 @@ from pyamp.core.models import ReplayGain, Track
 log = logging.getLogger(__name__)
 
 FILE_NAME = "library.sqlite3"
+#: Paths looked up per query (SQLite limits how many parameters one query may have).
+_LOOKUP_BATCH = 500
 
 #: One script per schema version: ``_MIGRATIONS[n]`` takes version n to n + 1.
 _MIGRATIONS = (
@@ -223,6 +225,19 @@ class Catalog:
         with self._lock:
             (count,) = self._db.execute("SELECT COUNT(*) FROM tracks").fetchone()
         return int(count)
+
+    def tracks_at(self, paths: Iterable[Path]) -> dict[Path, Track]:
+        """The library's tracks for those of ``paths`` it has (e.g. a playlist's files)."""
+        wanted = list(dict.fromkeys(str(path) for path in paths))
+        found: dict[Path, Track] = {}
+        for start in range(0, len(wanted), _LOOKUP_BATCH):
+            batch = wanted[start : start + _LOOKUP_BATCH]
+            query = f"{_SELECT} WHERE path IN ({', '.join('?' * len(batch))})"
+            with self._lock:
+                rows = self._db.execute(query, batch).fetchall()
+            for row in map(_TrackRow._make, rows):
+                found[Path(row.path)] = _from_row(row)
+        return found
 
     def stamps(self) -> dict[Path, FileStamp]:
         """Each indexed file and how it looked when its tags were read."""

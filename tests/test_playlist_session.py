@@ -324,3 +324,45 @@ def test_open_tracks_fills_a_playlist_without_touching_the_others(
     session.open_tracks("library", tracks[:1])  # the same playlist, case-insensitively
     assert saved.names() == ["Default", "Library"]
     wait_until(lambda: len(saved.read_paths("Library")) == 1)
+
+
+def test_adding_to_playlists_skips_what_they_have(
+    session: PlaylistSession,
+    playlist: Playlist,
+    saved: SavedPlaylists,
+    bus: EventBus,
+    tmp_path: Path,
+) -> None:
+    session.start()
+    wait_until(lambda: loaded(session))
+    a, b, c = (Track.from_path(p) for p in make_files(tmp_path / "m", 3))
+    events: list[SavedPlaylistsChanged] = []
+    bus.subscribe(SavedPlaylistsChanged, events.append)
+
+    assert session.add_to("default", [a, b, a]) == 2  # the open one, in place; repeats once
+    assert list(playlist) == [a, b]
+    assert saved.read_paths("Default") == [a.location, b.location]  # saved at once
+
+    name = session.create("Mix")
+    assert session.active == "Default"  # made, not opened
+    assert session.add_to(name, [a]) == 1
+    assert session.add_to(name, [a, c]) == 1
+    assert saved.read_paths("Mix") == [a.location, c.location]
+    assert session.add_to(name, [c]) == 0
+    assert events[-1] == SavedPlaylistsChanged(("Default", "Mix"), "Default")
+
+
+def test_other_playlists_can_be_renamed_and_deleted(
+    session: PlaylistSession, saved: SavedPlaylists, settings: Settings
+) -> None:
+    session.start()
+    wait_until(lambda: loaded(session))
+    session.create("Mix")
+    assert session.rename("Party", "mix") == "Party"
+    assert session.active == "Default"
+    assert saved.names() == ["Default", "Party"]
+    session.delete("party")
+    assert saved.names() == ["Default"]
+    assert session.active == "Default"
+    session.rename("Main")  # the open one, as before
+    assert session.active == "Main" == settings.active_playlist

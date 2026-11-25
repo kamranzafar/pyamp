@@ -76,7 +76,8 @@ _NODE = Qt.ItemDataRole.UserRole + 1
 _LOADED = Qt.ItemDataRole.UserRole + 2
 
 type PlayTracks = Callable[[Sequence[Track], int], None]
-type AddTracks = Callable[[Sequence[Track]], None]
+#: (tracks, playlist name or None for a new one, name to suggest) -> what happened.
+type AddToPlaylist = Callable[[Sequence[Track], str | None, str], str | None]
 #: Where an item is: its source's position in the sidebar, then node keys from the top.
 type _Path = tuple[int, tuple[Hashable, ...]]
 
@@ -91,7 +92,8 @@ class LibraryWindow(QDialog):
         skin: Skin,
         *,
         play_tracks: PlayTracks,
-        add_tracks: AddTracks,
+        add_to_playlist: AddToPlaylist,
+        playlist_names: Callable[[], Sequence[str]],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -99,7 +101,8 @@ class LibraryWindow(QDialog):
         self._sources = sources
         self._settings = settings
         self._play_tracks = play_tracks
-        self._add_tracks = add_tracks
+        self._add_to_playlist = add_to_playlist
+        self._playlist_names = playlist_names
         #: Each source's own worker threads, so a slow server only ever delays itself.
         self._calls: dict[int, tuple[MediaSource, BackgroundCalls]] = {}
         #: The threads of sources that have gone, kept until their last call returns.
@@ -404,11 +407,44 @@ class LibraryWindow(QDialog):
         if 0 <= row < self.model.rowCount():
             self._play_tracks(self.model.tracks(), row)
 
-    def add_selected(self) -> None:
-        """Add the selected tracks to the open playlist."""
+    def add_selected(self, playlist: str | None) -> None:
+        """Add the selected tracks to ``playlist`` (None: a new one)."""
         rows = sorted({index.row() for index in self.table.selectionModel().selectedRows()})
         if rows:
-            self._add_tracks([self.model.track(row) for row in rows])
+            self._add([self.model.track(row) for row in rows], playlist, "")
+
+    def add_node(self, item: QTreeWidgetItem, playlist: str | None) -> None:
+        """Add the tracks of a sidebar item (an album, an artist, ...) to ``playlist``."""
+        source: MediaSource = item.data(0, _SOURCE)
+        node = item.data(0, _NODE)
+        if not isinstance(node, Node):
+            return
+        self.status.setText(LOADING)
+
+        def done(tracks: list[Track] | None, error: BaseException | None) -> None:
+            if error is not None or tracks is None:
+                self._show_error(error)
+            else:
+                self._add(tracks, playlist, node.name)
+
+        self._calls_for(source).run(lambda: source.tracks(node), done)
+
+    def _add(self, tracks: Sequence[Track], playlist: str | None, suggested: str) -> None:
+        message = self._add_to_playlist(tracks, playlist, suggested)
+        self.status.setText(message or "")
+        if message is None:
+            self._update_status()
+
+    def _playlist_menu(self, parent: QMenu, add: Callable[[str | None], object]) -> QMenu:
+        """Add to Playlist ▸ every saved playlist, then New Playlist…"""
+        menu = parent.addMenu("&Add to Playlist")
+        for name in self._playlist_names():
+            menu.addAction(name.replace("&", "&&")).triggered.connect(
+                lambda _=False, name=name: add(name)
+            )
+        menu.addSeparator()
+        menu.addAction("&New Playlist…").triggered.connect(lambda: add(None))
+        return menu
 
     def add_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(
@@ -447,21 +483,25 @@ class LibraryWindow(QDialog):
         play = menu.addAction("&Play")
         play.setEnabled(0 <= row < self.model.rowCount())
         play.triggered.connect(lambda: self.play_from(row))
-        add = menu.addAction("&Add to Playlist")
+        add = self._playlist_menu(menu, self.add_selected)
         add.setEnabled(self.table.selectionModel().hasSelection())
-        add.triggered.connect(self.add_selected)
         return menu
 
     def sidebar_menu(self, item: QTreeWidgetItem | None) -> QMenu | None:
-        """The menu for a right-click in the sidebar: the node's commands, if it has any."""
+        """The menu for a right-click in the sidebar: Add to Playlist, if the item has tracks,
+        and its source's commands for it (e.g. removing a folder)."""
         node = item.data(0, _NODE) if item is not None else None
         if item is None or not isinstance(node, Node):
             return None
         source: MediaSource = item.data(0, _SOURCE)
         actions = source.actions(node)
-        if not actions:
+        if not actions and not node.has_tracks:
             return None
         menu = QMenu(self)
+        if node.has_tracks:
+            self._playlist_menu(menu, lambda playlist: self.add_node(item, playlist))
+            if actions:
+                menu.addSeparator()
         for action in actions:
             menu.addAction(action.text).triggered.connect(action.run)
         return menu

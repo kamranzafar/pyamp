@@ -34,6 +34,7 @@ from functools import cache
 from itertools import pairwise
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 from numpy.typing import NDArray
 
 from pyamp.core.events import AudioFrame, EventBus, PlaybackStateChanged, SpectrumUpdated
@@ -74,6 +75,32 @@ class SpectrumAnalyzer:
         result: NDArray[np.float64] = np.clip((db - self.floor_db) / -self.floor_db, 0.0, 1.0)
         return result
 
+    def analyze_blocks(
+        self, samples: NDArray[np.float32], sample_rate: int, hop: int
+    ) -> NDArray[np.float32]:
+        """One row of levels per whole ``hop`` of ``samples``, in a single pass.
+
+        The same rows as calling :meth:`analyze` on each ``hop`` in turn (and it carries
+        on from there), but with the FFTs done together: much faster for a whole song.
+        A partial last hop is left out; the caller keeps it for next time.
+        """
+        count = len(samples) // hop
+        if count == 0:
+            return np.zeros((0, self.band_count), dtype=np.float32)
+        padded = np.concatenate([self._history, samples[: count * hop].astype(np.float32)])
+        # The window for block k ends where that block ends, as in analyze().
+        frames = sliding_window_view(padded, self.fft_size)[hop::hop][:count]
+        rows = np.empty((count, self.band_count), dtype=np.float32)
+        bins = self._band_bins(sample_rate)
+        for start in range(0, count, _FRAMES_PER_FFT):
+            chunk = frames[start : start + _FRAMES_PER_FFT]
+            magnitudes = np.abs(np.fft.rfft(chunk * self._window, axis=1)) * self._norm
+            levels = np.stack([magnitudes[:, lo:hi].max(axis=1) for lo, hi in bins], axis=1)
+            db = 20.0 * np.log10(levels + 1e-12)
+            rows[start : start + len(chunk)] = np.clip((db - self.floor_db) / -self.floor_db, 0, 1)
+        self._history = padded[-self.fft_size :].copy()
+        return rows
+
     def reset(self) -> None:
         self._history.fill(0.0)
 
@@ -88,6 +115,10 @@ class SpectrumAnalyzer:
 
     def _band_bins(self, sample_rate: int) -> tuple[tuple[int, int], ...]:
         return _log_band_bins(self.band_count, self.fft_size, sample_rate, self.min_hz, self.max_hz)
+
+
+#: Frames transformed per batch in :meth:`SpectrumAnalyzer.analyze_blocks` (bounds memory).
+_FRAMES_PER_FFT = 128
 
 
 @cache

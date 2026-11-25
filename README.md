@@ -155,19 +155,21 @@ uv run pyamp --backend qt   # remembered for next time; --backend mpv switches b
 
 mpv plays more formats and moves between tracks without a gap. It doesn't expose
 the audio it plays, so for the visualiser PyAmp decodes the track a second time,
-silently and in the background (Qt's decoder on a low-priority thread, much faster
-than real time), and shows the analysed levels for mpv's current position. That
-costs a short burst of CPU when a track starts and almost nothing while it plays;
-the bars also show the equaliser's curve. A song streamed from a server (e.g.
-Subsonic) is analysed from mpv's own copy once mpv has all of it buffered (it reads
-songs ahead anyway), so nothing is downloaded twice; the bars start when it's there.
-A song too big for mpv's buffer (over about 135 MiB) is analysed as it plays instead,
-like radio, and after a seek the bars pick up from the new place. Live radio is analysed the same way a piece at a time: every half
-second mpv's newly buffered stretch (it reads a few seconds ahead) is saved and
-analysed before it's heard, about 2% of one CPU core while the visualiser is visible.
-If a station's timing doesn't match playback, it gets no bars rather than wrong ones.
-If libmpv isn't
-installed, PyAmp warns and plays through `qt`, trying mpv again on the next start.
+silently and in the background (a hidden libmpv, separate from the one playing, on a
+low-priority thread, much faster than real time), and shows the analysed levels for
+mpv's current position. That costs a short burst of CPU when a track starts (about a
+second's work for a 4-minute MP3) and almost nothing while it plays; the bars also
+show the equaliser's curve.
+
+A song streamed from a server (e.g. Subsonic) is analysed from mpv's own copy once mpv
+has all of it buffered, so nothing is downloaded twice; the bars start when it's
+there. mpv keeps up to 32 MiB of a stream ahead (minutes of audio, for a bad network)
+and 16 MiB behind; a song bigger than that is analysed as it plays instead, like
+radio, and after a seek the bars pick up from the new place. Live radio is analysed a
+piece at a time: every 1.5 seconds mpv's newly buffered stretch (it reads a few
+seconds ahead) is saved and analysed before it's heard. If a station's timing doesn't
+match playback, it gets no bars rather than wrong ones. If libmpv isn't installed,
+PyAmp warns and plays through `qt`, trying mpv again on the next start.
 
 #### Using a libmpv that isn't installed system-wide
 

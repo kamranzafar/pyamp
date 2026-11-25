@@ -76,3 +76,26 @@ def test_service_pauses_while_inactive(bus: EventBus) -> None:
     service.set_active(True)
     bus.publish(AudioFrame(loud, 44_100))
     assert any(published[-1].levels)
+
+
+def test_blocks_give_the_same_rows_as_one_at_a_time() -> None:
+    """The batch path (for whole songs) must draw exactly the bars the frame path does."""
+    rng = np.random.default_rng(3)
+    rate, hop = 44100, 44100 // 30
+    t = np.arange(rate * 3) / rate
+    audio = (np.sin(2 * np.pi * 440 * t) * 0.3 + rng.normal(0, 0.05, t.size)).astype(np.float32)
+    one, batch = SpectrumAnalyzer(), SpectrumAnalyzer()
+    expected = np.array(
+        [one.analyze(audio[i : i + hop], rate) for i in range(0, len(audio) - hop + 1, hop)]
+    )
+    first = batch.analyze_blocks(audio[: hop * 40 + 100], rate, hop)  # in two goes, a partial
+    rest = batch.analyze_blocks(audio[hop * 40 :], rate, hop)  # hop left out of the first
+    assert len(first) == 40
+    np.testing.assert_allclose(np.concatenate([first, rest]), expected, atol=1e-5)
+
+
+def test_blocks_of_nothing() -> None:
+    assert SpectrumAnalyzer().analyze_blocks(np.zeros(10, dtype=np.float32), 44100, 1470).shape == (
+        0,
+        20,
+    )

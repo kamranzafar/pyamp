@@ -37,6 +37,8 @@ import functools
 import locale
 import logging
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -53,6 +55,14 @@ from pyamp.core.equalizer import BANDS_HZ, Equalizer
 from pyamp.core.models import Location, PlaybackState, ReplayGainMode, parse_location
 
 log = logging.getLogger(__name__)
+
+#: mpv's event for a file's end (played, failed or stopped).
+_END_FILE = 7
+#: How often a decode for the visualiser checks whether to stop.
+_CANCEL_CHECK_S = 0.1
+
+#: How much of a stream mpv reads ahead (and half that it keeps behind).
+STREAM_BUFFER_BYTES = 32 * 1024 * 1024
 
 #: How full mpv's read-ahead cache counts as full: a stream bigger than this won't fit.
 CACHE_FULL = 0.9
@@ -78,6 +88,11 @@ _DEFAULT_OPTIONS: dict[str, Any] = {
     "idle": True,
     "keep_open": False,
     "config": False,
+    # How much of a stream mpv holds in memory: minutes of audio ahead for a bad network,
+    # without keeping a whole hi-res album side in RAM (mpv's defaults: 150 + 50 MiB).
+    # A song too big for this is visualised a stretch at a time.
+    "demuxer_max_bytes": STREAM_BUFFER_BYTES,
+    "demuxer_max_back_bytes": STREAM_BUFFER_BYTES // 2,
     "input_default_bindings": False,
     "terminal": False,
     # ReplayGain is off until the player sets a mode; never let it clip, and leave
@@ -429,3 +444,59 @@ class MpvAudioBackend(AudioBackend):
         else:
             state = PlaybackState.PLAYING
         self._bridge.state.emit(state)
+
+
+class MpvPcmDecoder:
+    """Decodes a file to raw samples with a hidden libmpv, for the visualiser's analysis.
+
+    It shares nothing with the libmpv that plays: it writes to a file instead of a sound
+    card, as fast as it can (``untimed``). Several times quicker than Qt's decoder. Safe
+    to call from a worker thread; each call has its own instance.
+    """
+
+    #: Longest a decode may take (a corrupt or endless file stops there).
+    TIMEOUT_S = 120.0
+
+    def decode(
+        self,
+        source: Path,
+        target: Path,
+        sample_rate: int,
+        cancelled: Callable[[], bool] = lambda: False,
+    ) -> bool:
+        """Write ``source`` to ``target`` as mono float32 at ``sample_rate``, as it goes
+        (the samples can be read while it's still writing); False if it can't be decoded
+        or ``cancelled`` says to stop, which is checked several times a second."""
+        decoder: Any = None
+        ended = threading.Event()
+        try:
+            decoder = mpv.MPV(
+                video=False,
+                audio_display=False,
+                config=False,
+                terminal=False,
+                input_default_bindings=False,
+                ao="pcm",
+                ao_pcm_file=str(target),
+                ao_pcm_waveheader=False,
+                audio_format="float",
+                audio_channels="mono",
+                audio_samplerate=sample_rate,
+                untimed=True,
+                replaygain="no",
+            )
+            decoder.register_event_callback(
+                lambda event: ended.set() if event.event_id.value == _END_FILE else None
+            )
+            decoder.play(str(source))
+            deadline = time.monotonic() + self.TIMEOUT_S
+            while not ended.wait(_CANCEL_CHECK_S):
+                if cancelled() or time.monotonic() > deadline:
+                    return False
+        except Exception as exc:  # unreadable, unplayable, or it took too long
+            log.debug("Could not decode %s for the visualiser: %s", source.name, exc)
+            return False
+        finally:
+            if decoder is not None:
+                decoder.terminate()
+        return target.is_file() and target.stat().st_size > 0

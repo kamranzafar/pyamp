@@ -54,18 +54,24 @@ from pyamp.core.models import RepeatMode, ReplayGainMode
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 from pyamp.dsp.spectrum import SpectrumService
+from pyamp.library.catalog import Catalog
 from pyamp.library.loader import TrackLoader
 from pyamp.library.metadata import MutagenMetadataReader
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.library.saved_playlists import SavedPlaylists
+from pyamp.library.scanner import LibraryScanner
 from pyamp.plugins import PluginContext, PluginManager
 from pyamp.ui.background_loader import BackgroundTrackLoader
 from pyamp.ui.icons import app_icon
+from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.main_window import MainWindow, UiServices
 from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import DEFAULT_SKIN
 
 log = logging.getLogger(__name__)
+
+#: The library is rescanned this long after start, once the music has started.
+LIBRARY_SCAN_DELAY_MS = 5000
 
 
 def apply_libmpv_preference(requested: str | None, settings: Settings) -> None:
@@ -128,6 +134,7 @@ class Application:
         args: argparse.Namespace,
         store: SettingsStore | None = None,
         saved_playlists: SavedPlaylists | None = None,
+        catalog: Catalog | None = None,
     ) -> None:
         self._store = store or SettingsStore()
         self.settings = self._store.load()
@@ -149,6 +156,10 @@ class Application:
         self.playlist_formats = PlaylistFormatRegistry.default()
         self.loader = BackgroundTrackLoader(
             TrackLoader(MutagenMetadataReader(), self.playlist_formats)
+        )
+        self.catalog = catalog or Catalog()
+        self.library = BackgroundLibraryScanner(
+            self.catalog, LibraryScanner(self.catalog, MutagenMetadataReader()), self.bus
         )
         self.plugins = PluginManager(
             PluginContext(
@@ -178,6 +189,7 @@ class Application:
                 settings=self.settings,
                 spectrum_bands=self.spectrum.band_count,
                 playlists=self.playlists,
+                library=self.library,
             ),
             DEFAULT_SKIN,
         )
@@ -192,11 +204,14 @@ class Application:
         self.playlists.start()  # opens the playlist that was open last
         if paths:
             self.window.add_paths(paths, autoplay=True)
+        self.library.scan_later(LIBRARY_SCAN_DELAY_MS)
 
     def shutdown(self) -> None:
         # Saves the open playlist, unless it's still loading (then its file is kept).
         self.playlists.shutdown()
         self.loader.shutdown()
+        self.library.shutdown()
+        self.catalog.close()
         self.settings.volume = self.player.volume
         self.settings.shuffle = self.player.shuffle
         self.settings.repeat = self.player.repeat.value

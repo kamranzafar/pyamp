@@ -222,3 +222,12 @@ def test_files_that_vanish_mid_scan_are_skipped(
 
     monkeypatch.setattr("pyamp.library.scanner.audio_files", listing_then_delete)
     assert scanner.scan() == ScanSummary(added=2)
+
+
+def test_progress_counts_the_files_checked(
+    catalog: Catalog, scanner: LibraryScanner, music: Path
+) -> None:
+    catalog.add_source(music)
+    counts: list[int] = []
+    scanner.scan(progress=counts.append)
+    assert counts == [1, 2, 3]

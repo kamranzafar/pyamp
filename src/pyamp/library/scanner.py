@@ -53,6 +53,10 @@ def _never() -> bool:
     return False
 
 
+def _ignore(_: int) -> None:
+    pass
+
+
 class LibraryScanner:
     """Synchronous and toolkit-agnostic, like :class:`pyamp.library.loader.TrackLoader`.
 
@@ -64,8 +68,16 @@ class LibraryScanner:
         self._catalog = catalog
         self._reader = reader
 
-    def scan(self, should_stop: Callable[[], bool] = _never) -> ScanSummary:
-        """Scan every source; ``should_stop`` is checked before each file."""
+    def scan(
+        self,
+        should_stop: Callable[[], bool] = _never,
+        progress: Callable[[int], None] = _ignore,
+    ) -> ScanSummary:
+        """Scan every source.
+
+        ``should_stop`` is checked before each file, and ``progress`` is told how many
+        files have been checked after each one.
+        """
         known = self._catalog.stamps()
         sources = self._catalog.sources()
         missing = tuple(source for source in sources if not source.exists())
@@ -85,6 +97,7 @@ class LibraryScanner:
             if stamp is None:
                 continue
             seen.add(path)
+            progress(len(seen))
             before = known.get(path)
             if before == stamp:
                 continue

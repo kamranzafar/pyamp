@@ -106,6 +106,27 @@ Editing the open playlist:
 | `Delete` | Remove the selected tracks |
 | Right-click | All of the above |
 
+### Library
+
+**Library → Show Library** (`Alt+L`) opens a window with all your music, browsable by
+artist, album, genre and folder, with a search box. Add music with **Add Folder…** or
+**Add Files…** (in the window or the Library menu). Tags are read once, in the
+background, at low priority, so the music keeps playing while a large folder is
+scanned. PyAmp checks for new, changed and deleted files a few seconds after it
+starts, and when you click **Rescan**. Only files that changed are read again.
+
+- Double-click a track (or press Enter) to play the tracks shown, starting there. They
+  play in a playlist called **Library**, so your other playlists stay as they are.
+- **Add to Playlist** (right-click) adds the selected tracks to the open playlist, or
+  drag them into it.
+- Right-click a folder under **Folders** to remove it from the library. The files stay
+  where they are: PyAmp only reads your music files, and never retags, renames or
+  moves them.
+
+If a folder isn't there when PyAmp scans (e.g. on a drive that isn't connected), its
+tracks are kept until it's back. The library is a single `library.sqlite3` file in
+PyAmp's data folder.
+
 ### Audio backends
 
 | Backend | Default | Gapless | Equaliser | Visualiser | Needs |
@@ -321,6 +342,9 @@ src/pyamp/
     ├── equalizer_window.py  The equaliser window
     ├── background_loader.py  Non-blocking track loading (worker thread)
     ├── playlist_session.py   Which saved playlist is open; auto-save
+    ├── library_scan.py       Library scans on a low-priority worker thread
+    ├── library_window.py     The library window: browse, search, play
+    ├── library_model.py      Library tracks → sortable, draggable table model
     ├── jump_dialog.py        Jump to Track (J)
     ├── about_dialog.py       Help → About: version, licence, notices
     ├── menu_bar.py           Menu bar / system tray icon and its menu
@@ -376,11 +400,17 @@ the playlist files (switching, renaming, deleting, quitting) waits for it first.
 The visualiser only works while the window can be seen: hiding or minimising it pauses
 the FFT and, on the `mpv` backend, the second decoding of the playing file.
 
-The media library's index (`library/catalog.py`) is one SQLite connection guarded by a
-lock, so the scanner can fill it from a worker thread while the window reads it. The
-scanner writes in batches and can be cancelled; a cancelled scan keeps what it read
-and forgets nothing, and tracks of a folder that isn't there (an unplugged drive) are
-kept until it's back.
+The media library is scanned the same way by `ui/library_scan.py`: one scan at a time
+on its own worker thread. The index (`library/catalog.py`) is one SQLite connection
+guarded by a lock, so the scanner fills it while the window reads it. The scanner
+writes in batches and can be cancelled (asking for a scan while one runs restarts
+it); a cancelled scan keeps what it read and forgets nothing, and tracks of a folder
+that isn't there (an unplugged drive) are kept until it's back. `LibraryChanged` is
+published on the main thread when a scan has changed something.
+
+Both worker threads run at low priority, so reading tags never competes with
+playback or the window. The audio itself is decoded and played on the backends' own
+native threads (libmpv's or QtMultimedia's), outside Python.
 
 libmpv reports events on its own thread. `audio/mpv_backend.py` only records
 state there and emits signals on a main-thread `QObject`, so the player never
@@ -413,7 +443,8 @@ my-scrobbler = "my_package:MyScrobbler"
 ```
 
 `ctx.ui()` gives plugins with windows a place in the menu bar
-(`add_menu_action("&Library", "My Window…", show)`) and a parent for their windows, and
+(`add_menu_action("&Tools", "My Window…", show)` adds a menu before Help; items for
+`"&Library"` join PyAmp's own Library menu) and a parent for their windows, and
 `ctx.player.set_location_resolver()` lets one rewrite what the player loads (the Subsonic
 plugin adds its login there).
 
@@ -428,10 +459,8 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
   don't warn.
 - **Smaller downloads**: bundle only the Qt modules and plugins PyAmp uses, so the
   apps shrink from about 170 MB.
-- **Media library**: add folders and files once, then browse and search them by artist,
-  album and genre, and build playlists from them. PyAmp only reads your files; it
-  never retags, renames or moves them. The index and scanner are in place; the
-  library window is next.
+- **Building playlists from the library**: create and edit saved playlists from the
+  library window, and add to playlists other than the open one.
 - **DLNA/UPnP media servers** (plugin): find media servers on the local network (NAS,
   MiniDLNA, Plex/Jellyfin DLNA), browse them and play from them.
 

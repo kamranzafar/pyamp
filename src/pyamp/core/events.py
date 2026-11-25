@@ -133,6 +133,11 @@ class PlaylistChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class LibraryChanged:
+    """The media library's tracks or folders changed (e.g. a scan finished)."""
+
+
+@dataclass(frozen=True, slots=True)
 class SavedPlaylistsChanged:
     """The saved playlists, or which one is open, changed."""
 

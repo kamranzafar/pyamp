@@ -151,6 +151,20 @@ class PlaylistSession(QObject):
         self._open(name)
         return name
 
+    def open_tracks(self, name: str, tracks: Sequence[Track]) -> None:
+        """Open the playlist ``name`` (creating it) with ``tracks`` in place of its own.
+
+        How the library plays tracks without changing the user's other playlists.
+        """
+        self.save_now()
+        self._loader.cancel_all()
+        if not self._saved.exists(name):
+            self._saved.create(name)
+        self._active = next(n for n in self._saved.names() if n.casefold() == name.casefold())
+        self._loading = None
+        self._playlist.replace(tracks)  # saved by the auto-save this starts
+        self._remember()
+
     def rename(self, new_name: str) -> str:
         """Rename the open playlist. Raises PlaylistNameError with a user-facing message."""
         assert self._active is not None

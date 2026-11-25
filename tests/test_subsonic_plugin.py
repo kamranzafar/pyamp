@@ -121,7 +121,8 @@ def test_adds_its_menu_and_waits_to_be_set_up(
     assert plugin.client is None
     menu = next(a.menu() for a in app.window.menuBar().actions() if a.text() == "&Library")
     assert isinstance(menu, QMenu)
-    assert [a.text() for a in menu.actions()] == ["Subsonic &Browser…", "Subsonic &Server…"]
+    # After PyAmp's own library items.
+    assert [a.text() for a in menu.actions()][-2:] == ["Subsonic &Browser…", "Subsonic &Server…"]
 
 
 def test_connects_and_remembers_the_password_in_the_keychain(

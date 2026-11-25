@@ -32,6 +32,7 @@ import sqlite3
 import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import NamedTuple
 
@@ -65,8 +66,15 @@ _MIGRATIONS = (
         track_peak REAL,
         album_gain REAL,
         album_peak REAL,
+        -- Case-folded, for grouping and browsing: an album's artist is its album
+        -- artist, else its artist.
+        artist_key TEXT NOT NULL,
+        album_key TEXT NOT NULL,
+        genre_key TEXT NOT NULL,
         search_text TEXT NOT NULL
     );
+    CREATE INDEX tracks_by_artist ON tracks (artist_key, album_key);
+    CREATE INDEX tracks_by_genre ON tracks (genre_key);
     """,
 )
 SCHEMA_VERSION = len(_MIGRATIONS)
@@ -92,7 +100,10 @@ class _TrackRow(NamedTuple):
 
 
 _SELECT = f"SELECT {', '.join(_TrackRow._fields)} FROM tracks"
-_STORED_COLUMNS = (*_TrackRow._fields, "mtime_ns", "size", "search_text")
+_KEY_COLUMNS = ("artist_key", "album_key", "genre_key", "search_text")
+_STORED_COLUMNS = (*_TrackRow._fields, "mtime_ns", "size", *_KEY_COLUMNS)
+#: The artist that groups a track: its album artist, else its artist.
+_GROUP_ARTIST = "CASE WHEN album_artist != '' THEN album_artist ELSE artist END"
 _PUT = (
     f"INSERT OR REPLACE INTO tracks ({', '.join(_STORED_COLUMNS)})"
     f" VALUES ({', '.join('?' * len(_STORED_COLUMNS))})"
@@ -124,6 +135,30 @@ class FileStamp:
     def of(cls, path: Path) -> FileStamp:
         stat = path.stat()
         return cls(stat.st_mtime_ns, stat.st_size)
+
+
+class GroupKind(StrEnum):
+    ARTIST = "artist"
+    ALBUM = "album"
+    GENRE = "genre"
+    FOLDER = "folder"
+
+
+@dataclass(frozen=True, slots=True)
+class Group:
+    """An artist, album, genre or folder of the library, to browse by.
+
+    Artists are album artists where tracks have one (so a compilation is one entry),
+    and names that differ only in case are one group.
+    """
+
+    kind: GroupKind
+    #: The artist, album title or genre as tagged (empty: untagged), or a source's path.
+    name: str
+    #: Albums only: whose album it is.
+    artist: str = ""
+    #: How many tracks it has.
+    count: int = 0
 
 
 class CatalogError(Exception):
@@ -206,18 +241,46 @@ class Catalog:
         with self._lock, self._db:
             self._db.executemany("DELETE FROM tracks WHERE path = ?", rows)
 
-    def tracks(self, search: str = "") -> list[Track]:
-        """Every track, or those matching every word of ``search``, in album order.
+    def tracks(self, search: str = "", group: Group | None = None) -> list[Track]:
+        """The tracks in ``group`` (default: all) matching ``search``, in album order.
 
-        Words match anywhere in the title, artist, album, album artist, genre or file
-        name, ignoring case.
+        Every word of ``search`` must match somewhere in the title, artist, album,
+        album artist, genre or file name, ignoring case.
         """
-        words = search.casefold().split()
-        where = " AND ".join("search_text LIKE ? ESCAPE '\\'" for _ in words)
-        query = f"{_SELECT} WHERE {where}" if words else _SELECT
+        conditions = [_LIKE] * len(words := search.casefold().split())
+        params = [f"%{_escape_like(word)}%" for word in words]
+        if group is not None:
+            condition, group_params = _group_condition(group)
+            conditions.append(condition)
+            params.extend(group_params)
+        query = f"{_SELECT} WHERE {' AND '.join(conditions)}" if conditions else _SELECT
         with self._lock:
-            rows = self._db.execute(query, [f"%{_escape_like(w)}%" for w in words]).fetchall()
+            rows = self._db.execute(query, params).fetchall()
         return sorted((_from_row(_TrackRow._make(row)) for row in rows), key=album_order)
+
+    def groups(self, kind: GroupKind) -> list[Group]:
+        """Every artist, album, genre or folder with its track count, by name.
+
+        Untagged tracks make an artist without a name; albums and genres only list
+        tagged ones.
+        """
+        if kind is GroupKind.FOLDER:
+            return [
+                Group(kind, str(source), count=self._count(Group(kind, str(source))))
+                for source in self.sources()
+            ]
+        with self._lock:
+            rows = self._db.execute(_GROUP_QUERIES[kind]).fetchall()
+        groups = [Group(kind, name, artist, count) for name, artist, count in rows]
+        return sorted(groups, key=lambda g: (g.name.casefold(), g.artist.casefold()))
+
+    def _count(self, group: Group) -> int:
+        condition, params = _group_condition(group)
+        with self._lock:
+            (count,) = self._db.execute(
+                f"SELECT COUNT(*) FROM tracks WHERE {condition}", params
+            ).fetchone()
+        return int(count)
 
     # -- Storage --------------------------------------------------------------------- #
 
@@ -265,6 +328,33 @@ def album_order(track: Track) -> tuple[str, str, int, int, str, str]:
     )
 
 
+_LIKE = "search_text LIKE ? ESCAPE '\\'"
+_GROUP_QUERIES = {
+    GroupKind.ARTIST: f"SELECT MIN({_GROUP_ARTIST}), '', COUNT(*) FROM tracks GROUP BY artist_key",
+    GroupKind.ALBUM: f"SELECT MIN(album), MIN({_GROUP_ARTIST}), COUNT(*) FROM tracks"
+    " WHERE album_key != '' GROUP BY artist_key, album_key",
+    GroupKind.GENRE: "SELECT MIN(genre), '', COUNT(*) FROM tracks"
+    " WHERE genre_key != '' GROUP BY genre_key",
+}
+
+
+def _group_condition(group: Group) -> tuple[str, list[str]]:
+    """A WHERE condition (and its parameters) for the tracks in ``group``."""
+    match group.kind:
+        case GroupKind.ARTIST:
+            return "artist_key = ?", [group.name.casefold()]
+        case GroupKind.ALBUM:
+            return "artist_key = ? AND album_key = ?", [
+                group.artist.casefold(),
+                group.name.casefold(),
+            ]
+        case GroupKind.GENRE:
+            return "genre_key = ?", [group.name.casefold()]
+        case GroupKind.FOLDER:
+            inside = f"{_escape_like(os.path.join(group.name, ''))}%"  # ends in a separator
+            return "(path = ? OR path LIKE ? ESCAPE '\\')", [group.name, inside]
+
+
 def _escape_like(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -295,7 +385,13 @@ def _to_row(track: Track, stamp: FileStamp) -> tuple[object, ...]:
         album_gain=gain.album_gain,
         album_peak=gain.album_peak,
     )
-    return (*row, stamp.mtime_ns, stamp.size, _search_text(track))
+    keys = (
+        (track.album_artist or track.artist).casefold(),
+        track.album.casefold(),
+        track.genre.casefold(),
+        _search_text(track),
+    )
+    return (*row, stamp.mtime_ns, stamp.size, *keys)
 
 
 def _from_row(row: _TrackRow) -> Track:

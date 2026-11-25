@@ -29,7 +29,14 @@ from pathlib import Path
 import pytest
 
 from pyamp.core.models import ReplayGain, StreamUrl, Track
-from pyamp.library.catalog import SCHEMA_VERSION, Catalog, FileStamp
+from pyamp.library.catalog import (
+    SCHEMA_VERSION,
+    Catalog,
+    FileStamp,
+    Group,
+    GroupKind,
+    default_path,
+)
 
 STAMP = FileStamp(mtime_ns=1, size=2)
 
@@ -178,6 +185,85 @@ def test_can_be_used_from_several_threads(catalog: Catalog) -> None:
     assert len(catalog) == 200
 
 
+# -- Browsing by artist, album, genre and folder -------------------------------------- #
+
+
+@pytest.fixture
+def browsable(catalog: Catalog, tmp_path: Path) -> Catalog:
+    rock, jazz = tmp_path / "rock", tmp_path / "jazz"
+    catalog.add_source(rock)
+    catalog.add_source(jazz)
+    catalog.add_source(tmp_path / "single.mp3")
+    entries = [
+        track(f"{rock}/1.mp3", "One", artist="Band", album="First", genre="Rock"),
+        track(f"{rock}/2.mp3", "Two", artist="band", album="first", genre="rock"),
+        track(f"{rock}/3.mp3", "Duet", artist="Guest", album_artist="Band", album="Second"),
+        track(f"{jazz}/4.mp3", "Blue", artist="Trio", album="First", genre="Jazz"),
+        track(f"{jazz}/sub/5.mp3", "Untagged"),
+        track(f"{tmp_path}/single.mp3", "Single", artist="Solo"),
+        track(f"{tmp_path}/rockabilly/6.mp3", "Outside"),  # shares rock's prefix only
+    ]
+    catalog.put((t, STAMP) for t in entries)
+    return catalog
+
+
+def test_artists_group_by_album_artist_ignoring_case(browsable: Catalog) -> None:
+    assert browsable.groups(GroupKind.ARTIST) == [
+        Group(GroupKind.ARTIST, "", count=2),  # untagged
+        Group(GroupKind.ARTIST, "Band", count=3),  # incl. a guest on Band's album
+        Group(GroupKind.ARTIST, "Solo", count=1),
+        Group(GroupKind.ARTIST, "Trio", count=1),
+    ]
+
+
+def test_albums_are_told_apart_by_artist(browsable: Catalog) -> None:
+    assert browsable.groups(GroupKind.ALBUM) == [
+        Group(GroupKind.ALBUM, "First", "Band", 2),
+        Group(GroupKind.ALBUM, "First", "Trio", 1),
+        Group(GroupKind.ALBUM, "Second", "Band", 1),
+    ]
+
+
+def test_genres(browsable: Catalog) -> None:
+    assert browsable.groups(GroupKind.GENRE) == [
+        Group(GroupKind.GENRE, "Jazz", count=1),
+        Group(GroupKind.GENRE, "Rock", count=2),
+    ]
+
+
+def test_folders_are_the_sources(browsable: Catalog, tmp_path: Path) -> None:
+    assert browsable.groups(GroupKind.FOLDER) == [
+        Group(GroupKind.FOLDER, str(tmp_path / "jazz"), count=2),
+        Group(GroupKind.FOLDER, str(tmp_path / "rock"), count=3),
+        Group(GroupKind.FOLDER, str(tmp_path / "single.mp3"), count=1),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("group", "titles"),
+    [
+        (Group(GroupKind.ARTIST, "BAND"), ["One", "Two", "Duet"]),
+        (Group(GroupKind.ARTIST, ""), ["Outside", "Untagged"]),
+        (Group(GroupKind.ALBUM, "first", "trio"), ["Blue"]),
+        (Group(GroupKind.GENRE, "rock"), ["One", "Two"]),
+        (Group(GroupKind.FOLDER, "{tmp}/jazz"), ["Untagged", "Blue"]),  # no artist first
+        (Group(GroupKind.FOLDER, "{tmp}/rock"), ["One", "Two", "Duet"]),
+        (Group(GroupKind.FOLDER, "{tmp}/single.mp3"), ["Single"]),
+    ],
+)
+def test_tracks_of_a_group(
+    browsable: Catalog, tmp_path: Path, group: Group, titles: list[str]
+) -> None:
+    group = Group(group.kind, group.name.format(tmp=tmp_path), group.artist)
+    assert [t.title for t in browsable.tracks(group=group)] == titles
+
+
+def test_search_within_a_group(browsable: Catalog) -> None:
+    band = Group(GroupKind.ARTIST, "Band")
+    assert [t.title for t in browsable.tracks("second", band)] == ["Duet"]
+    assert browsable.tracks("blue", band) == []
+
+
 # -- The library file ---------------------------------------------------------------- #
 
 
@@ -195,6 +281,7 @@ def test_the_library_is_kept_between_runs(tmp_path: Path) -> None:
 def test_default_location_is_the_user_data_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("pyamp.library.catalog.default_path", default_path)  # not isolated
     monkeypatch.setattr("platformdirs.user_data_dir", lambda _: str(tmp_path))
     opened = Catalog()
     assert opened.path == tmp_path / "library.sqlite3"

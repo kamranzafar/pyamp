@@ -299,3 +299,28 @@ def test_deleting_waits_for_a_pending_auto_save(
     session.delete()
     session.wait_for_saves()
     assert saved.names() == ["Default"]  # not brought back by the late auto-save
+
+
+def test_open_tracks_fills_a_playlist_without_touching_the_others(
+    session: PlaylistSession,
+    playlist: Playlist,
+    saved: SavedPlaylists,
+    settings: Settings,
+    tmp_path: Path,
+) -> None:
+    session.start()
+    wait_until(lambda: loaded(session))
+    playlist.add([Track.from_path(make_files(tmp_path / "d", 1)[0])])
+    tracks = [Track.from_path(p) for p in make_files(tmp_path / "lib", 3)]
+
+    session.open_tracks("Library", tracks)
+    assert session.active == "Library"
+    assert list(playlist) == tracks  # at once, nothing to load
+    assert not session.loading
+    assert settings.active_playlist == "Library"
+    assert len(saved.read_paths("Default")) == 1  # saved as it was
+    wait_until(lambda: saved.exists("Library") and len(saved.read_paths("Library")) == 3)
+
+    session.open_tracks("library", tracks[:1])  # the same playlist, case-insensitively
+    assert saved.names() == ["Default", "Library"]
+    wait_until(lambda: len(saved.read_paths("Library")) == 1)

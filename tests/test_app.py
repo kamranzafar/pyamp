@@ -21,12 +21,14 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QMenu
 
 from pyamp import app as app_module
 from pyamp.app import Application, parse_args
@@ -67,6 +69,7 @@ def cleanup(qt_app: QCoreApplication) -> Iterator[list[Application]]:
     yield apps
     for application in apps:
         application.loader.shutdown()
+        application.library.shutdown()
         application.window.close()
 
 
@@ -318,3 +321,72 @@ def test_shutdown_survives_unwritable_config_dir(
     cleanup.append(application)
     application.shutdown()  # must not raise
     assert "Could not save session" in caplog.text
+
+
+# -- The media library --------------------------------------------------------------- #
+
+
+def test_library_menu_and_window(store: SettingsStore, cleanup: list[Application]) -> None:
+    application = build(store)
+    cleanup.append(application)
+    window = application.window
+    library = next(a.menu() for a in window.menuBar().actions() if a.text() == "&Library")
+    assert isinstance(library, QMenu)
+    texts = [a.text() for a in library.actions() if not a.isSeparator()]
+    assert texts == [
+        "Show &Library",
+        "Add &Folder to Library…",
+        "Add F&iles to Library…",
+        "&Rescan Library",
+    ]
+    assert library.actions()[0].shortcut().toString() == "Alt+L"
+    library.actions()[0].trigger()
+    assert window.show_library() is window.show_library()  # one window, reused
+    assert window.show_library().isVisible()
+
+
+def test_playing_from_the_library_leaves_other_playlists_alone(
+    store: SettingsStore, cleanup: list[Application], tmp_path: Path
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    application.start([])
+    wait_until(lambda: not application.playlists.loading)
+    mine = Track.from_path(tmp_path / "mine.mp3")
+    application.playlist.add([mine])
+    tracks = [Track.from_path(tmp_path / f"{n}.mp3") for n in "abc"]
+
+    application.window.play_from_library(tracks, 1)
+    assert application.playlists.active == "Library"
+    assert list(application.playlist) == tracks
+    assert application.playlist.current_index == 1
+    saved = SavedPlaylists(store.directory / "playlists")
+    assert saved.read_paths("Default") == [mine.location]
+
+
+def test_adding_from_the_library_adds_to_the_open_playlist(
+    store: SettingsStore, cleanup: list[Application], tmp_path: Path
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    application.start([])
+    wait_until(lambda: not application.playlists.loading)
+    application.window.add_from_library([Track.from_path(tmp_path / "a.mp3")])
+    assert len(application.playlist) == 1
+    assert application.window.statusBar().currentMessage() == "Added 1 track to Default"
+
+
+def test_the_library_is_scanned_after_start_and_closed_on_quit(
+    store: SettingsStore, cleanup: list[Application], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app_module, "LIBRARY_SCAN_DELAY_MS", 10)
+    application = build(store)
+    cleanup.append(application)
+    finished: list[object] = []
+    application.library.finished.connect(finished.append)
+    application.start([])
+    assert finished == []  # not while starting up
+    wait_until(lambda: bool(finished))
+    application.shutdown()
+    with pytest.raises(sqlite3.ProgrammingError):
+        application.catalog.sources()  # closed

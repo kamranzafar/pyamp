@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,6 +69,8 @@ from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
 from pyamp.ui.equalizer_window import EqualizerWindow
 from pyamp.ui.jump_dialog import JumpDialog
+from pyamp.ui.library_scan import BackgroundLibraryScanner
+from pyamp.ui.library_window import LibraryWindow
 from pyamp.ui.menu_bar import IS_MACOS, PLACE, MenuBarIcon
 from pyamp.ui.playlist_model import PlaylistModel, dropped_locations
 from pyamp.ui.playlist_session import PlaylistSession
@@ -80,6 +82,9 @@ from pyamp.ui.widgets.sliders import SeekSlider, VolumeSlider
 
 WINDOW_WIDTH = 460
 STATUS_TIMEOUT_MS = 5000
+#: The saved playlist the library plays into, so it never changes the user's others.
+LIBRARY_PLAYLIST = "Library"
+LIBRARY_MENU = "&Library"  # plugins with a library (Subsonic) add to it too
 
 SORT_OPTIONS = (
     ("&Title", SortKey.TITLE),
@@ -102,6 +107,7 @@ class UiServices:
     settings: Settings
     spectrum_bands: int
     playlists: PlaylistSession
+    library: BackgroundLibraryScanner
 
 
 class MainWindow(QMainWindow):
@@ -115,6 +121,7 @@ class MainWindow(QMainWindow):
         self._s = services
         self._skin = skin
         self._equalizer_window: EqualizerWindow | None = None
+        self._library_window: LibraryWindow | None = None
         self._jump_dialog: JumpDialog | None = None
         self._about_dialog: AboutDialog | None = None
         self._plugin_menus: dict[str, QMenu] = {}
@@ -263,7 +270,16 @@ class MainWindow(QMainWindow):
         )
         self._add_menu_action(list_menu, "&Clear", self._clear_playlist)
 
-        view_menu = menu_bar.addMenu("&View")
+        self._build_library_menu(menu_bar.addMenu(LIBRARY_MENU))
+
+        self._build_view_menu(menu_bar.addMenu("&View"))
+
+        help_menu = self._help_menu = menu_bar.addMenu("&Help")
+        self.about_action = self._add_menu_action(help_menu, f"&About {APP_NAME}", self.show_about)
+        # macOS shows it as "About PyAmp" in the application menu, where users look for it.
+        self.about_action.setMenuRole(QAction.MenuRole.AboutRole)
+
+    def _build_view_menu(self, view_menu: QMenu) -> None:
         self.show_icon_action = QAction(f"Show Icon in {PLACE}", self)
         self.show_icon_action.setCheckable(True)
         self.show_icon_action.setChecked(self.menu_bar_icon.visible)
@@ -283,10 +299,18 @@ class MainWindow(QMainWindow):
             self.show_icon_action.setToolTip(f"This desktop has no {PLACE.lower()}")
         self._sync_view_menu()
 
-        help_menu = self._help_menu = menu_bar.addMenu("&Help")
-        self.about_action = self._add_menu_action(help_menu, f"&About {APP_NAME}", self.show_about)
-        # macOS shows it as "About PyAmp" in the application menu, where users look for it.
-        self.about_action.setMenuRole(QAction.MenuRole.AboutRole)
+    def _build_library_menu(self, menu: QMenu) -> None:
+        self._plugin_menus[LIBRARY_MENU] = menu
+        self._add_menu_action(menu, "Show &Library", self.show_library, "Alt+L")
+        menu.addSeparator()
+        self._add_menu_action(
+            menu, "Add &Folder to Library…", lambda: self.show_library().add_folder()
+        )
+        self._add_menu_action(
+            menu, "Add F&iles to Library…", lambda: self.show_library().add_files()
+        )
+        self._add_menu_action(menu, "&Rescan Library", self._s.library.scan)
+        menu.addSeparator()
 
     # -- PluginUi ----------------------------------------------------------- #
 
@@ -409,6 +433,37 @@ class MainWindow(QMainWindow):
         self._equalizer_window.raise_()
         self._equalizer_window.activateWindow()
         return self._equalizer_window
+
+    def show_library(self) -> LibraryWindow:
+        """Open the library window (one instance, reused)."""
+        if self._library_window is None:
+            self._library_window = LibraryWindow(
+                self._s.library,
+                self._s.bus,
+                self._s.settings,
+                self._skin,
+                play_tracks=self.play_from_library,
+                add_tracks=self.add_from_library,
+                parent=self,
+            )
+        self._library_window.show()
+        self._library_window.raise_()
+        self._library_window.activateWindow()
+        return self._library_window
+
+    def play_from_library(self, tracks: Sequence[Track], start: int) -> None:
+        """Play ``tracks`` from ``start``, in the "Library" playlist."""
+        self._autoplay_jobs.clear()
+        self._s.playlists.open_tracks(LIBRARY_PLAYLIST, tracks)
+        self._s.player.play_index(start)
+
+    def add_from_library(self, tracks: Sequence[Track]) -> None:
+        """Add ``tracks`` to the open playlist."""
+        self._s.playlist.add(tracks)
+        noun = "track" if len(tracks) == 1 else "tracks"
+        self.statusBar().showMessage(
+            f"Added {len(tracks)} {noun} to {self._s.playlists.active}", STATUS_TIMEOUT_MS
+        )
 
     def _add_menu_action(
         self,

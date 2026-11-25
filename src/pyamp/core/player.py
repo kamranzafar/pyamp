@@ -144,6 +144,11 @@ class Player:
         return self._equalizer
 
     @property
+    def backend_name(self) -> str:
+        """The audio backend in use, e.g. ``"qt"`` or ``"mpv"``."""
+        return self._backend.name
+
+    @property
     def provides_audio_frames(self) -> bool:
         """Whether the backend reports the audio it plays (for the visualiser)."""
         return self._backend.provides_audio_frames

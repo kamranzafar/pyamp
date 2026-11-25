@@ -17,7 +17,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
-"""View → Audio Backend: choosing the backend PyAmp uses on its next start."""
+"""Playback → Audio Backend: choosing the backend PyAmp uses on its next start."""
 
 from __future__ import annotations
 

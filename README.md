@@ -236,8 +236,10 @@ are added to playlists like local tracks.
 
 Songs are added with their tags and length, so they show like local files and can be
 seeked. The password is kept in the system keychain (macOS Keychain, Windows Credential
-Manager or Secret Service on Linux), never in a file; without a keychain PyAmp asks
-for it each session. Saved playlists keep the server's songs without your login (PyAmp
+Manager or Secret Service on Linux), never in a file. Untick **Remember the password**
+(or have no keychain) and PyAmp keeps it only until it quits, doesn't touch the
+keychain, and asks again next session (Library → Subsonic Server…); the choice is
+remembered. Saved playlists keep the server's songs without your login (PyAmp
 adds it as each one plays), so they're safe to share or back up.
 
 ### Media keys and system controls

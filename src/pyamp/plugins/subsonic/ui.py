@@ -49,6 +49,7 @@ class ServerDialog(QDialog):
         username: str = "",
         *,
         has_keychain: bool = True,
+        remember: bool = True,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -62,7 +63,7 @@ class ServerDialog(QDialog):
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.remember = QCheckBox("Remember the password in the system keychain")
-        self.remember.setChecked(has_keychain)
+        self.remember.setChecked(has_keychain and remember)  # as the user left it
         self.remember.setEnabled(has_keychain)
         if not has_keychain:
             self.remember.setToolTip("No keychain is available; you'll be asked each session")

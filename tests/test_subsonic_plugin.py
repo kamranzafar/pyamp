@@ -49,8 +49,10 @@ class MemoryKeyring(KeyringBackend):
     def __init__(self) -> None:
         super().__init__()
         self.passwords: dict[tuple[str, str], str] = {}
+        self.reads = 0  # each can make the system ask for permission
 
     def get_password(self, service: str, username: str) -> str | None:
+        self.reads += 1
         return self.passwords.get((service, username))
 
     def set_password(self, service: str, username: str, password: str) -> None:
@@ -102,6 +104,7 @@ def answer_dialog(
 
     def run(dialog: ServerDialog) -> int:
         shown.append(dialog)
+        dialog.remember_at_first = dialog.remember.isChecked()  # type: ignore[attr-defined]
         dialog.server.setText(server)
         dialog.username.setText(USERNAME)
         dialog.password.setText(password)
@@ -175,6 +178,37 @@ def test_not_remembering_the_password(
     answer_dialog(monkeypatch, server.url, PASSWORD, remember=False)
     assert plugin.show_server_dialog()
     assert keychain.passwords == {}  # and an earlier one is forgotten
+    assert not accounts.remembers_password()
+
+
+def test_not_remembering_is_remembered_and_keeps_out_of_the_keychain(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    accounts.save(Account(server.url, USERNAME), remember_password=False)
+    plugin = start(app, accounts)  # as PyAmp starts
+    assert keychain.reads == 0  # so the system doesn't ask for anything
+    assert plugin.client is None  # the password is asked for again this session
+    shown = answer_dialog(monkeypatch, server.url, PASSWORD, remember=False)
+    assert plugin.show_server_dialog()
+    assert shown[0].remember_at_first is False  # type: ignore[attr-defined]  # as left
+    assert keychain.reads == 0
+    assert keychain.passwords == {}
+
+
+def test_remembering_is_the_default(
+    accounts: AccountStore, server: SubsonicServer, tmp_path: Path
+) -> None:
+    assert accounts.remembers_password()  # nothing saved yet
+    accounts.directory.mkdir(parents=True, exist_ok=True)
+    accounts.file.write_text(f'{{"server": "{server.url}", "username": "{USERNAME}"}}')
+    assert accounts.remembers_password()  # saved by an earlier PyAmp
+    accounts.file.write_text("[1, 2]")
+    assert accounts.load() is None
+    assert accounts.remembers_password()
 
 
 def test_without_a_keychain_the_password_lasts_the_session(

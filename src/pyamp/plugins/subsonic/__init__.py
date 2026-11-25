@@ -49,7 +49,9 @@ class SubsonicPlugin:
     def activate(self, context: PluginContext) -> None:
         self._context = context
         account = self._accounts.load()
-        if account is not None:
+        # Only look in the keychain if the user keeps the password there: reading it
+        # can make the system ask for permission.
+        if account is not None and self._accounts.remembers_password():
             password = self._accounts.password(account)
             if password is not None:
                 self._use(SubsonicClient(account.server, account.username, password))
@@ -68,22 +70,26 @@ class SubsonicPlugin:
     def show_server_dialog(self) -> bool:
         """Ask for the server and login; True once connected."""
         account = self._accounts.load()
+        was_remembered = self._accounts.remembers_password()
         dialog = ServerDialog(
             account.server if account else "",
             account.username if account else "",
             has_keychain=self._accounts.has_keychain(),
+            remember=was_remembered,
             parent=self._parent(),
         )
         if dialog.exec() != QDialog.DialogCode.Accepted or dialog.client is None:
             return False
         client = dialog.client
         chosen = Account(client.server, client.username)
-        if account is not None and account != chosen:
+        remember = dialog.remember.isChecked()
+        # The keychain is only touched where a password is, or is to be, kept.
+        if was_remembered and account is not None and account != chosen:
             self._accounts.forget_password(account)
-        self._accounts.save(chosen)
-        if dialog.remember.isChecked():
+        self._accounts.save(chosen, remember_password=remember)
+        if remember:
             self._accounts.save_password(chosen, dialog.password.text())
-        else:
+        elif was_remembered:
             self._accounts.forget_password(chosen)
         self._use(client)
         return True

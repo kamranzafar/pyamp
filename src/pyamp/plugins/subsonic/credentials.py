@@ -60,20 +60,35 @@ class AccountStore:
         return self.directory / "subsonic.json"
 
     def load(self) -> Account | None:
+        raw = self._read()
         try:
-            raw = json.loads(self.file.read_text(encoding="utf-8"))
             return Account(server=str(raw["server"]), username=str(raw["username"]))
-        except FileNotFoundError:
-            return None
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            log.warning("Ignoring unreadable Subsonic settings %s: %s", self.file, exc)
+        except KeyError:
             return None
 
-    def save(self, account: Account) -> None:
+    def remembers_password(self) -> bool:
+        """Whether the user chose to keep the password in the keychain (the default)."""
+        return self._read().get("remember_password") is not False
+
+    def save(self, account: Account, *, remember_password: bool = True) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
+        payload = {**asdict(account), "remember_password": remember_password}
         tmp = self.file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(asdict(account), indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp.replace(self.file)
+
+    def _read(self) -> dict[str, object]:
+        try:
+            raw = json.loads(self.file.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as exc:
+            log.warning("Ignoring unreadable Subsonic settings %s: %s", self.file, exc)
+            return {}
+        if not isinstance(raw, dict):
+            log.warning("Ignoring unreadable Subsonic settings %s", self.file)
+            return {}
+        return raw
 
     def password(self, account: Account) -> str | None:
         try:

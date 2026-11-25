@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import argparse
+import threading
 import time
 import wave
 from collections.abc import Callable, Iterator
@@ -30,7 +31,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 
 from pyamp.app import Application
-from pyamp.audio import registry
+from pyamp.audio import registry, track_analysis
 from pyamp.audio.track_analysis import (
     FPS,
     AnalysedSpectrum,
@@ -48,7 +49,7 @@ from pyamp.core.events import (
     SpectrumUpdated,
     TrackChanged,
 )
-from pyamp.core.models import PlaybackState, Track
+from pyamp.core.models import PlaybackState, StreamUrl, Track
 from pyamp.library.saved_playlists import SavedPlaylists
 from tests.conftest import FakeBackend
 
@@ -194,6 +195,7 @@ def spectrum(
     service = AnalysedSpectrum(bus, FakeAnalyser(ramp), BANDS, clock=clock)  # type: ignore[arg-type]
     published: list[SpectrumUpdated] = []
     bus.subscribe(SpectrumUpdated, published.append)
+    assert ramp.path is not None
     bus.publish(TrackChanged(Track.from_path(ramp.path), 0))
     yield service, clock, published
     service.shutdown()
@@ -271,6 +273,298 @@ def test_paused_while_nobody_can_see_it(
     assert analyser.requested[-1] == Path("/m/two.mp3")
     assert service.timeline is ramp
     service.shutdown()
+
+
+def test_the_bars_drop_when_the_track_changes(
+    spectrum: tuple[AnalysedSpectrum, Clock, list[SpectrumUpdated]], bus: EventBus
+) -> None:
+    """As with the Qt backend: no frozen bars while the next track gets going."""
+    service, _clock, published = spectrum
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+    bus.publish(PositionChanged(1000, 3000))
+    service.tick()
+    assert max(published[-1].levels) > 0
+    bus.publish(TrackChanged(Track.for_stream(StreamUrl("https://radio.example/live")), 1))
+    assert published[-1].levels == (0.0,) * BANDS  # dropped at once
+    count = len(published)
+    service.tick()  # nothing to show yet (still buffering)...
+    service.tick()
+    assert len(published) == count  # ...and silence isn't sent again and again
+
+
+def test_the_bars_drop_where_there_are_no_levels(
+    spectrum: tuple[AnalysedSpectrum, Clock, list[SpectrumUpdated]], bus: EventBus
+) -> None:
+    service, clock, published = spectrum
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+    bus.publish(PositionChanged(1000, 3000))
+    service.tick()
+    clock.now += 10  # past what's been analysed
+    service.tick()
+    assert published[-1].levels == (0.0,) * BANDS
+
+
+# -- Songs streamed from a server ---------------------------------------------------------- #
+
+
+class FakeSaver:
+    """Stands in for the player: says what's buffered of the stream, and saves it."""
+
+    def __init__(self) -> None:
+        self.buffered = False
+        self.fits = True  # whether the stream can be buffered whole
+        self.range: tuple[float, float] | None = None  # a live stream's buffered stretch
+        self.works = True
+        self.saved: list[Path] = []
+        self.pieces: list[tuple[float, float | None]] = []
+        self.gate = threading.Event()
+        self.gate.set()
+        self.started = threading.Event()  # a save is under way
+
+    def stream_is_buffered(self) -> bool:
+        return self.buffered
+
+    def stream_fits_buffer(self) -> bool:
+        return self.fits
+
+    def buffered_range(self) -> tuple[float, float] | None:
+        return self.range
+
+    def save_stream(self, target: Path, start: float = 0.0, end: float | None = None) -> bool:
+        self.started.set()
+        self.gate.wait(timeout=5)
+        if not self.works:
+            return False
+        target.write_bytes(b"song")
+        self.saved.append(target)
+        self.pieces.append((start, end))
+        return True
+
+
+SONG = Track.for_stream(StreamUrl("https://music.example/rest/stream?id=1"), "Song", 240_000)
+RADIO = Track.for_stream(StreamUrl("https://radio.example/live"), "Radio")
+
+
+@pytest.fixture
+def saver() -> FakeSaver:
+    return FakeSaver()
+
+
+@pytest.fixture
+def streamed(
+    qt_app: QCoreApplication,
+    bus: EventBus,
+    ramp: LevelTimeline,
+    saver: FakeSaver,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[tuple[AnalysedSpectrum, FakeAnalyser]]:
+    monkeypatch.setattr(track_analysis, "STREAM_CHECK_MS", 5)
+    analyser = FakeAnalyser(ramp)
+    service = AnalysedSpectrum(bus, analyser, BANDS, streams=saver)  # type: ignore[arg-type]
+    yield service, analyser
+    saver.gate.set()
+    service.shutdown()
+
+
+def test_a_streamed_song_is_analysed_once_wholly_buffered(
+    streamed: tuple[AnalysedSpectrum, FakeAnalyser], bus: EventBus, saver: FakeSaver
+) -> None:
+    service, analyser = streamed
+    bus.publish(TrackChanged(SONG, 0))
+    QCoreApplication.processEvents()
+    assert analyser.requested == [] and saver.saved == []  # not all there yet
+    saver.buffered = True
+    wait_until(lambda: len(analyser.requested) == 1)
+    (copy,) = saver.saved
+    assert analyser.requested == [copy]
+    assert service.timeline is not None
+    bus.publish(TrackChanged(Track.from_path(Path("/m/next.mp3")), 1))
+    assert not copy.exists()  # the copy goes with its track
+    service.shutdown()
+    assert not copy.parent.exists()
+
+
+class PieceAnalyser(FakeAnalyser):
+    """Also takes a live stream's pieces: fills one row per piece, at the piece's start."""
+
+    def __init__(self, timeline: LevelTimeline) -> None:
+        super().__init__(timeline)
+        self.pieces: list[tuple[Path, float]] = []
+
+    def analyse_piece(self, piece: Path, timeline: LevelTimeline, start: float) -> None:
+        self.pieces.append((piece, start))
+        timeline.put(round(start * FPS), np.full(BANDS, 0.5, dtype=np.float32))
+        piece.unlink()
+
+
+@pytest.fixture
+def live(
+    qt_app: QCoreApplication,
+    bus: EventBus,
+    ramp: LevelTimeline,
+    saver: FakeSaver,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[tuple[AnalysedSpectrum, PieceAnalyser, Clock]]:
+    monkeypatch.setattr(track_analysis, "STREAM_CHECK_MS", 5)
+    analyser, clock = PieceAnalyser(ramp), Clock()
+    service = AnalysedSpectrum(bus, analyser, BANDS, clock=clock, streams=saver)  # type: ignore[arg-type]
+    yield service, analyser, clock
+    saver.gate.set()
+    service.shutdown()
+
+
+def test_live_radio_is_analysed_a_piece_at_a_time(
+    live: tuple[AnalysedSpectrum, PieceAnalyser, Clock], bus: EventBus, saver: FakeSaver
+) -> None:
+    service, analyser, _clock = live
+    published: list[SpectrumUpdated] = []
+    bus.subscribe(SpectrumUpdated, published.append)
+    bus.publish(TrackChanged(RADIO, 0))  # no length: it never ends
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+    saver.range = (0.0, 3.0)  # the first seconds are buffered
+    wait_until(lambda: len(analyser.pieces) == 1)
+    saver.range = (0.0, 4.5)
+    wait_until(lambda: len(analyser.pieces) == 2)
+    assert saver.pieces == [(0.0, 3.0), (3.0, 4.5)]  # each stretch once, in order
+    assert [start for _, start in analyser.pieces] == [0.0, 3.0]
+    assert all(not piece.exists() for piece in saver.saved)
+    assert analyser.requested == []  # no whole-file analysis
+    service.tick()
+    assert published and published[-1].levels[0] == pytest.approx(0.5)  # the bars move
+
+
+def test_live_pieces_start_near_playback(
+    live: tuple[AnalysedSpectrum, PieceAnalyser, Clock], bus: EventBus, saver: FakeSaver
+) -> None:
+    _service, analyser, _clock = live
+    bus.publish(TrackChanged(RADIO, 0))
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+    bus.publish(PositionChanged(60_000, 0))  # a minute in, with lots buffered behind
+    saver.range = (0.0, 63.0)
+    wait_until(lambda: len(analyser.pieces) == 1)
+    assert saver.pieces == [(59.0, 63.0)]  # not the minute already played
+
+
+def test_a_live_stream_on_another_clock_is_left_alone(
+    live: tuple[AnalysedSpectrum, PieceAnalyser, Clock],
+    bus: EventBus,
+    saver: FakeSaver,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service, analyser, _clock = live
+    caplog.set_level("INFO")
+    bus.publish(TrackChanged(RADIO, 0))
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+    bus.publish(PositionChanged(2_000, 0))
+    saver.range = (5000.0, 5004.0)  # buffered "times" nowhere near the position
+    wait_until(lambda: "timing doesn't match" in caplog.text)
+    assert analyser.pieces == [] and service.timeline is None
+
+
+def test_live_levels_go_with_the_stream(
+    live: tuple[AnalysedSpectrum, PieceAnalyser, Clock], bus: EventBus, saver: FakeSaver
+) -> None:
+    service, analyser, _clock = live
+    bus.publish(TrackChanged(RADIO, 0))
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+    saver.range = (0.0, 2.0)
+    wait_until(lambda: len(analyser.pieces) == 1)
+    timeline = service.timeline
+    assert timeline is not None
+    service.set_active(False)  # hidden: nothing is saved or kept
+    assert timeline.cancelled.is_set() and service.timeline is None
+    service.set_active(True)
+    assert service.timeline is not None and service.timeline is not timeline
+    bus.publish(TrackChanged(SONG, 1))  # another track: the stream's levels are dropped
+    assert service.timeline is None
+
+
+def test_a_song_too_big_to_buffer_whole_is_analysed_as_it_plays(
+    live: tuple[AnalysedSpectrum, PieceAnalyser, Clock], bus: EventBus, saver: FakeSaver
+) -> None:
+    service, analyser, _clock = live
+    bus.publish(TrackChanged(SONG, 0))  # it has a length...
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+    saver.fits = False  # ...but won't fit mpv's buffer, so it'd never be wholly buffered
+    saver.range = (0.0, 6.0)
+    wait_until(lambda: len(analyser.pieces) == 1)
+    assert saver.pieces == [(0.0, 6.0)]  # a stretch, not the whole song
+    assert analyser.requested == [] and service.timeline is not None
+
+
+def test_after_a_seek_pieces_start_at_the_new_place(
+    live: tuple[AnalysedSpectrum, PieceAnalyser, Clock], bus: EventBus, saver: FakeSaver
+) -> None:
+    service, analyser, _clock = live
+    bus.publish(TrackChanged(SONG, 0))
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+    saver.fits, saver.range = False, (0.0, 6.0)
+    wait_until(lambda: len(analyser.pieces) == 1)
+    before = service.timeline
+    bus.publish(PositionChanged(600_000, 3_600_000))  # seek ten minutes in
+    saver.range = (599.0, 606.0)  # mpv fetches from there
+    wait_until(lambda: len(analyser.pieces) == 2)
+    assert saver.pieces[-1] == (599.0, 606.0)
+    assert service.timeline is not None and service.timeline is not before  # afresh
+    assert before is not None and before.cancelled.is_set()
+
+
+def test_live_levels_keep_only_the_last_minutes() -> None:
+    timeline = LevelTimeline(keep_seconds=1.0)
+    row = np.zeros(BANDS, dtype=np.float32)
+    for n in range(10 * FPS):  # ten seconds of radio
+        timeline.put(n, row)
+    assert len(timeline.rows) <= 2 * FPS
+    assert timeline.row_at(9.9) is row
+    assert timeline.row_at(1.0) is None  # long gone
+    timeline.put(5, row)  # a late row for a stretch that's gone is ignored
+    gap = LevelTimeline()
+    gap.put(3, row)
+    assert gap.rows[:3] == [None, None, None] and gap.row_at(3 / FPS) is row
+
+
+def test_a_copy_for_a_track_that_has_ended_is_dropped(
+    streamed: tuple[AnalysedSpectrum, FakeAnalyser], bus: EventBus, saver: FakeSaver
+) -> None:
+    _service, analyser = streamed
+    saver.buffered = True
+    saver.gate.clear()  # saving takes a while
+    bus.publish(TrackChanged(SONG, 0))
+    wait_until(saver.started.is_set)
+    bus.publish(TrackChanged(Track.from_path(Path("/m/next.mp3")), 1))  # meanwhile
+    saver.gate.set()
+    wait_until(lambda: len(saver.saved) == 1)
+    wait_until(lambda: not saver.saved[0].exists())  # deleted, not analysed
+    assert analyser.requested == [Path("/m/next.mp3")]
+
+
+def test_nothing_is_analysed_if_saving_fails(
+    streamed: tuple[AnalysedSpectrum, FakeAnalyser],
+    bus: EventBus,
+    saver: FakeSaver,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service, analyser = streamed
+    caplog.set_level("INFO")
+    saver.buffered, saver.works = True, False
+    bus.publish(TrackChanged(SONG, 0))
+    wait_until(lambda: "Can't save the stream" in caplog.text)
+    assert analyser.requested == [] and service.timeline is None
+
+
+def test_streams_wait_while_nobody_can_see_the_visualiser(
+    streamed: tuple[AnalysedSpectrum, FakeAnalyser], bus: EventBus, saver: FakeSaver
+) -> None:
+    service, analyser = streamed
+    service.set_active(False)
+    saver.buffered = True
+    bus.publish(TrackChanged(SONG, 0))
+    time.sleep(0.05)
+    QCoreApplication.processEvents()
+    assert saver.saved == []  # nothing saved for a hidden visualiser
+    service.set_active(True)
+    wait_until(lambda: len(saver.saved) == 1)
+    wait_until(lambda: analyser.requested[-1] == saver.saved[0])  # once shown again
 
 
 # -- App wiring ---------------------------------------------------------------------------- #

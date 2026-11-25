@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -152,6 +153,22 @@ class Player:
     def provides_audio_frames(self) -> bool:
         """Whether the backend reports the audio it plays (for the visualiser)."""
         return self._backend.provides_audio_frames
+
+    def stream_is_buffered(self) -> bool:
+        """Whether the playing stream is wholly in memory (see :meth:`save_stream`)."""
+        return self._backend.stream_is_buffered()
+
+    def stream_fits_buffer(self) -> bool:
+        """Whether the playing stream can be buffered whole (see the backend's)."""
+        return self._backend.stream_fits_buffer()
+
+    def buffered_range(self) -> tuple[float, float] | None:
+        """The buffered stretch of the playing stream, in seconds (see the backend's)."""
+        return self._backend.buffered_range()
+
+    def save_stream(self, target: Path, start: float = 0.0, end: float | None = None) -> bool:
+        """Save the buffered stream (or a stretch of it) to ``target``; any thread."""
+        return self._backend.save_stream(target, start, end)
 
     @property
     def supports_equalizer(self) -> bool:

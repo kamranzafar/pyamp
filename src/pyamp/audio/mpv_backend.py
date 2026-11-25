@@ -37,6 +37,7 @@ import functools
 import locale
 import logging
 import threading
+from pathlib import Path
 from typing import Any, ClassVar
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -52,6 +53,9 @@ from pyamp.core.equalizer import BANDS_HZ, Equalizer
 from pyamp.core.models import Location, PlaybackState, ReplayGainMode, parse_location
 
 log = logging.getLogger(__name__)
+
+#: How full mpv's read-ahead cache counts as full: a stream bigger than this won't fit.
+CACHE_FULL = 0.9
 
 #: python-mpv, bound to the best libmpv available (see libmpv_loader).
 mpv: Any
@@ -214,6 +218,8 @@ class MpvAudioBackend(AudioBackend):
         self._mpv.observe_property("audio-bitrate", self._observe_audio)
         self._mpv.observe_property("audio-params", self._observe_audio)
         self._mpv.register_event_callback(self._on_event)
+        # mpv 0.31+ can write what it has buffered to a file (for the visualiser).
+        self._can_dump_cache = any(c.get("name") == "dump-cache" for c in self._mpv.command_list)
 
     @property
     def listener(self) -> Any:
@@ -274,6 +280,69 @@ class MpvAudioBackend(AudioBackend):
             # changes once a slider stops moving.
             self._mpv.command("af", "add", f"@{EQ_LABEL}:lavfi=[{equalizer_graph(equalizer)}]")
             self._equalizer = equalizer
+
+    def stream_is_buffered(self) -> bool:
+        """Whether mpv has the whole playing file in its cache (it reads network streams
+        ahead, up to ``demuxer-max-bytes``: 150 MiB by default)."""
+        if self._closed or not self._can_dump_cache:
+            return False
+        try:
+            state = self._mpv.demuxer_cache_state
+        except (AttributeError, RuntimeError):  # nothing playing
+            return False
+        return isinstance(state, dict) and bool(state.get("bof-cached") and state.get("eof-cached"))
+
+    def buffered_range(self) -> tuple[float, float] | None:
+        """The cached stretch around the playback position. After a seek mpv may hold
+        several; the one being played is wanted, else the last (where it's reading)."""
+        if self._closed or not self._can_dump_cache:
+            return None
+        try:
+            ranges = (self._mpv.demuxer_cache_state or {}).get("seekable-ranges") or []
+            position = self._mpv.time_pos
+        except (AttributeError, RuntimeError):  # nothing playing
+            return None
+        stretches = [(float(r["start"]), float(r["end"])) for r in ranges]
+        playing = [s for s in stretches if position is not None and s[0] <= position <= s[1]]
+        candidates = playing or stretches
+        return candidates[-1] if candidates else None
+
+    def stream_fits_buffer(self) -> bool:
+        """Whether the playing stream can be cached whole (it's under ``demuxer-max-bytes``,
+        150 MiB by default). Unknown sizes are taken to fit until the cache fills up."""
+        if self._closed:
+            return False
+        try:
+            limit = self._mpv.demuxer_max_bytes
+            size = self._mpv.file_size
+            state = self._mpv.demuxer_cache_state or {}
+        except (AttributeError, RuntimeError):  # nothing playing
+            return True
+        if not limit:
+            return True
+        room = limit * CACHE_FULL
+        if size and size > room:
+            return False
+        return bool(state.get("eof-cached")) or (state.get("fw-bytes") or 0) < room
+
+    def save_stream(self, target: Path, start: float = 0.0, end: float | None = None) -> bool:
+        """Write mpv's cache of the playing file to ``target`` (Matroska, by its suffix)."""
+        if self._closed or not self._can_dump_cache:
+            return False
+        try:
+            if end is None:  # the whole song
+                if not self.stream_is_buffered():
+                    return False
+                end = self._mpv.duration
+                if not end:
+                    return False
+            # Always an explicit end: with "no" (to the end) mpv keeps the command running
+            # until playback reaches the end of the file, however much is already cached.
+            self._mpv.command("dump-cache", f"{start:.3f}", f"{end:.3f}", str(target))
+        except Exception as exc:  # e.g. the file changed or mpv closed meanwhile
+            log.debug("Could not save the stream for the visualiser: %s", exc)
+            return False
+        return target.is_file() and target.stat().st_size > 0
 
     def close(self) -> None:
         self._closed = True

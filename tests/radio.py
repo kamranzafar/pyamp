@@ -29,12 +29,15 @@ from __future__ import annotations
 import http.server
 import io
 import threading
+import time
 import wave
 from types import TracebackType
 
 import numpy as np
 
 METAINT = 4096
+#: tone_wav's bytes per second of audio (16-bit mono, 22.05 kHz).
+BYTES_PER_S = 22050 * 2
 
 
 def tone_wav(seconds: float, rate: int = 22050, hz: float = 440.0) -> bytes:
@@ -58,8 +61,12 @@ def _metadata_block(title: str) -> bytes:
 class RadioStation:
     """Serves ``/live`` (ICY stream, ``title`` as its current song) and ``/plain.wav``."""
 
-    def __init__(self, title: str = "Test Artist - Test Song", seconds: float = 4.0) -> None:
+    def __init__(
+        self, title: str = "Test Artist - Test Song", seconds: float = 4.0, *, paced: bool = False
+    ) -> None:
+        """``paced``: send ``/live`` at playing speed (a little ahead), like a real station."""
         self.title = title
+        self.requests: list[str] = []  # the paths asked for, in order
         audio = tone_wav(seconds)
         station = self
 
@@ -67,6 +74,7 @@ class RadioStation:
             protocol_version = "HTTP/1.0"
 
             def do_GET(self) -> None:
+                station.requests.append(self.path)
                 if self.path == "/plain.wav":
                     self.send_response(200)
                     self.send_header("Content-Type", "audio/wav")
@@ -84,8 +92,11 @@ class RadioStation:
                 if icy:
                     self.send_header("icy-metaint", str(METAINT))
                 self.end_headers()
+                began = time.monotonic()
                 try:
                     for start in range(0, len(audio), METAINT):
+                        while paced and start / BYTES_PER_S - (time.monotonic() - began) > 2:
+                            time.sleep(0.02)  # stay about two seconds ahead of playback
                         self.wfile.write(audio[start : start + METAINT])
                         if icy:
                             self.wfile.write(_metadata_block(station.title))

@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -33,8 +34,9 @@ from PySide6.QtWidgets import QDialog, QMenu
 from pyamp.app import Application
 from pyamp.core.models import StreamUrl
 from pyamp.plugins.subsonic import SubsonicPlugin
+from pyamp.plugins.subsonic.client import SubsonicClient
 from pyamp.plugins.subsonic.credentials import KEYRING_SERVICE, Account, AccountStore
-from pyamp.plugins.subsonic.source import ALBUM, ARTIST, ARTISTS, PLAYLIST, PLAYLISTS
+from pyamp.plugins.subsonic.source import ALBUM, ARTIST, ARTISTS, PLAYLIST, PLAYLISTS, SIGN_IN
 from pyamp.plugins.subsonic.ui import ServerDialog
 from tests.conftest import FakeBackend
 from tests.subsonic_server import PASSWORD, USERNAME, SubsonicServer
@@ -78,6 +80,12 @@ def server() -> Iterator[SubsonicServer]:
 
 
 @pytest.fixture
+def second_server() -> Iterator[SubsonicServer]:
+    with SubsonicServer() as server:
+        yield server
+
+
+@pytest.fixture
 def accounts(tmp_path: Path) -> AccountStore:
     return AccountStore(tmp_path / "subsonic")
 
@@ -91,9 +99,16 @@ def start(app: Application, accounts: AccountStore) -> SubsonicPlugin:  # noqa: 
 
 def remember(accounts: AccountStore, keychain: MemoryKeyring, server: SubsonicServer) -> Account:
     account = Account(server.url, USERNAME)
-    accounts.save(account)
+    accounts.put(account)
     keychain.set_password(KEYRING_SERVICE, account.key, PASSWORD)
     return account
+
+
+def client(plugin: SubsonicPlugin, number: int = 0) -> SubsonicClient:
+    """The client of the plugin's ``number``th server (signed in)."""
+    signed_in = plugin.sources[number].client
+    assert signed_in is not None
+    return signed_in
 
 
 def answer_dialog(
@@ -123,13 +138,12 @@ def test_adds_its_menu_and_waits_to_be_set_up(
     keychain: MemoryKeyring,
 ) -> None:
     plugin = start(app, accounts)
-    assert plugin.client is None
+    assert plugin.sources == []
     menu = next(a.menu() for a in app.window.menuBar().actions() if a.text() == "&Library")
     assert isinstance(menu, QMenu)
     # After PyAmp's own library items; the server is browsed in the library window.
-    assert [a.text() for a in menu.actions()][-1] == "Subsonic &Server…"
+    assert [a.text() for a in menu.actions()][-1] == "Add Subsonic &Server…"
     assert "Subsonic" not in " ".join(a.text() for a in menu.actions()[:-1])
-    assert plugin.source is None
     assert list(app.sources) == [app.local_source, app.playlists_source]  # no server yet
 
 
@@ -142,9 +156,9 @@ def test_connects_and_remembers_the_password_in_the_keychain(
 ) -> None:
     plugin = start(app, accounts)
     answer_dialog(monkeypatch, server.url + "/", PASSWORD)
-    assert plugin.show_server_dialog()
-    assert plugin.client is not None
-    assert accounts.load() == Account(server.url, USERNAME)
+    assert plugin.add_server()
+    assert client(plugin).server == server.url
+    assert accounts.accounts() == [Account(server.url, USERNAME)]
     assert PASSWORD not in accounts.file.read_text()
     assert keychain.passwords == {(KEYRING_SERVICE, f"{USERNAME}@{server.url}"): PASSWORD}
 
@@ -158,11 +172,11 @@ def test_a_wrong_password_keeps_the_dialog_open(
 ) -> None:
     plugin = start(app, accounts)
     shown = answer_dialog(monkeypatch, server.url, "wrong")
-    assert not plugin.show_server_dialog()
+    assert not plugin.add_server()
     assert shown[0].status.text() == "Wrong username or password"
     assert shown[0].result() != QDialog.DialogCode.Accepted
-    assert plugin.client is None
-    assert accounts.load() is None
+    assert plugin.sources == []
+    assert accounts.accounts() == []
     assert keychain.passwords == {}
 
 
@@ -176,9 +190,9 @@ def test_not_remembering_the_password(
     remember(accounts, keychain, server)
     plugin = start(app, accounts)
     answer_dialog(monkeypatch, server.url, PASSWORD, remember=False)
-    assert plugin.show_server_dialog()
+    assert plugin.add_server()
     assert keychain.passwords == {}  # and an earlier one is forgotten
-    assert not accounts.remembers_password()
+    assert not accounts.remembers_password(Account(server.url, USERNAME))
 
 
 def test_not_remembering_is_remembered_and_keeps_out_of_the_keychain(
@@ -188,27 +202,63 @@ def test_not_remembering_is_remembered_and_keeps_out_of_the_keychain(
     server: SubsonicServer,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    accounts.save(Account(server.url, USERNAME), remember_password=False)
+    account = Account(server.url, USERNAME)
+    accounts.put(account, remember_password=False)
     plugin = start(app, accounts)  # as PyAmp starts
     assert keychain.reads == 0  # so the system doesn't ask for anything
-    assert plugin.client is None  # the password is asked for again this session
+    assert plugin.sources[0].client is None  # the password is asked for again this session
     shown = answer_dialog(monkeypatch, server.url, PASSWORD, remember=False)
-    assert plugin.show_server_dialog()
+    assert plugin.edit_server(account)  # Sign In…
+    assert client(plugin).server == server.url
     assert shown[0].remember_at_first is False  # type: ignore[attr-defined]  # as left
     assert keychain.reads == 0
     assert keychain.passwords == {}
 
 
-def test_remembering_is_the_default(
-    accounts: AccountStore, server: SubsonicServer, tmp_path: Path
-) -> None:
-    assert accounts.remembers_password()  # nothing saved yet
+def test_remembering_is_the_default(accounts: AccountStore, server: SubsonicServer) -> None:
+    account = Account(server.url, USERNAME)
+    assert accounts.remembers_password(account)  # nothing saved yet
     accounts.directory.mkdir(parents=True, exist_ok=True)
-    accounts.file.write_text(f'{{"server": "{server.url}", "username": "{USERNAME}"}}')
-    assert accounts.remembers_password()  # saved by an earlier PyAmp
+    accounts.file.write_text(
+        json.dumps({"servers": [{"server": server.url, "username": USERNAME}]})
+    )
+    assert accounts.remembers_password(account)  # saved without the choice
     accounts.file.write_text("[1, 2]")
-    assert accounts.load() is None
-    assert accounts.remembers_password()
+    assert accounts.accounts() == []
+    accounts.file.write_text('{"servers": [{"server": "x"}, 3]}')
+    assert accounts.accounts() == []
+
+
+def test_an_earlier_single_server_file_is_read_as_a_list(accounts: AccountStore) -> None:
+    accounts.directory.mkdir(parents=True, exist_ok=True)
+    old = {"server": "https://a.example", "username": "alice", "remember_password": False}
+    accounts.file.write_text(json.dumps(old))  # as PyAmp wrote it with one server
+    first = Account("https://a.example", "alice")
+    assert accounts.accounts() == [first]
+    assert not accounts.remembers_password(first)
+    second = Account("https://b.example", "bob")
+    accounts.put(second)
+    assert json.loads(accounts.file.read_text()) == {
+        "servers": [
+            {**old},
+            {"server": "https://b.example", "username": "bob", "remember_password": True},
+        ]
+    }
+
+
+def test_servers_keep_their_order_when_edited_and_removed(accounts: AccountStore) -> None:
+    a, b, c = (Account(f"https://{n}.example", n) for n in "abc")
+    for account in (a, b, c):
+        accounts.put(account)
+    edited = Account("https://b2.example", "b")
+    accounts.put(edited, remember_password=False, replacing=b)
+    assert accounts.accounts() == [a, edited, c]
+    assert not accounts.remembers_password(edited)
+    accounts.put(a, replacing=c)  # edited into one already there: no duplicate
+    assert accounts.accounts() == [a, edited]
+    accounts.remove(a)
+    accounts.remove(a)
+    assert accounts.accounts() == [edited]
 
 
 def test_without_a_keychain_the_password_lasts_the_session(
@@ -222,9 +272,9 @@ def test_without_a_keychain_the_password_lasts_the_session(
     try:
         plugin = start(app, accounts)
         shown = answer_dialog(monkeypatch, server.url, PASSWORD, remember=True)
-        assert plugin.show_server_dialog()
+        assert plugin.add_server()
         assert not shown[0].remember.isEnabled()
-        assert plugin.client is not None
+        assert client(plugin).server == server.url
         assert accounts.password(Account(server.url, USERNAME)) is None
     finally:
         keyring.set_keyring(before)
@@ -238,8 +288,7 @@ def test_a_remembered_account_is_used_at_start_and_plays_with_a_login(
 ) -> None:
     remember(accounts, keychain, server)
     plugin = start(app, accounts)
-    assert plugin.client is not None
-    tracks = plugin.client.album_tracks("al1")
+    tracks = client(plugin).album_tracks("al1")
     app.window.play_from_library(tracks, 0)
     backend = app.player._backend
     assert isinstance(backend, FakeBackend)
@@ -257,8 +306,7 @@ def test_saved_playlists_hold_no_login(
 ) -> None:
     remember(accounts, keychain, server)
     plugin = start(app, accounts)
-    assert plugin.client is not None
-    app.window.play_from_library(plugin.client.album_tracks("al1"), 0)
+    app.window.play_from_library(client(plugin).album_tracks("al1"), 0)
     app.playlists.save_now()
     assert app.playlists.active is not None
     text = app.playlists._saved.path(app.playlists.active).read_text()
@@ -277,14 +325,160 @@ def test_the_server_is_a_source_in_the_library(
 ) -> None:
     remember(accounts, keychain, server)
     plugin = start(app, accounts)
-    assert plugin.source is not None
-    assert list(app.sources) == [app.local_source, app.playlists_source, plugin.source]
-    assert plugin.source.name == f"Subsonic — {server.url.removeprefix('http://')}"
+    (source,) = plugin.sources
+    assert list(app.sources) == [app.local_source, app.playlists_source, source]
+    assert source.name == f"Subsonic — {server.url.removeprefix('http://')}"
     answer_dialog(monkeypatch, server.url, PASSWORD)
-    assert plugin.show_server_dialog()  # connecting again replaces it
-    assert list(app.sources) == [app.local_source, app.playlists_source, plugin.source]
+    assert plugin.add_server()  # adding it again replaces it, in its place
+    assert list(app.sources) == [app.local_source, app.playlists_source, *plugin.sources]
+    assert len(plugin.sources) == 1
     plugin.deactivate()
     assert list(app.sources) == [app.local_source, app.playlists_source]
+
+
+def test_servers_are_added_alongside_each_other(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+    second_server: SubsonicServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    remember(accounts, keychain, server)
+    plugin = start(app, accounts)
+    answer_dialog(monkeypatch, second_server.url, PASSWORD)
+    assert plugin.add_server()
+    first, second = plugin.sources
+    assert list(app.sources) == [app.local_source, app.playlists_source, first, second]
+    assert [client(plugin, n).server for n in (0, 1)] == [server.url, second_server.url]
+    assert accounts.accounts() == [
+        Account(server.url, USERNAME),
+        Account(second_server.url, USERNAME),
+    ]
+    assert len(keychain.passwords) == 2
+
+
+def test_each_song_plays_with_its_own_servers_login(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+    second_server: SubsonicServer,
+) -> None:
+    remember(accounts, keychain, server)
+    remember(accounts, keychain, second_server)
+    plugin = start(app, accounts)
+    songs = [client(plugin, n).album_tracks("al1")[0] for n in (0, 1)]
+    app.window.play_from_library(songs, 0)
+    app.player.next()
+    backend = app.player._backend
+    assert isinstance(backend, FakeBackend)
+    first, second = backend.loaded[-2:]
+    assert isinstance(first, StreamUrl) and isinstance(second, StreamUrl)
+    assert first.url.startswith(f"{server.url}/rest/stream?id=s1&") and "&u=alice&t=" in first.url
+    assert second.url.startswith(f"{second_server.url}/rest/stream?id=s1&")
+    assert "&u=alice&t=" in second.url
+
+
+def test_a_server_is_edited_in_its_place(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+    second_server: SubsonicServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old = remember(accounts, keychain, server)
+    other = Account("https://elsewhere.example", "bob")
+    accounts.put(other, remember_password=False)
+    plugin = start(app, accounts)
+    answer_dialog(monkeypatch, second_server.url, PASSWORD)
+    assert plugin.edit_server(old)  # moved to another address
+    moved = Account(second_server.url, USERNAME)
+    assert accounts.accounts() == [moved, other]
+    assert keychain.passwords == {(KEYRING_SERVICE, moved.key): PASSWORD}  # the old one gone
+    assert client(plugin).server == second_server.url
+    assert list(app.sources)[2:] == plugin.sources  # still first of the servers
+    assert plugin.sources[0].name == f"Subsonic — {second_server.url.removeprefix('http://')}"
+
+
+def test_a_server_is_removed_from_its_menu_in_the_library(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+    second_server: SubsonicServer,
+) -> None:
+    first = remember(accounts, keychain, server)
+    remember(accounts, keychain, second_server)
+    plugin = start(app, accounts)
+    song = client(plugin).album_tracks("al1")[0]  # from the server to remove
+    window = app.window.show_library()
+    settle(window)
+    menu = window.sidebar_menu(window.sidebar_item(2))  # right-click on the server's name
+    assert menu is not None
+    assert [a.text() for a in menu.actions()] == ["&Edit Server…", "&Remove Server"]
+    menu.actions()[1].trigger()
+    settle(window)
+    assert accounts.accounts() == [Account(second_server.url, USERNAME)]
+    assert (KEYRING_SERVICE, first.key) not in keychain.passwords
+    assert [s.client.server for s in plugin.sources if s.client] == [second_server.url]
+    assert list(app.sources)[2:] == plugin.sources
+    assert window.sidebar.topLevelItemCount() == 3
+    app.playlist.add([song])
+    app.player.play_index(len(app.playlist) - 1)
+    backend = app.player._backend
+    assert isinstance(backend, FakeBackend)
+    assert backend.loaded[-1] == song.location  # its login isn't added any more
+
+
+def test_a_server_without_its_password_is_shown_to_sign_in_to(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account = Account(server.url, USERNAME)
+    accounts.put(account, remember_password=False)
+    plugin = start(app, accounts)
+    window = app.window.show_library()
+    settle(window)
+    pick(window, 2)
+    assert window.status.text() == SIGN_IN
+    menu = window.sidebar_menu(window.sidebar_item(2))
+    assert menu is not None
+    sign_in, remove = menu.actions()
+    assert (sign_in.text(), remove.text()) == ("Sign &In…", "&Remove Server")
+    answer_dialog(monkeypatch, server.url, PASSWORD, remember=False)
+    sign_in.trigger()
+    settle(window)
+    assert client(plugin).server == server.url
+    assert labels(window, 2) == ["Artists", "Playlists"]
+    assert keychain.passwords == {}  # still not remembered, as chosen
+
+
+def test_servers_on_one_host_are_told_apart_by_username(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+) -> None:
+    for name in ("alice", "bob"):
+        accounts.put(Account("https://music.example", name), remember_password=False)
+    accounts.put(Account("https://other.example", "alice"), remember_password=False)
+    plugin = start(app, accounts)
+    assert [s.name for s in plugin.sources] == [
+        "Subsonic — alice@music.example",
+        "Subsonic — bob@music.example",
+        "Subsonic — other.example",
+    ]
+    window = app.window.show_library()
+    settle(window)
+    plugin.remove_server(Account("https://music.example", "bob"))
+    settle(window)
+    shown = [window.sidebar.topLevelItem(n).text(0) for n in (2, 3)]  # type: ignore[union-attr]
+    assert shown == ["Subsonic — music.example", "Subsonic — other.example"]
+    assert keychain.reads == 0  # none remembered: the keychain is never asked
 
 
 def test_browse_an_album_in_the_library_and_play_it(
@@ -345,8 +539,7 @@ def test_server_errors_are_shown_in_the_library(
 ) -> None:
     remember(accounts, keychain, server)
     plugin = start(app, accounts)
-    assert plugin.client is not None
-    plugin.client._password = "changed on the server"
+    client(plugin)._password = "changed on the server"
     window = app.window.show_library()
     settle(window)
     item(window, 2, (ARTISTS, "")).setExpanded(True)
@@ -362,8 +555,7 @@ def test_deactivate_stops_adding_logins(
 ) -> None:
     remember(accounts, keychain, server)
     plugin = start(app, accounts)
-    assert plugin.client is not None
-    track = plugin.client.album_tracks("al1")[0]
+    track = client(plugin).album_tracks("al1")[0]
     plugin.deactivate()
     app.playlist.add([track])
     app.player.play_index(0)

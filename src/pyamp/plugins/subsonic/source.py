@@ -24,8 +24,7 @@ No Qt here; the library window calls it on a worker thread.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from urllib.parse import urlsplit
+from collections.abc import Callable, Sequence
 
 from pyamp.core.models import Track
 from pyamp.library.sources import Node, NodeAction, SourceError, matches
@@ -34,53 +33,76 @@ from pyamp.plugins.subsonic.client import Item, SubsonicClient, SubsonicError, d
 ARTISTS, ARTIST, ALBUM, PLAYLISTS, PLAYLIST = "artists", "artist", "album", "playlists", "playlist"
 
 
+#: Shown for a server whose password PyAmp doesn't have this session.
+SIGN_IN = "Right-click the server and choose Sign In… to browse it"
+
+
 class SubsonicSource:
     """Artists → albums, and playlists. An artist's tracks are all its albums' songs;
-    picking the whole server searches it."""
+    picking the whole server searches it.
 
-    hint = "Search, or pick an album or playlist"
+    Without a ``client`` (the password wasn't remembered) it has nothing to show until
+    the user signs in. ``commands`` are the server's own right-click commands (sign in,
+    edit, remove), which the plugin carries out.
+    """
 
-    def __init__(self, client: SubsonicClient) -> None:
+    def __init__(
+        self, client: SubsonicClient | None, name: str, commands: Sequence[NodeAction] = ()
+    ) -> None:
         self.client = client
-        self.name = f"Subsonic — {urlsplit(client.server).netloc}"
+        self.name = name
+        self.hint = "Search, or pick an album or playlist" if client else SIGN_IN
+        self._commands = list(commands)
 
     def roots(self) -> list[Node]:
+        if self.client is None:
+            return []
         return [
             Node((ARTISTS, ""), "Artists", expandable=True, has_tracks=False),
             Node((PLAYLISTS, ""), "Playlists", expandable=True, has_tracks=False),
         ]
 
     def children(self, node: Node) -> list[Node]:
+        client = self._signed_in()
         kind, item_id = _key(node)
         if kind == ARTISTS:
-            items = _ask(self.client.artists)
+            items = _ask(client.artists)
             return [_node(ARTIST, i, expandable=True) for i in items]
         if kind == ARTIST:
-            return [_node(ALBUM, i) for i in _ask(lambda: self.client.albums(item_id))]
+            return [_node(ALBUM, i) for i in _ask(lambda: client.albums(item_id))]
         if kind == PLAYLISTS:
-            return [_node(PLAYLIST, i) for i in _ask(self.client.playlists)]
+            return [_node(PLAYLIST, i) for i in _ask(client.playlists)]
         return []
 
     def tracks(self, node: Node | None, search: str = "") -> list[Track]:
+        if node is None and not search.strip():
+            return []
+        client = self._signed_in()
         if node is None:
-            return _ask(lambda: self.client.search(search)[1]) if search.strip() else []
+            return _ask(lambda: client.search(search)[1])
         kind, item_id = _key(node)
         if kind == ARTIST:  # every album's songs
-            songs = _ask(lambda: self._artist_songs(item_id))
+            songs = _ask(lambda: self._artist_songs(client, item_id))
         elif kind == ALBUM:
-            songs = _ask(lambda: self.client.album_tracks(item_id))
+            songs = _ask(lambda: client.album_tracks(item_id))
         elif kind == PLAYLIST:
-            songs = _ask(lambda: self.client.playlist_tracks(item_id))
+            songs = _ask(lambda: client.playlist_tracks(item_id))
         else:
             return []
         return [song for song in songs if matches(song, search)]
 
-    def actions(self, node: Node) -> list[NodeAction]:
-        return []
+    def actions(self, node: Node | None) -> list[NodeAction]:
+        return list(self._commands) if node is None else []
 
-    def _artist_songs(self, artist_id: str) -> list[Track]:
-        albums = self.client.albums(artist_id)
-        return [song for album in albums for song in self.client.album_tracks(album.id)]
+    def _signed_in(self) -> SubsonicClient:
+        if self.client is None:
+            raise SourceError(SIGN_IN)
+        return self.client
+
+    @staticmethod
+    def _artist_songs(client: SubsonicClient, artist_id: str) -> list[Track]:
+        albums = client.albums(artist_id)
+        return [song for album in albums for song in client.album_tracks(album.id)]
 
 
 def _key(node: Node) -> tuple[str, str]:

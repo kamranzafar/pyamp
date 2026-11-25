@@ -133,8 +133,8 @@ tracks are kept until it's back. The library is a single `library.sqlite3` file 
 PyAmp's data folder.
 
 The library window also shows music from elsewhere, each in its own part of the
-sidebar under **This Computer**: a [Subsonic server](#subsonic-servers), for one, and
-sources added by plugins. They're browsed, searched and played the same way, and a
+sidebar under **This Computer**: each [Subsonic server](#subsonic-servers) you add,
+for one, and sources added by plugins. They're browsed, searched and played the same way, and a
 slow or unreachable server never holds up the window. Picking a server's name
 searches the whole server.
 
@@ -245,20 +245,25 @@ backend's visualiser works for both.
 
 ### Subsonic servers
 
-PyAmp can play your own music library from a Subsonic-compatible server: Navidrome,
-Airsonic(-Advanced), Gonic and others. **Library → Subsonic Server…** asks for the
+PyAmp can play your own music library from Subsonic-compatible servers: Navidrome,
+Airsonic(-Advanced), Gonic and others. **Library → Add Subsonic Server…** asks for the
 server's address, your username and password, and checks them. The server then
 appears in the [library window](#library), below This Computer, with its artists,
 their albums and your playlists. Click an artist to see its albums and all its songs;
 pick the server itself to search it. Songs play and
 are added to playlists like local tracks.
 
+Add as many servers as you like; each is listed on its own, by its address (and your
+username, if you've added two accounts on one server). Right-click a server's name for
+**Edit Server…** (a new address, username or password) and **Remove Server**. A
+playlist can hold songs from several servers: each plays with its own server's login.
+
 Songs are added with their tags and length, so they show like local files and can be
 seeked. The password is kept in the system keychain (macOS Keychain, Windows Credential
 Manager or Secret Service on Linux), never in a file. Untick **Remember the password**
 (or have no keychain) and PyAmp keeps it only until it quits, doesn't touch the
-keychain, and asks again next session (Library → Subsonic Server…); the choice is
-remembered. Saved playlists keep the server's songs without your login (PyAmp
+keychain, and asks again next session: the server is listed but empty until you
+right-click it and choose **Sign In…**. The choice is remembered for each server. Saved playlists keep the server's songs without your login (PyAmp
 adds it as each one plays), so they're safe to share or back up.
 
 ### Media keys and system controls
@@ -507,15 +512,20 @@ my-scrobbler = "my_package:MyScrobbler"
 `ctx.ui()` gives plugins with windows a place in the menu bar
 (`add_menu_action("&Tools", "My Window…", show)` adds a menu before Help; items for
 `"&Library"` join PyAmp's own Library menu) and a parent for their windows, and
-`ctx.player.set_location_resolver()` lets one rewrite what the player loads (the Subsonic
-plugin adds its login there).
+`ctx.player.add_location_resolver()` lets one rewrite what the player loads (the Subsonic
+plugin adds its servers' logins there). A resolver returns locations that aren't its own
+unchanged, so several plugins can each add one; the call returns a function that
+removes it again.
 
 A plugin that brings music from somewhere else (a server, a service) adds a
 `MediaSource` (`library/sources.py`) with `ctx.sources.add(source)`, and the library
 window shows it under This Computer. A source lists nodes to browse (`roots()`,
 `children(node)`) and their tracks (`tracks(node, search)`); it keeps its own index,
 and is called on a worker thread, so it may block on the network. Raise `SourceError`
-with a message for the user when something goes wrong.
+with a message for the user when something goes wrong. `actions(node)` gives commands
+for a node's right-click menu, and `actions(None)` those for the source's own name
+(the Subsonic plugin's Edit Server… and Remove Server); add one source per server, and
+`ctx.sources.replace(old, new)` swaps one in its place.
 
 See `src/pyamp/plugins/now_playing.py` for a small example, and `plugins/subsonic/` for
 one with a source and a dialog.

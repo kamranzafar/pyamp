@@ -63,7 +63,8 @@ class Node:
 
 @dataclass(frozen=True, slots=True)
 class NodeAction:
-    """A command for a node's right-click menu, e.g. removing a folder from the library."""
+    """A command for a right-click menu: a node's (e.g. removing a folder from the
+    library) or the whole source's (e.g. removing a server)."""
 
     text: str
     #: Runs on the main thread.
@@ -90,8 +91,9 @@ class MediaSource(Protocol):
         """
         ...
 
-    def actions(self, node: Node) -> list[NodeAction]:
-        """Commands for a node's right-click menu (often none)."""
+    def actions(self, node: Node | None) -> list[NodeAction]:
+        """Commands for a node's right-click menu (None: the source's own, shown on its
+        name in the sidebar); often none."""
         ...
 
 
@@ -123,6 +125,15 @@ class MediaSources:
         if source not in self._sources:
             self._sources.append(source)
             self._bus.publish(MediaSourcesChanged())
+
+    def replace(self, old: MediaSource, new: MediaSource) -> None:
+        """Put ``new`` where ``old`` is (e.g. a server whose address was changed), or add
+        it at the end if ``old`` isn't there."""
+        if old not in self._sources:
+            self.add(new)
+            return
+        self._sources[self._sources.index(old)] = new
+        self._bus.publish(MediaSourcesChanged())
 
     def remove(self, source: MediaSource) -> None:
         if source in self._sources:

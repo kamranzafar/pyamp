@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -363,7 +364,7 @@ def test_resolver_rewrites_what_the_backend_loads(
 ) -> None:
     song = Track.for_stream(StreamUrl("https://music.example/rest/stream"), "Song")
     playlist.add([song])
-    player.set_location_resolver(_signed)
+    player.add_location_resolver(_signed)
     player.play()
     assert backend.loaded == [StreamUrl("https://music.example/rest/stream?key=1")]
     assert playlist.current_track == song  # the playlist keeps the plain location
@@ -374,7 +375,7 @@ def test_resolved_advance_is_matched_to_the_playlist(
 ) -> None:
     songs = [Track.for_stream(StreamUrl(f"https://music.example/{n}"), str(n)) for n in range(3)]
     playlist.add(songs)
-    gplayer.set_location_resolver(_signed)
+    gplayer.add_location_resolver(_signed)
     gplayer.play()
     assert gapless.next_up == StreamUrl("https://music.example/1?key=1")
     gapless.advance()  # reports the resolved URL, as mpv does
@@ -391,9 +392,56 @@ def test_a_failing_resolver_plays_the_location_as_is(
     def broken(location: Location) -> Location:
         raise RuntimeError("keychain locked")
 
-    player.set_location_resolver(broken)
+    player.add_location_resolver(broken)
     player.play()
     assert backend.loaded == [tracks[0].location]
+
+
+def _on(host: str, key: str) -> Callable[[Location], Location]:
+    """A resolver for one server: signs only that server's URLs."""
+
+    def sign(location: Location) -> Location:
+        if isinstance(location, StreamUrl) and location.url.startswith(f"https://{host}/"):
+            return StreamUrl(f"{location}?key={key}")
+        return location
+
+    return sign
+
+
+def test_each_resolver_rewrites_its_own_locations(
+    player: Player, playlist: Playlist, backend: FakeBackend
+) -> None:
+    songs = [
+        Track.for_stream(StreamUrl(f"https://{h}/song"), h) for h in ("a.example", "b.example")
+    ]
+    songs.append(Track.for_stream(StreamUrl("https://radio.example/live"), "Radio"))
+    playlist.add(songs)
+
+    def broken(location: Location) -> Location:
+        raise RuntimeError("keychain locked")
+
+    player.add_location_resolver(_on("a.example", "1"))
+    player.add_location_resolver(broken)  # skipped: the others still sign theirs
+    player.add_location_resolver(_on("b.example", "2"))
+    for index in range(3):
+        player.play_index(index)
+    assert backend.loaded == [
+        StreamUrl("https://a.example/song?key=1"),
+        StreamUrl("https://b.example/song?key=2"),
+        StreamUrl("https://radio.example/live"),  # nobody's: played as it is
+    ]
+
+
+def test_a_removed_resolver_stops_rewriting(
+    player: Player, playlist: Playlist, backend: FakeBackend
+) -> None:
+    song = Track.for_stream(StreamUrl("https://music.example/rest/stream"), "Song")
+    playlist.add([song])
+    remove = player.add_location_resolver(_signed)
+    remove()
+    remove()  # twice is harmless
+    player.play()
+    assert backend.loaded == [song.location]
 
 
 def test_audio_info_is_published_in_kbps_when_it_changes(player: Player, bus: EventBus) -> None:

@@ -109,7 +109,7 @@ class FakeServer:
             return [t for t in songs if search and matches(t, search)]
         return [t for t in self.albums.get(str(node.key), []) if matches(t, search)]
 
-    def actions(self, node: Node) -> list[NodeAction]:
+    def actions(self, node: Node | None) -> list[NodeAction]:
         return []
 
 

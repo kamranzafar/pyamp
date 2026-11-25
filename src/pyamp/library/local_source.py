@@ -82,8 +82,8 @@ class LocalSource:
             return self._catalog.tracks(search, node.key)
         return []
 
-    def actions(self, node: Node) -> list[NodeAction]:
-        group = node.key
+    def actions(self, node: Node | None) -> list[NodeAction]:
+        group = node.key if node is not None else None
         if not isinstance(group, Group) or group.kind is not GroupKind.FOLDER:
             return []
         folder = Path(group.name)

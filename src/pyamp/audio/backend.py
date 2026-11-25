@@ -29,6 +29,7 @@ event bus directly.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import ClassVar, Protocol
 
 import numpy as np
@@ -170,6 +171,31 @@ class AudioBackend(ABC):
     def set_equalizer(self, equalizer: Equalizer) -> None:
         """Filter the output through ``equalizer``. Only for :attr:`supports_equalizer`."""
         return None
+
+    def stream_is_buffered(self) -> bool:
+        """Whether the playing stream is wholly in memory, so :meth:`save_stream` can save
+        it (e.g. a song from a server, never live radio)."""
+        return False
+
+    def buffered_range(self) -> tuple[float, float] | None:
+        """The stretch of the playing stream that's buffered, in seconds on the same clock as
+        the playback position (e.g. the next few seconds of live radio); None if unknown."""
+        return None
+
+    def stream_fits_buffer(self) -> bool:
+        """Whether the playing stream can be buffered whole (so a whole-song copy can be
+        made); if not, it's analysed a stretch at a time like live radio."""
+        return True
+
+    def save_stream(self, target: Path, start: float = 0.0, end: float | None = None) -> bool:
+        """Write the buffered stream from ``start`` to ``end`` seconds (None: the whole,
+        wholly buffered song) to ``target``, without fetching it again; False if it can't.
+        May be called from any thread.
+
+        For the visualiser of backends without :attr:`provides_audio_frames`: the copy is
+        analysed like a local file.
+        """
+        return False
 
     def close(self) -> None:
         """Release native resources. Override if needed."""

@@ -372,3 +372,201 @@ def test_events_still_queued_after_close_are_dropped(qt_app: QCoreApplication) -
     backend.close()
     QCoreApplication.processEvents()  # ...and delivered after it
     assert recorder.events == []  # a player would otherwise call into the closed mpv
+
+
+def test_a_buffered_song_is_saved_without_fetching_it_again(
+    backend: MpvAudioBackend, recorder: Recorder, tmp_path: Path
+) -> None:
+    """For the visualiser: a song from a server is analysed from mpv's own copy."""
+    from pyamp.audio.track_analysis import TrackAnalyser  # noqa: PLC0415  (Qt Multimedia)
+
+    assert not backend.stream_is_buffered()  # nothing playing
+    assert not backend.save_stream(tmp_path / "nothing.mkv")
+    with RadioStation(seconds=30.0) as server:
+        backend.load(StreamUrl(f"{server.url}/plain.wav"))  # a whole song, like Subsonic's
+        backend.play()
+        wait_until(backend.stream_is_buffered)
+        copy = tmp_path / "copy.mkv"
+        started = time.monotonic()
+        assert backend.save_stream(copy)
+        # At once, while the song plays: not when playback reaches its end (which is
+        # what mpv's dump-cache does when told to go "to the end").
+        assert time.monotonic() - started < 2
+        assert server.requests == ["/plain.wav"]  # mpv's copy: fetched only once
+
+    analyser = TrackAnalyser()
+    timeline = analyser.analyse(copy)
+    wait_until(timeline.finished.is_set)
+    analyser.shutdown()
+    assert timeline.seconds == pytest.approx(30.0, abs=0.2)  # the whole song
+
+
+def test_the_visualiser_shows_a_streamed_song_while_it_plays(qt_app: QCoreApplication) -> None:
+    """End to end, as with Subsonic: mpv plays a song from a server, the bars move."""
+    from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser  # noqa: PLC0415
+    from pyamp.core.events import SpectrumUpdated  # noqa: PLC0415
+
+    bus = EventBus()
+    playlist = Playlist(bus)
+    player = Player(MpvAudioBackend(ao="null"), playlist, bus)
+    analyser = TrackAnalyser()
+    spectrum = AnalysedSpectrum(bus, analyser, 20, streams=player)
+    bars: list[SpectrumUpdated] = []
+    bus.subscribe(SpectrumUpdated, bars.append)
+    try:
+        with RadioStation(seconds=20.0) as server:
+            url = StreamUrl(f"{server.url}/plain.wav")
+            playlist.add([Track.for_stream(url, "Song", 20_000)])
+            player.play_index(0)
+            wait_until(lambda: len(bars) >= 10)  # within seconds, not at the song's end
+            assert player.state is PlaybackState.PLAYING
+            assert max(max(b.levels) for b in bars) > 0  # the tone shows
+            assert server.requests == ["/plain.wav"]
+    finally:
+        spectrum.shutdown()
+        analyser.shutdown()
+        player.shutdown()
+
+
+def test_the_visualiser_follows_live_radio(qt_app: QCoreApplication) -> None:
+    """End to end: a station that sends at playing speed, with no end; the bars move."""
+    from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser  # noqa: PLC0415
+    from pyamp.core.events import SpectrumUpdated  # noqa: PLC0415
+
+    bus = EventBus()
+    playlist = Playlist(bus)
+    player = Player(MpvAudioBackend(ao="null"), playlist, bus)
+    analyser = TrackAnalyser()
+    spectrum = AnalysedSpectrum(bus, analyser, 20, streams=player)
+    bars: list[SpectrumUpdated] = []
+    bus.subscribe(SpectrumUpdated, bars.append)
+    try:
+        with RadioStation(seconds=60.0, paced=True) as station:
+            playlist.add([Track.for_stream(StreamUrl(f"{station.url}/live"), "Radio")])
+            player.play_index(0)
+            wait_until(lambda: len(bars) >= 30)  # a second of bars, within seconds
+            assert player.state is PlaybackState.PLAYING
+            assert max(max(b.levels) for b in bars) > 0  # the tone shows
+            assert station.requests == ["/live"]  # nothing fetched twice
+    finally:
+        spectrum.shutdown()
+        analyser.shutdown()
+        player.shutdown()
+
+
+def test_the_bars_drop_when_switching_from_a_song_to_radio(
+    qt_app: QCoreApplication, tmp_path: Path
+) -> None:
+    """As with the Qt backend: they fall at the switch, then the station's bars come."""
+    from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser  # noqa: PLC0415
+    from pyamp.core.events import SpectrumUpdated  # noqa: PLC0415
+    from tests.radio import tone_wav  # noqa: PLC0415
+
+    song = tmp_path / "song.wav"
+    song.write_bytes(tone_wav(30.0))
+    bus = EventBus()
+    playlist = Playlist(bus)
+    player = Player(MpvAudioBackend(ao="null"), playlist, bus)
+    analyser = TrackAnalyser()
+    spectrum = AnalysedSpectrum(bus, analyser, 20, streams=player)
+    bars: list[float] = []
+    bus.subscribe(SpectrumUpdated, lambda e: bars.append(max(e.levels)))
+    try:
+        with RadioStation(seconds=60.0, paced=True) as station:
+            playlist.add(
+                [Track.from_path(song), Track.for_stream(StreamUrl(f"{station.url}/live"), "Radio")]
+            )
+            player.play_index(0)
+            wait_until(lambda: len(bars) >= 10 and bars[-1] > 0)  # the song's bars
+            switched = len(bars)
+            player.play_index(1)
+            wait_until(lambda: len(bars) > switched)
+            assert bars[switched] == 0.0  # dropped at the switch, not frozen
+            wait_until(lambda: bars[-1] > 0)  # then the station's
+    finally:
+        spectrum.shutdown()
+        analyser.shutdown()
+        player.shutdown()
+
+
+class FakeMpv:
+    """mpv's cache as the backend reads it, for situations hard to make real mpv reach."""
+
+    def __init__(self, ranges: list[tuple[float, float]], position: float | None) -> None:
+        self.demuxer_cache_state: dict[str, object] = {
+            "seekable-ranges": [{"start": a, "end": b} for a, b in ranges]
+        }
+        self.time_pos = position
+        self.demuxer_max_bytes = 100
+        self.file_size: int | None = None
+
+
+@pytest.mark.parametrize(
+    ("ranges", "position", "expected"),
+    [
+        ([(0.0, 30.0), (600.0, 610.0)], 605.0, (600.0, 610.0)),
+        ([(0.0, 30.0), (600.0, 610.0)], 12.0, (0.0, 30.0)),  # after seeking back
+        ([(0.0, 30.0), (600.0, 610.0)], 300.0, (600.0, 610.0)),  # in neither: where it reads
+        ([], 1.0, None),
+    ],
+)
+def test_the_buffered_stretch_is_the_one_being_played(
+    backend: MpvAudioBackend,
+    ranges: list[tuple[float, float]],
+    position: float,
+    expected: tuple[float, float] | None,
+) -> None:
+    real, backend._mpv = backend._mpv, FakeMpv(ranges, position)
+    try:
+        assert backend.buffered_range() == expected
+    finally:
+        backend._mpv = real
+
+
+@pytest.mark.parametrize(
+    ("size", "state", "fits"),
+    [
+        (50, {}, True),
+        (95, {}, False),  # bigger than 90% of the cache
+        (None, {"fw-bytes": 40}, True),  # unknown size, cache not filling up
+        (None, {"fw-bytes": 95}, False),  # unknown size, cache full and no end in sight
+        (None, {"fw-bytes": 95, "eof-cached": True}, True),  # full, but it's all there
+    ],
+)
+def test_whether_a_stream_fits_the_buffer(
+    backend: MpvAudioBackend, size: int | None, state: dict[str, object], fits: bool
+) -> None:
+    fake = FakeMpv([], None)
+    fake.file_size, fake.demuxer_cache_state = size, state
+    real, backend._mpv = backend._mpv, fake
+    try:
+        assert backend.stream_fits_buffer() is fits
+    finally:
+        backend._mpv = real
+
+
+def test_the_visualiser_shows_a_song_too_big_to_buffer_whole(qt_app: QCoreApplication) -> None:
+    """End to end: a song bigger than mpv's buffer (shrunk here) is analysed as it plays."""
+    from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser  # noqa: PLC0415
+    from pyamp.core.events import SpectrumUpdated  # noqa: PLC0415
+
+    bus = EventBus()
+    playlist = Playlist(bus)
+    backend = MpvAudioBackend(ao="null", demuxer_max_bytes=200_000)  # ~4 s of this song
+    player = Player(backend, playlist, bus)
+    analyser = TrackAnalyser()
+    spectrum = AnalysedSpectrum(bus, analyser, 20, streams=player)
+    bars: list[SpectrumUpdated] = []
+    bus.subscribe(SpectrumUpdated, bars.append)
+    try:
+        with RadioStation(seconds=30.0) as server:
+            url = StreamUrl(f"{server.url}/plain.wav")
+            playlist.add([Track.for_stream(url, "Long mix", 30_000)])
+            player.play_index(0)
+            wait_until(lambda: sum(max(b.levels) > 0 for b in bars) >= 10)
+            assert not backend.stream_is_buffered()  # never wholly buffered...
+            assert player.state is PlaybackState.PLAYING  # ...yet the bars move
+    finally:
+        spectrum.shutdown()
+        analyser.shutdown()
+        player.shutdown()

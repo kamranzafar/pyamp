@@ -156,7 +156,7 @@ class Application:
         if not self.player.provides_audio_frames:
             self.track_analyser = TrackAnalyser(self.spectrum.band_count)
             self.analysed_spectrum = AnalysedSpectrum(
-                self.bus, self.track_analyser, self.spectrum.band_count
+                self.bus, self.track_analyser, self.spectrum.band_count, streams=self.player
             )
         self.playlist_formats = PlaylistFormatRegistry.default()
         self.loader = BackgroundTrackLoader(

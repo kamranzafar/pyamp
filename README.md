@@ -332,6 +332,29 @@ since a windowed program can't print. Licences of bundled components are listed 
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    ui["<b>ui/</b><br/>windows: player, library, equaliser"]
+    core["<b>core/</b><br/>Player, Playlist, event bus"]
+    audio["<b>audio/</b><br/>mpv and Qt backends,<br/>visualiser analysis"]
+    library["<b>library/</b><br/>sources, catalog, playlists"]
+    plugins["<b>plugins/</b><br/>Subsonic, media keys"]
+
+    ui --> core
+    ui --> library
+    audio --> core
+    plugins --> core
+    plugins --> library
+
+    audio --> engines[["libmpv / QtMultimedia"]]
+    library --> data[("music files,<br/>library.sqlite3")]
+    plugins --> remote[("Subsonic server,<br/>OS media controls")]
+```
+
+`core` is the centre: the other packages use it, and it depends on none of them (it
+only knows the `AudioBackend` interface). `app.py` builds every object and wires them
+together.
+
 ```
 src/pyamp/
 ├── app.py              Composition root: builds the object graph, owns session lifecycle

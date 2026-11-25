@@ -31,7 +31,7 @@ from collections.abc import Callable, Hashable, Sequence
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QHideEvent, QKeySequence, QShortcut, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -106,6 +106,8 @@ class LibraryWindow(QDialog):
         self._retired: list[BackgroundCalls] = []
         self._checked = 0
         self._error = ""
+        #: Closed after being open: the table is empty, so the library holds no tracks.
+        self._closed = False
         self._tracks_request = 0
         #: Bumped when a source's part of the sidebar is rebuilt: late replies are dropped.
         self._generation: dict[int, int] = {}
@@ -344,10 +346,10 @@ class LibraryWindow(QDialog):
     def show_tracks(self) -> None:
         """Ask the picked source for the picked node's tracks matching the search."""
         self._search_delay.stop()
-        self._tracks_request += 1
+        self._tracks_request += 1  # and a reply still on its way is dropped
         request = self._tracks_request
         picked = self.selected()
-        if picked is None:
+        if picked is None or self._closed:
             self.model.set_tracks([])
             self._update_status()
             return
@@ -485,6 +487,21 @@ class LibraryWindow(QDialog):
         if summary.missing_sources:
             missing = ", ".join(path.name or str(path) for path in summary.missing_sources)
             self.status.setText(f"{self.status.text()} · Not found: {missing}")
+
+    # -- Open and closed ----------------------------------------------------------- #
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._closed:
+            self._closed = False
+            self.show_tracks()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        """Let go of the tracks while the window is closed (a big library's take tens of MB);
+        they're asked for again when it opens."""
+        super().hideEvent(event)
+        self._closed = True
+        self.show_tracks()  # empties the table
 
     # -- Layout ------------------------------------------------------------------- #
 

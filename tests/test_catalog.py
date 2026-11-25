@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import random
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -35,6 +36,7 @@ from pyamp.library.catalog import (
     FileStamp,
     Group,
     GroupKind,
+    album_order,
     default_path,
 )
 
@@ -145,6 +147,26 @@ def test_tracks_come_in_album_order(catalog: Catalog) -> None:
     ]
     catalog.put((t, STAMP) for t in tracks)
     assert [t.title for t in catalog.tracks()] == ["W", "X", "Y", "Z"]
+
+
+def test_the_database_sorts_exactly_like_album_order(catalog: Catalog) -> None:
+    """Sorting moved into SQL for speed; it must not change the order anywhere."""
+    rng = random.Random(7)
+    names = ["", "abba", "ABBA", "Öl", "ol", "Straße", "STRASSE", "zz", "Émile", "émile", "b"]
+    tracks = [
+        Track(
+            Path(f"/m/{rng.choice(names)}/{n:03d} {rng.choice(names)}.mp3"),
+            rng.choice(names) or "x",
+            artist=rng.choice(names),
+            album_artist=rng.choice(["", *names]),
+            album=rng.choice(names),
+            disc_number=rng.randint(0, 2),
+            track_number=rng.randint(0, 3),
+        )
+        for n in range(400)
+    ]
+    catalog.put((t, STAMP) for t in tracks)
+    assert catalog.tracks() == sorted(tracks, key=album_order)
 
 
 @pytest.mark.parametrize(

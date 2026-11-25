@@ -51,7 +51,7 @@ def row_texts(model: LibraryModel, row: int) -> list[str]:
     return [model.data(model.index(row, c)) for c in range(model.columnCount())]
 
 
-def test_shows_tracks_in_album_order(model: LibraryModel) -> None:
+def test_shows_tracks_in_the_order_given(model: LibraryModel) -> None:
     assert [model.headerData(c, Qt.Orientation.Horizontal) for c in range(7)] == [
         "#",
         "Title",
@@ -61,10 +61,10 @@ def test_shows_tracks_in_album_order(model: LibraryModel) -> None:
         "Genre",
         "Time",
     ]
-    assert [t.title for t in model.tracks()] == ["alpha", "Gamma", "Beta"]
-    assert row_texts(model, 0) == ["", "alpha", "Ann", "One", "", "", "1:01"]
-    assert row_texts(model, 2) == ["2", "Beta", "Zed", "Two", "2001", "", ""]
-    assert model.data(model.index(0, 0), Qt.ItemDataRole.ToolTipRole) == "/m/a.mp3"
+    assert [t.title for t in model.tracks()] == ["Beta", "alpha", "Gamma"]  # as the source said
+    assert row_texts(model, 0) == ["2", "Beta", "Zed", "Two", "2001", "", ""]
+    assert row_texts(model, 1) == ["", "alpha", "Ann", "One", "", "", "1:01"]
+    assert model.data(model.index(1, 0), Qt.ItemDataRole.ToolTipRole) == "/m/a.mp3"
 
 
 def test_numbers_are_right_aligned(model: LibraryModel) -> None:
@@ -73,22 +73,22 @@ def test_numbers_are_right_aligned(model: LibraryModel) -> None:
     assert model.data(model.index(0, column("Title")), Qt.ItemDataRole.TextAlignmentRole) is None
 
 
-def test_columns_sort_and_ties_stay_in_album_order(model: LibraryModel) -> None:
+def test_columns_sort_and_ties_stay_in_the_order_given(model: LibraryModel) -> None:
     model.sort(column("Artist"), Qt.SortOrder.DescendingOrder)
-    assert [t.title for t in model.tracks()] == ["Gamma", "Beta", "alpha"]
+    assert [t.title for t in model.tracks()] == ["Beta", "Gamma", "alpha"]
     model.sort(column("Title"))
     assert [t.title for t in model.tracks()] == ["alpha", "Beta", "Gamma"]  # ignoring case
     model.set_tracks(list(reversed(TRACKS)))  # new tracks keep the user's sort
     assert [t.title for t in model.tracks()] == ["alpha", "Beta", "Gamma"]
-    model.sort(-1)
-    assert [t.title for t in model.tracks()] == ["alpha", "Gamma", "Beta"]
+    model.sort(-1)  # back to the order they came in
+    assert [t.title for t in model.tracks()] == ["Gamma", "alpha", "Beta"]
 
 
 def test_dragged_tracks_are_files(model: LibraryModel) -> None:
     assert model.flags(model.index(0, 0)) & Qt.ItemFlag.ItemIsDragEnabled
     assert model.mimeTypes() == ["text/uri-list"]
     data = model.mimeData([model.index(2, 0), model.index(0, 1), model.index(0, 0)])
-    assert [Path(url.toLocalFile()) for url in data.urls()] == [Path("/m/a.mp3"), Path("/m/b.mp3")]
+    assert [Path(url.toLocalFile()) for url in data.urls()] == [Path("/m/b.mp3"), Path("/m/c.mp3")]
 
 
 def test_nothing_for_invalid_indexes(model: LibraryModel) -> None:

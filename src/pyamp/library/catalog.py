@@ -253,10 +253,10 @@ class Catalog:
             condition, group_params = _group_condition(group)
             conditions.append(condition)
             params.extend(group_params)
-        query = f"{_SELECT} WHERE {' AND '.join(conditions)}" if conditions else _SELECT
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._lock:
-            rows = self._db.execute(query, params).fetchall()
-        return sorted((_from_row(_TrackRow._make(row)) for row in rows), key=album_order)
+            rows = self._db.execute(f"{_SELECT}{where}{_IN_ALBUM_ORDER}", params).fetchall()
+        return [_from_row(_TrackRow._make(row)) for row in rows]
 
     def groups(self, kind: GroupKind) -> list[Group]:
         """Every artist, album, genre or folder with its track count, by name.
@@ -304,6 +304,7 @@ class Catalog:
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, check_same_thread=False)  # guarded by self._lock
+        db.create_function("casefold", 1, _casefold, deterministic=True)
         try:
             (version,) = db.execute("PRAGMA user_version").fetchone()
             if version > SCHEMA_VERSION:
@@ -317,7 +318,11 @@ class Catalog:
 
 
 def album_order(track: Track) -> tuple[str, str, int, int, str, str]:
-    """Sort key: by album artist (or artist), album, disc and track number, ignoring case."""
+    """Sort key: by album artist (or artist), album, disc and track number, ignoring case.
+
+    :data:`_IN_ALBUM_ORDER` sorts the same way in the database (much faster for a big
+    library: no paths to parse, nothing to sort in Python).
+    """
     return (
         (track.album_artist or track.artist).casefold(),
         track.album.casefold(),
@@ -328,6 +333,11 @@ def album_order(track: Track) -> tuple[str, str, int, int, str, str]:
     )
 
 
+#: :func:`album_order` in SQL. The keys are stored case-folded, and SQLite compares text
+#: by its UTF-8 bytes, which sorts the same as Python compares strings.
+_IN_ALBUM_ORDER = (
+    " ORDER BY artist_key, album_key, disc_number, track_number, casefold(title), path"
+)
 _LIKE = "search_text LIKE ? ESCAPE '\\'"
 _GROUP_QUERIES = {
     GroupKind.ARTIST: f"SELECT MIN({_GROUP_ARTIST}), '', COUNT(*) FROM tracks GROUP BY artist_key",
@@ -353,6 +363,10 @@ def _group_condition(group: Group) -> tuple[str, list[str]]:
         case GroupKind.FOLDER:
             inside = f"{_escape_like(os.path.join(group.name, ''))}%"  # ends in a separator
             return "(path = ? OR path LIKE ? ESCAPE '\\')", [group.name, inside]
+
+
+def _casefold(value: object) -> str:
+    return str(value).casefold()
 
 
 def _escape_like(text: str) -> str:

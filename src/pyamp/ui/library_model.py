@@ -80,17 +80,19 @@ COLUMNS = (
 
 
 class LibraryModel(QAbstractTableModel):
-    """The tracks the library window shows, in album order until a column is sorted."""
+    """The tracks the library window shows, in their source's order until a column is sorted
+    (the local library gives them in album order)."""
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._tracks: list[Track] = []
+        self._given: list[Track] = []  # in the source's order
+        self._tracks: list[Track] = []  # as shown
         self._sort: tuple[int, Qt.SortOrder] = (-1, Qt.SortOrder.AscendingOrder)
 
     def set_tracks(self, tracks: Sequence[Track]) -> None:
-        """Show ``tracks`` (in album order), keeping the column sort the user chose."""
+        """Show ``tracks``, in the order given unless the user has sorted by a column."""
         self.beginResetModel()
-        self._tracks = list(tracks)
+        self._given = list(tracks)
         self._apply_sort()
         self.endResetModel()
 
@@ -134,7 +136,7 @@ class LibraryModel(QAbstractTableModel):
         return None
 
     def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
-        """Sort by a column; a negative column means album order."""
+        """Sort by a column; a negative column means the order the tracks came in."""
         self.layoutAboutToBeChanged.emit()
         self._sort = (column, order)
         self._apply_sort()
@@ -142,8 +144,8 @@ class LibraryModel(QAbstractTableModel):
 
     def _apply_sort(self) -> None:
         column, order = self._sort
-        self._tracks.sort(key=album_order)
-        if 0 <= column < len(COLUMNS):  # stable: ties stay in album order
+        self._tracks = list(self._given)
+        if 0 <= column < len(COLUMNS):  # stable: ties stay in the order they came in
             descending = order is Qt.SortOrder.DescendingOrder
             self._tracks.sort(key=COLUMNS[column].sort_key, reverse=descending)
 

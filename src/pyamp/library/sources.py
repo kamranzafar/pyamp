@@ -85,9 +85,8 @@ class MediaSource(Protocol):
         ...
 
     def tracks(self, node: Node | None, search: str = "") -> list[Track]:
-        """The tracks of ``node`` (None: the whole source) that match ``search``.
-
-        See :func:`matches` for how searches match.
+        """The tracks of ``node`` (None: the whole source) that match ``search``, in the
+        order to show them (e.g. album order). See :func:`matches` for how searches match.
         """
         ...
 

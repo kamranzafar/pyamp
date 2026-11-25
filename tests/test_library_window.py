@@ -464,7 +464,7 @@ def test_a_slow_source_never_blocks_the_window(window: LibraryWindow, server: Fa
 
 def test_picking_a_source_lists_its_tracks(window: LibraryWindow, server: FakeServer) -> None:
     pick(window, 1, "albums", "a1")
-    assert titles(window) == ["Angel", "Teardrop"]  # album order: by title, no tags
+    assert titles(window) == ["Teardrop", "Angel"]  # in the order the source gives them
     pick(window, 1)
     assert titles(window) == []
     assert window.status.text() == "Search the server"
@@ -597,3 +597,19 @@ def test_clicking_a_name_opens_it(music: Path, window: LibraryWindow, bus: Event
     assert artists.isExpanded()
     click(window, item(window, 0, GroupKind.ARTIST, PORTISHEAD))
     assert titles(window) == ["Glory Box"]
+
+
+def test_closing_the_window_lets_go_of_the_tracks(
+    music: Path, window: LibraryWindow, catalog: Catalog, bus: EventBus
+) -> None:
+    window.show()
+    refresh(window, bus)
+    assert len(titles(window)) == 3
+    window.close()  # hidden, kept for next time
+    assert titles(window) == []
+    catalog.put([(Track(music / "4.mp3", "Risingson", artist="Massive Attack"), STAMP)])
+    refresh(window, bus)  # a scan while it's closed doesn't load them again
+    assert titles(window) == []
+    window.show()
+    settle(window)
+    assert len(titles(window)) == 4  # back, and up to date

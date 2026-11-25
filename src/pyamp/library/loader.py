@@ -27,7 +27,7 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 from pyamp.core.models import Location, StreamUrl, Track
-from pyamp.library.metadata import MetadataReader, is_audio_file
+from pyamp.library.metadata import MetadataReader, audio_files, is_audio_file
 from pyamp.library.playlist_formats import PlaylistEntry, PlaylistFormatRegistry
 from pyamp.library.remote import fetch_text
 
@@ -69,9 +69,7 @@ class TrackLoader:
             if isinstance(location, StreamUrl):
                 yield from self._stream(location, None, 0, depth=0)
             elif location.is_dir():
-                yield from sorted(
-                    p for p in location.rglob("*") if p.is_file() and is_audio_file(p)
-                )
+                yield from audio_files(location)
             elif self._formats.supports(location):
                 try:
                     entries = self._formats.read(location)

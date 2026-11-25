@@ -304,6 +304,8 @@ src/pyamp/
 │   ├── metadata.py     Tag reading via mutagen
 │   ├── playlist_formats.py  M3U / PLS read & write
 │   ├── saved_playlists.py   Named playlists stored as .m3u8 files
+│   ├── catalog.py      Media library index (SQLite): added folders/files and their tags
+│   ├── scanner.py      Brings the index up to date, re-reading only changed files
 │   ├── remote.py       Downloads remote playlists (a station's .pls)
 │   └── loader.py       Files/folders/playlists/streams → Tracks
 ├── media_session/      OS media controls (used by the media-session plugin)
@@ -374,6 +376,12 @@ the playlist files (switching, renaming, deleting, quitting) waits for it first.
 The visualiser only works while the window can be seen: hiding or minimising it pauses
 the FFT and, on the `mpv` backend, the second decoding of the playing file.
 
+The media library's index (`library/catalog.py`) is one SQLite connection guarded by a
+lock, so the scanner can fill it from a worker thread while the window reads it. The
+scanner writes in batches and can be cancelled; a cancelled scan keeps what it read
+and forgets nothing, and tracks of a folder that isn't there (an unplugged drive) are
+kept until it's back.
+
 libmpv reports events on its own thread. `audio/mpv_backend.py` only records
 state there and emits signals on a main-thread `QObject`, so the player never
 sees a call from mpv's thread.
@@ -420,6 +428,10 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
   don't warn.
 - **Smaller downloads**: bundle only the Qt modules and plugins PyAmp uses, so the
   apps shrink from about 170 MB.
+- **Media library**: add folders and files once, then browse and search them by artist,
+  album and genre, and build playlists from them. PyAmp only reads your files; it
+  never retags, renames or moves them. The index and scanner are in place; the
+  library window is next.
 - **DLNA/UPnP media servers** (plugin): find media servers on the local network (NAS,
   MiniDLNA, Plex/Jellyfin DLNA), browse them and play from them.
 

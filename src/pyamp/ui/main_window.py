@@ -88,7 +88,7 @@ STATUS_TIMEOUT_MS = 5000
 LIBRARY_PLAYLIST = "Library"
 LIBRARY_MENU = "&Library"  # plugins with a library (Subsonic) add to it too
 
-#: How the View → Audio Backend menu names backends (others by their own name).
+#: How the Playback → Audio Backend menu names backends (others by their own name).
 BACKEND_LABELS = {"qt": "Qt Multimedia", "mpv": "mpv"}
 
 SORT_OPTIONS = (
@@ -114,7 +114,7 @@ class UiServices:
     playlists: PlaylistSession
     library: BackgroundLibraryScanner
     sources: MediaSources
-    #: Audio backends that can be chosen (View → Audio Backend), e.g. ("mpv", "qt").
+    #: Audio backends that can be chosen (Playback → Audio Backend), e.g. ("mpv", "qt").
     backends: tuple[str, ...] = ()
 
 
@@ -255,6 +255,7 @@ class MainWindow(QMainWindow):
         replay_gain_menu = play_menu.addMenu("Replay&Gain")
         replay_gain_menu.addActions(list(self._actions.replay_gain.values()))
         self._add_menu_action(play_menu, "&Equaliser…", self.show_equalizer, "G")
+        self._build_backend_menu(play_menu)
 
         list_menu = menu_bar.addMenu("P&laylist")
         self._add_menu_action(list_menu, "&New Playlist…", self.new_playlist, "Ctrl+N")
@@ -347,8 +348,6 @@ class MainWindow(QMainWindow):
         self.keep_running_action.setChecked(self._s.settings.keep_running_when_closed)
         self.keep_running_action.toggled.connect(self._set_keep_running)
         view_menu.addActions([self.show_icon_action, self.keep_running_action])
-        view_menu.addSeparator()
-        self._build_backend_menu(view_menu)
         if not MenuBarIcon.available():
             self.show_icon_action.setEnabled(False)
             self.show_icon_action.setToolTip(f"This desktop has no {PLACE.lower()}")

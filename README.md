@@ -145,7 +145,7 @@ searches the whole server.
 | `mpv` (libmpv) | yes | **yes** | **yes** | yes (analysed) | `brew install mpv` or `apt install libmpv2` |
 | `qt` (QtMultimedia) | fallback | no | no | yes | nothing extra |
 
-Choose one in **View → Audio Backend**; the one playing now is marked "(in use)".
+Choose one in **Playback → Audio Backend**; the one playing now is marked "(in use)".
 The choice is saved and takes effect the next time PyAmp starts. From the command
 line:
 
@@ -284,8 +284,7 @@ Like other music players, **closing the window doesn't stop PyAmp**: the window
 hides and the music keeps playing. Bring it back with the Dock icon (macOS) or the
 menu bar/tray icon. **Quit** (⌘Q, File → Quit, the icon's menu or the Dock) ends it.
 
-Two settings in the **View** menu (which also has **Audio Backend**, see
-[Audio backends](#audio-backends)):
+Two settings in the **View** menu:
 
 - **Show Icon in Menu Bar** (on by default).
 - **Keep Running When Window Is Closed** (on by default; turn it off to have

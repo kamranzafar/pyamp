@@ -49,17 +49,19 @@ from pyamp.audio.registry import (
 from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.equalizer import Equalizer
-from pyamp.core.events import EventBus
+from pyamp.core.events import EventBus, LibraryChanged
 from pyamp.core.models import RepeatMode, ReplayGainMode
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 from pyamp.dsp.spectrum import SpectrumService
 from pyamp.library.catalog import Catalog
 from pyamp.library.loader import TrackLoader
+from pyamp.library.local_source import LocalSource
 from pyamp.library.metadata import MutagenMetadataReader
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.library.scanner import LibraryScanner
+from pyamp.library.sources import MediaSources
 from pyamp.plugins import PluginContext, PluginManager
 from pyamp.ui.background_loader import BackgroundTrackLoader
 from pyamp.ui.icons import app_icon
@@ -161,6 +163,11 @@ class Application:
         self.library = BackgroundLibraryScanner(
             self.catalog, LibraryScanner(self.catalog, MutagenMetadataReader()), self.bus
         )
+        # The library window's sources: this computer first, then any from plugins.
+        self.sources = MediaSources(self.bus)
+        self.local_source = LocalSource(self.catalog, self.library.remove_source)
+        self.sources.add(self.local_source)
+        self.bus.subscribe(LibraryChanged, lambda _: self.sources.changed(self.local_source))
         self.plugins = PluginManager(
             PluginContext(
                 self.bus,
@@ -168,6 +175,7 @@ class Application:
                 self.playlist,
                 window_handle=self._window_handle,
                 ui=lambda: getattr(self, "window", None),
+                sources=self.sources,
             )
         )
         self.playlists = PlaylistSession(
@@ -190,6 +198,7 @@ class Application:
                 spectrum_bands=self.spectrum.band_count,
                 playlists=self.playlists,
                 library=self.library,
+                sources=self.sources,
             ),
             DEFAULT_SKIN,
         )

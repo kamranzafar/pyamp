@@ -17,10 +17,10 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
-"""Subsonic plugin: browse and play your music library from a Subsonic-compatible server
-(Navidrome, Airsonic, Gonic, ...).
+"""Subsonic plugin: browse and play your music from a Subsonic-compatible server
+(Navidrome, Airsonic, Gonic, ...) in PyAmp's library window, as one of its sources.
 
-Songs are added to the playlist as streams with their tags and length. Their URLs carry no
+Songs are added to playlists as streams with their tags and length. Their URLs carry no
 login, so saved playlists hold no secrets; the plugin adds a fresh login as each one plays.
 """
 
@@ -28,11 +28,11 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QDialog, QWidget
 
-from pyamp.core.models import Track
 from pyamp.plugins.base import PluginContext
 from pyamp.plugins.subsonic.client import SubsonicClient
 from pyamp.plugins.subsonic.credentials import Account, AccountStore
-from pyamp.plugins.subsonic.ui import BrowserWindow, ServerDialog
+from pyamp.plugins.subsonic.source import SubsonicSource
+from pyamp.plugins.subsonic.ui import ServerDialog
 
 MENU = "&Library"
 
@@ -44,7 +44,7 @@ class SubsonicPlugin:
         self._accounts = accounts or AccountStore()
         self._context: PluginContext | None = None
         self.client: SubsonicClient | None = None
-        self.browser: BrowserWindow | None = None
+        self.source: SubsonicSource | None = None
 
     def activate(self, context: PluginContext) -> None:
         self._context = context
@@ -55,11 +55,10 @@ class SubsonicPlugin:
                 self._use(SubsonicClient(account.server, account.username, password))
         ui = context.ui()
         if ui is not None:
-            ui.add_menu_action(MENU, "Subsonic &Browser…", self.show_browser, "Ctrl+B")
             ui.add_menu_action(MENU, "Subsonic &Server…", self.show_server_dialog)
 
     def deactivate(self) -> None:
-        self._close_browser()
+        self._remove_source()
         if self._context is not None:
             self._context.player.set_location_resolver(None)
         self.client = None
@@ -89,37 +88,22 @@ class SubsonicPlugin:
         self._use(client)
         return True
 
-    def show_browser(self) -> BrowserWindow | None:
-        if self.client is None and not self.show_server_dialog():
-            return None
-        assert self.client is not None
-        if self.browser is None:
-            self.browser = BrowserWindow(self.client, self.add_tracks, parent=self._parent())
-        self.browser.show()
-        self.browser.raise_()
-        self.browser.activateWindow()
-        return self.browser
-
-    def add_tracks(self, tracks: list[Track], play: bool) -> None:
-        assert self._context is not None
-        first = len(self._context.playlist)
-        self._context.playlist.add(tracks)
-        if play:
-            self._context.player.play_index(first)
-
     # -- Internals ---------------------------------------------------------- #
 
     def _use(self, client: SubsonicClient) -> None:
+        """Play from ``client``'s server, and show it in the library window."""
         assert self._context is not None
         self.client = client
         self._context.player.set_location_resolver(client.authorise)
-        self._close_browser()  # it was showing the old server
+        self._remove_source()  # the old server's
+        if self._context.sources is not None:
+            self.source = SubsonicSource(client)
+            self._context.sources.add(self.source)
 
-    def _close_browser(self) -> None:
-        if self.browser is not None:
-            self.browser.close()
-            self.browser.deleteLater()
-            self.browser = None
+    def _remove_source(self) -> None:
+        if self.source is not None and self._context is not None and self._context.sources:
+            self._context.sources.remove(self.source)
+        self.source = None
 
     def _parent(self) -> QWidget | None:
         ui = self._context.ui() if self._context else None

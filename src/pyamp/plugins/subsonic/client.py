@@ -136,7 +136,11 @@ class SubsonicClient:
             title=song.get("title") or str(song["id"]),
             artist=song.get("artist") or "",
             album=song.get("album") or "",
-            duration_ms=int(song.get("duration") or 0) * 1000,
+            genre=song.get("genre") or "",
+            year=_int(song.get("year")),
+            track_number=_int(song.get("track")),
+            disc_number=_int(song.get("discNumber")),
+            duration_ms=_int(song.get("duration")) * 1000,
         )
 
     def authorise(self, location: Location) -> Location:
@@ -176,6 +180,20 @@ class SubsonicClient:
             error = body.get("error") or {}
             raise SubsonicError(error.get("message") or "The server refused the request")
         return dict(body)
+
+
+def describe(error: BaseException) -> str:
+    """A short message for the user."""
+    if isinstance(error, SubsonicError | ValueError):
+        return str(error)
+    if isinstance(error, OSError):
+        reason = getattr(error, "reason", None) or error.strerror or error
+        return f"Could not reach the server: {reason}"
+    return f"Something went wrong: {error}"
+
+
+def _int(value: object) -> int:
+    return value if isinstance(value, int) and value > 0 else 0
 
 
 def _count(value: object, noun: str) -> str:

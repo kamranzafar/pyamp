@@ -29,6 +29,7 @@ from typing import Protocol, runtime_checkable
 from pyamp.core.events import EventBus
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
+from pyamp.library.sources import MediaSources
 
 
 class PluginUi(Protocol):
@@ -58,6 +59,8 @@ class PluginContext:
     window_handle: Callable[[], int | None] = field(default=lambda: None)
     #: The user interface, once it exists (None when running without one).
     ui: Callable[[], PluginUi | None] = field(default=lambda: None)
+    #: Where the library window finds music; plugins may add sources (None: no library).
+    sources: MediaSources | None = None
 
 
 @runtime_checkable

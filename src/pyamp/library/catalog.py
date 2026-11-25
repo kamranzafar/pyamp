@@ -359,7 +359,8 @@ def _escape_like(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _search_text(track: Track) -> str:
+def search_text(track: Track) -> str:
+    """What searches look in: title, artists, album, genre and file name, case-folded."""
     fields = (track.title, track.artist, track.album, track.album_artist, track.genre)
     return "\n".join((*fields, track.name)).casefold()
 
@@ -389,7 +390,7 @@ def _to_row(track: Track, stamp: FileStamp) -> tuple[object, ...]:
         (track.album_artist or track.artist).casefold(),
         track.album.casefold(),
         track.genre.casefold(),
-        _search_text(track),
+        search_text(track),
     )
     return (*row, stamp.mtime_ns, stamp.size, *keys)
 

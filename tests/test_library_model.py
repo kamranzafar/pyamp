@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QCoreApplication, QModelIndex, Qt
 
-from pyamp.core.models import Track
+from pyamp.core.models import StreamUrl, Track
 from pyamp.ui.library_model import COLUMNS, LibraryModel
 
 TRACKS = [
@@ -96,3 +96,11 @@ def test_nothing_for_invalid_indexes(model: LibraryModel) -> None:
     assert model.rowCount(model.index(0, 0)) == 0
     assert model.columnCount(model.index(0, 0)) == 0
     assert model.headerData(0, Qt.Orientation.Vertical) is None
+
+
+def test_streams_are_not_dragged(qt_app: QCoreApplication) -> None:
+    model = LibraryModel()
+    song = Track.for_stream(StreamUrl("https://server.example/rest/stream?id=1"), "Song")
+    model.set_tracks([song, TRACKS[1]])
+    data = model.mimeData([model.index(0, 0), model.index(1, 0)])
+    assert [Path(url.toLocalFile()) for url in data.urls()] == [Path("/m/a.mp3")]

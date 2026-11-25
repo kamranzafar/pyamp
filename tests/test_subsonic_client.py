@@ -91,9 +91,13 @@ def test_an_albums_songs_are_streams_with_tags_and_length(client: SubsonicClient
         title="Teardrop",
         artist="Massive Attack",
         album="Mezzanine",
+        genre="Trip Hop",
+        year=1998,
+        track_number=1,
+        disc_number=1,
         duration_ms=330_000,
     )
-    assert angel.duration_ms == 379_000
+    assert (angel.track_number, angel.year, angel.genre) == (2, 0, "")  # untagged: unknown
 
 
 def test_search_finds_songs_and_their_albums(client: SubsonicClient) -> None:

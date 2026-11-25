@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import (
@@ -156,7 +157,10 @@ class LibraryModel(QAbstractTableModel):
         return ["text/uri-list"]
 
     def mimeData(self, indexes: Sequence[QModelIndex]) -> QMimeData:
+        """The dragged tracks' files. Streams (e.g. from a server) aren't dragged: as a
+        bare URL they'd lose their tags; Add to Playlist keeps them."""
         rows = sorted({index.row() for index in indexes if index.isValid()})
+        locations = [self._tracks[row].location for row in rows]
         data = QMimeData()
-        data.setUrls([QUrl.fromLocalFile(str(self._tracks[row].location)) for row in rows])
+        data.setUrls([QUrl.fromLocalFile(str(p)) for p in locations if isinstance(p, Path)])
         return data

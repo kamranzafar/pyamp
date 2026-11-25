@@ -64,6 +64,7 @@ from pyamp.core.playlist import Playlist, SortKey
 from pyamp.library.metadata import AUDIO_EXTENSIONS
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.library.saved_playlists import PlaylistNameError
+from pyamp.library.sources import MediaSources
 from pyamp.ui.about_dialog import AboutDialog
 from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
@@ -108,6 +109,7 @@ class UiServices:
     spectrum_bands: int
     playlists: PlaylistSession
     library: BackgroundLibraryScanner
+    sources: MediaSources
 
 
 class MainWindow(QMainWindow):
@@ -439,6 +441,7 @@ class MainWindow(QMainWindow):
         if self._library_window is None:
             self._library_window = LibraryWindow(
                 self._s.library,
+                self._s.sources,
                 self._s.bus,
                 self._s.settings,
                 self._skin,

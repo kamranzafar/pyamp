@@ -150,7 +150,45 @@ def test_analysis_finds_the_tones_at_the_right_times(
         assert abs(int(np.argmax(row)) - band_of(hz)) <= 1, (seconds, hz, row.round(2))
 
 
-def test_analysing_another_file_cancels_the_first(analyser: TrackAnalyser, tmp_path: Path) -> None:
+class StallingWavDecoder(WavDecoder):
+    """Writes a file's first second, then waits to be cancelled before writing the rest,
+    as a slow decode would: the first file is still being analysed when the second comes."""
+
+    def decode(
+        self, source: Path, target: Path, sample_rate: int, cancelled: Callable[[], bool]
+    ) -> bool:
+        with wave.open(str(source), "rb") as w:
+            first = np.frombuffer(w.readframes(sample_rate), dtype="<i2")
+            rest = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
+        with target.open("wb") as out:
+            out.write((first.astype(np.float32) / 32768).tobytes())
+            out.flush()
+            if rest.size:
+                wait_for(cancelled)
+                if not cancelled():
+                    out.write((rest.astype(np.float32) / 32768).tobytes())
+        self.decoded.append(source)
+        return True
+
+
+def wait_for(condition: Callable[[], bool], timeout: float = 20.0) -> None:
+    """Like wait_until, off the main thread (no Qt events)."""
+    deadline = time.monotonic() + timeout
+    while not condition() and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+
+@pytest.fixture
+def stalling_analyser(qt_app: QCoreApplication) -> Iterator[TrackAnalyser]:
+    analyser = TrackAnalyser(BANDS, decoder=StallingWavDecoder())
+    yield analyser
+    analyser.shutdown()
+
+
+def test_analysing_another_file_cancels_the_first(
+    stalling_analyser: TrackAnalyser, tmp_path: Path
+) -> None:
+    analyser = stalling_analyser
     first = analyser.analyse(write_tones(tmp_path / "a.wav", (440,), seconds=30))
     second = analyser.analyse(write_tones(tmp_path / "b.wav", (440,), seconds=1))
     assert first.cancelled.is_set()

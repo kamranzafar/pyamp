@@ -43,7 +43,7 @@ class Source:
     def tracks(self, node: Node | None, search: str = "") -> list[Track]:
         return []
 
-    def actions(self, node: Node) -> list[NodeAction]:
+    def actions(self, node: Node | None) -> list[NodeAction]:
         return []
 
 
@@ -88,3 +88,18 @@ def test_sources_are_listed_in_the_order_added(bus: EventBus) -> None:
         MediaSourcesChanged(second),
         MediaSourcesChanged(),
     ]
+
+
+def test_a_source_is_replaced_in_its_place(bus: EventBus) -> None:
+    events: list[MediaSourcesChanged] = []
+    bus.subscribe(MediaSourcesChanged, events.append)
+    sources = MediaSources(bus)
+    first, second, edited, new = Source(), Source(), Source(), Source()
+    sources.add(first)
+    sources.add(second)
+    events.clear()
+    sources.replace(first, edited)
+    assert list(sources) == [edited, second]
+    sources.replace(first, new)  # not there (any more): added at the end
+    assert list(sources) == [edited, second, new]
+    assert events == [MediaSourcesChanged(), MediaSourcesChanged()]

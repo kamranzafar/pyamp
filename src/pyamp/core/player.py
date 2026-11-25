@@ -44,6 +44,7 @@ from pyamp.core.events import (
     ReplayGainChanged,
     StreamTitleChanged,
     TrackChanged,
+    Unsubscribe,
     VolumeChanged,
 )
 from pyamp.core.models import Location, PlaybackState, RepeatMode, ReplayGainMode, Track
@@ -85,7 +86,7 @@ class Player:
         self._stream_title = ""
         self._live = False
         self._audio_info = AudioInfoChanged(0, 0)
-        self._resolver: LocationResolver | None = None
+        self._resolvers: list[LocationResolver] = []
         # What the backend was given -> the playlist location it stands for, so a gapless
         # backend reporting the location it moved on to can be matched to the playlist.
         self._resolved: dict[Location, Location] = {}
@@ -271,21 +272,33 @@ class Player:
         self._backend.stop()
         self._backend.close()
 
-    def set_location_resolver(self, resolver: LocationResolver | None) -> None:
-        """Have ``resolver`` rewrite each location just before the backend gets it.
+    def add_location_resolver(self, resolver: LocationResolver) -> Unsubscribe:
+        """Have ``resolver`` rewrite locations just before the backend gets them. Returns a
+        function that undoes it.
 
-        Playlists keep the plain location; the resolver can add what shouldn't be saved,
-        such as a media server's login. Applies from the next track loaded.
+        Playlists keep the plain location; a resolver can add what shouldn't be saved,
+        such as a media server's login. It returns locations that aren't its own as they
+        are; the first resolver to change a location wins. Applies from the next track
+        loaded.
         """
-        self._resolver = resolver
+        self._resolvers.append(resolver)
+
+        def remove() -> None:
+            if resolver in self._resolvers:
+                self._resolvers.remove(resolver)
+
+        return remove
 
     def _resolve(self, location: Location) -> Location:
         resolved = location
-        if self._resolver is not None:
+        for resolver in tuple(self._resolvers):
             try:
-                resolved = self._resolver(location)
+                resolved = resolver(location)
             except Exception:
-                log.exception("Location resolver failed for %s; playing it as is", location)
+                log.exception("Location resolver failed for %s; trying the others", location)
+                continue
+            if resolved != location:
+                break
         self._resolved[resolved] = location
         return resolved
 

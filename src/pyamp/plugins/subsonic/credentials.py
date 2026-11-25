@@ -17,7 +17,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
-"""Which Subsonic server to use, and its password (kept in the system keychain)."""
+"""Which Subsonic servers to use, and their passwords (kept in the system keychain)."""
 
 from __future__ import annotations
 
@@ -49,8 +49,14 @@ class Account:
 
 
 class AccountStore:
-    """The server and username in ``subsonic.json`` (no secrets), the password in the
-    system keychain: macOS Keychain, Windows Credential Manager or Secret Service."""
+    """The servers and usernames in ``subsonic.json`` (no secrets), in the order they were
+    added; the passwords in the system keychain: macOS Keychain, Windows Credential
+    Manager or Secret Service.
+
+    The file is ``{"servers": [{"server", "username", "remember_password"}, ...]}``. One
+    written by an earlier PyAmp, with a single server's fields at the top, is read as a
+    list of that one server.
+    """
 
     def __init__(self, directory: Path | None = None) -> None:
         self.directory = directory or Path(platformdirs.user_config_dir(APP_NAME.lower()))
@@ -59,22 +65,56 @@ class AccountStore:
     def file(self) -> Path:
         return self.directory / "subsonic.json"
 
-    def load(self) -> Account | None:
+    def accounts(self) -> list[Account]:
+        return [account for account, _ in self._entries()]
+
+    def remembers_password(self, account: Account) -> bool:
+        """Whether the user chose to keep the account's password in the keychain (the
+        default, also for an account not added yet)."""
+        return next((r for a, r in self._entries() if a == account), True)
+
+    def put(
+        self,
+        account: Account,
+        *,
+        remember_password: bool = True,
+        replacing: Account | None = None,
+    ) -> None:
+        """Add ``account``, or update it where it (or ``replacing``, an account it was
+        edited from) is, keeping the order."""
+        entries = self._entries()
+        replaced = (account, replacing)
+        position = next((i for i, (a, _) in enumerate(entries) if a in replaced), len(entries))
+        entries = [entry for entry in entries if entry[0] not in replaced]
+        entries.insert(position, (account, remember_password))
+        self._write(entries)
+
+    def remove(self, account: Account) -> None:
+        """Forget the account (its keychain password is left to the caller)."""
+        self._write([entry for entry in self._entries() if entry[0] != account])
+
+    def _entries(self) -> list[tuple[Account, bool]]:
         raw = self._read()
-        try:
-            return Account(server=str(raw["server"]), username=str(raw["username"]))
-        except KeyError:
-            return None
+        servers = raw.get("servers", [raw] if "server" in raw else [])
+        if not isinstance(servers, list):
+            log.warning("Ignoring unreadable Subsonic settings %s", self.file)
+            return []
+        entries: list[tuple[Account, bool]] = []
+        for server in servers:
+            try:
+                account = Account(server=str(server["server"]), username=str(server["username"]))
+            except (KeyError, TypeError):
+                log.warning("Ignoring an unreadable server in %s", self.file)
+                continue
+            if account not in (a for a, _ in entries):
+                entries.append((account, server.get("remember_password") is not False))
+        return entries
 
-    def remembers_password(self) -> bool:
-        """Whether the user chose to keep the password in the keychain (the default)."""
-        return self._read().get("remember_password") is not False
-
-    def save(self, account: Account, *, remember_password: bool = True) -> None:
+    def _write(self, entries: list[tuple[Account, bool]]) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
-        payload = {**asdict(account), "remember_password": remember_password}
+        servers = [{**asdict(a), "remember_password": remember} for a, remember in entries]
         tmp = self.file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps({"servers": servers}, indent=2), encoding="utf-8")
         tmp.replace(self.file)
 
     def _read(self) -> dict[str, object]:

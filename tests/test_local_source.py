@@ -90,6 +90,7 @@ def test_folders_can_be_removed(source: LocalSource, removed: list[Path], tmp_pa
     artists, _, _, folders = source.roots()
     assert source.actions(source.children(artists)[0]) == []
     assert source.actions(folders) == []
+    assert source.actions(None) == []  # nothing for the whole library
     (folder,) = source.children(folders)
     (remove,) = source.actions(folder)
     assert remove.text == "&Remove from Library"

@@ -25,9 +25,9 @@ from collections.abc import Iterator
 
 import pytest
 
-from pyamp.library.sources import Node, SourceError
+from pyamp.library.sources import Node, NodeAction, SourceError
 from pyamp.plugins.subsonic.client import SubsonicClient
-from pyamp.plugins.subsonic.source import ALBUM, ARTISTS, PLAYLISTS, SubsonicSource
+from pyamp.plugins.subsonic.source import ALBUM, ARTISTS, PLAYLISTS, SIGN_IN, SubsonicSource
 from tests.subsonic_server import PASSWORD, USERNAME, SubsonicServer
 
 
@@ -39,7 +39,7 @@ def server() -> Iterator[SubsonicServer]:
 
 @pytest.fixture
 def source(server: SubsonicServer) -> SubsonicSource:
-    return SubsonicSource(SubsonicClient(server.url, USERNAME, PASSWORD))
+    return SubsonicSource(SubsonicClient(server.url, USERNAME, PASSWORD), "Subsonic")
 
 
 def test_artists_albums_and_playlists(source: SubsonicSource) -> None:
@@ -76,7 +76,7 @@ def test_nodes_from_elsewhere_have_nothing(source: SubsonicSource) -> None:
 
 
 def test_server_errors_become_messages(server: SubsonicServer) -> None:
-    source = SubsonicSource(SubsonicClient(server.url, USERNAME, "wrong"))
+    source = SubsonicSource(SubsonicClient(server.url, USERNAME, "wrong"), "Subsonic")
     with pytest.raises(SourceError, match="Wrong username or password"):
         source.children(Node((ARTISTS, ""), "Artists"))
     assert source.tracks(Node((PLAYLISTS, ""), "x")) == []  # not asked: nothing to list
@@ -85,6 +85,27 @@ def test_server_errors_become_messages(server: SubsonicServer) -> None:
 
 
 def test_an_unreachable_server_is_a_message(server: SubsonicServer) -> None:
-    source = SubsonicSource(SubsonicClient("http://127.0.0.1:9", USERNAME, PASSWORD, timeout=2))
+    client = SubsonicClient("http://127.0.0.1:9", USERNAME, PASSWORD, timeout=2)
+    source = SubsonicSource(client, "Subsonic")
     with pytest.raises(SourceError, match="Could not reach the server"):
         source.tracks(None, "anything")
+
+
+def test_the_servers_own_commands_are_on_its_name(server: SubsonicServer) -> None:
+    remove = NodeAction("&Remove Server", lambda: None)
+    source = SubsonicSource(SubsonicClient(server.url, USERNAME, PASSWORD), "S", [remove])
+    assert source.actions(None) == [remove]
+    assert source.actions(source.roots()[0]) == []  # nothing for its artists or albums
+
+
+def test_a_server_not_signed_in_asks_to_sign_in() -> None:
+    sign_in = NodeAction("Sign &In…", lambda: None)
+    source = SubsonicSource(None, "Subsonic — music.example", [sign_in])
+    assert source.roots() == []
+    assert source.hint == SIGN_IN
+    assert source.tracks(None) == []  # picking it: the hint
+    with pytest.raises(SourceError, match="Sign In"):
+        source.tracks(None, "tear")
+    with pytest.raises(SourceError, match="Sign In"):
+        source.children(Node((ARTISTS, ""), "Artists"))
+    assert source.actions(None) == [sign_in]

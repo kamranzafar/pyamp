@@ -125,3 +125,4 @@ def test_playlist_commands(source: PlaylistsSource, commands: list[tuple[str, st
     for action in actions:
         action.run()
     assert commands == [("open", "Mix"), ("rename", "Mix"), ("delete", "Mix")]
+    assert source.actions(None) == []  # nothing for the whole list

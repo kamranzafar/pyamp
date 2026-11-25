@@ -87,7 +87,9 @@ class PlaylistsSource:
             tracks.append(in_library or entry_track(entry))
         return [track for track in tracks if matches(track, search)]
 
-    def actions(self, node: Node) -> list[NodeAction]:
+    def actions(self, node: Node | None) -> list[NodeAction]:
+        if node is None:
+            return []
         name = str(node.key)
         return [
             NodeAction("&Open in Player", lambda: self._open(name)),

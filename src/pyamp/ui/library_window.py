@@ -489,16 +489,19 @@ class LibraryWindow(QDialog):
 
     def sidebar_menu(self, item: QTreeWidgetItem | None) -> QMenu | None:
         """The menu for a right-click in the sidebar: Add to Playlist, if the item has tracks,
-        and its source's commands for it (e.g. removing a folder)."""
-        node = item.data(0, _NODE) if item is not None else None
-        if item is None or not isinstance(node, Node):
+        and its source's commands for it (e.g. removing a folder, or on a source's name,
+        removing a server)."""
+        source: MediaSource | None = item.data(0, _SOURCE) if item is not None else None
+        if item is None or source is None:  # nothing, or a "Loading…" placeholder
             return None
-        source: MediaSource = item.data(0, _SOURCE)
+        data = item.data(0, _NODE)
+        node = data if isinstance(data, Node) else None
         actions = source.actions(node)
-        if not actions and not node.has_tracks:
+        has_tracks = node is not None and node.has_tracks
+        if not actions and not has_tracks:
             return None
         menu = QMenu(self)
-        if node.has_tracks:
+        if has_tracks:
             self._playlist_menu(menu, lambda playlist: self.add_node(item, playlist))
             if actions:
                 menu.addSeparator()

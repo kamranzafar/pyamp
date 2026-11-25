@@ -40,9 +40,9 @@ PASSWORD = "s3cret"
 
 SONGS = [
     {"id": "s1", "title": "Teardrop", "artist": "Massive Attack", "album": "Mezzanine",
-     "duration": 330, "track": 1},
+     "duration": 330, "track": 1, "discNumber": 1, "year": 1998, "genre": "Trip Hop"},
     {"id": "s2", "title": "Angel", "artist": "Massive Attack", "album": "Mezzanine",
-     "duration": 379, "track": 2},
+     "duration": 379, "track": 2, "discNumber": 1},
 ]  # fmt: skip
 ALBUM = {"id": "al1", "name": "Mezzanine", "artist": "Massive Attack", "year": 1998}
 ARTIST = {"id": "ar1", "name": "Massive Attack", "albumCount": 1}

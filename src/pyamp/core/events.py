@@ -133,6 +133,19 @@ class PlaylistChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class LibraryChanged:
+    """The media library's tracks or folders changed (e.g. a scan finished)."""
+
+
+@dataclass(frozen=True, slots=True)
+class MediaSourcesChanged:
+    """A media source was added or removed (``source`` None), or ``source``'s contents
+    changed. The source is a :class:`pyamp.library.sources.MediaSource`."""
+
+    source: object | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SavedPlaylistsChanged:
     """The saved playlists, or which one is open, changed."""
 

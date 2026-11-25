@@ -40,9 +40,9 @@ from PySide6.QtCore import QObject, QThreadPool, QTimer
 
 from pyamp.config import Settings
 from pyamp.core.events import EventBus, PlaylistChanged, SavedPlaylistsChanged
-from pyamp.core.models import Track
+from pyamp.core.models import Location, Track
 from pyamp.core.playlist import Playlist
-from pyamp.library.saved_playlists import SavedPlaylists
+from pyamp.library.saved_playlists import SavedPlaylists, entry_track
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
 
 log = logging.getLogger(__name__)
@@ -151,16 +151,65 @@ class PlaylistSession(QObject):
         self._open(name)
         return name
 
-    def rename(self, new_name: str) -> str:
-        """Rename the open playlist. Raises PlaylistNameError with a user-facing message."""
-        assert self._active is not None
-        self.save_now()
-        self._active = self._saved.rename(self._active, new_name)
-        self._remember()
-        return self._active
+    def open_tracks(self, name: str, tracks: Sequence[Track]) -> None:
+        """Open the playlist ``name`` (creating it) with ``tracks`` in place of its own.
 
-    def delete(self) -> None:
-        """Delete the open playlist and open a neighbour (or a fresh "Default")."""
+        How the library plays tracks without changing the user's other playlists.
+        """
+        self.save_now()
+        self._loader.cancel_all()
+        if not self._saved.exists(name):
+            self._saved.create(name)
+        self._active = next(n for n in self._saved.names() if n.casefold() == name.casefold())
+        self._loading = None
+        self._playlist.replace(tracks)  # saved by the auto-save this starts
+        self._remember()
+
+    def create(self, base: str) -> str:
+        """Make an empty playlist named ``base`` (or "base 2", ...), without opening it."""
+        name = self._saved.create(base)
+        self._announce()
+        return name
+
+    def add_to(self, name: str, tracks: Sequence[Track]) -> int:
+        """Add ``tracks`` to the playlist ``name``, skipping those already in it (and
+        repeats); returns how many were added. The open playlist changes in place."""
+        if self._is_open(name):
+            new = _not_in(tracks, {track.location for track in self._playlist})
+            self._playlist.add(new)
+            self.save_now()
+        else:
+            self.wait_for_saves()  # so this read and write come after any auto-save
+            entries = self._saved.entries(name)
+            new = _not_in(tracks, {entry.location for entry in entries})
+            if new:
+                self._saved.save(name, [*map(entry_track, entries), *new])
+        if new:
+            self._announce()
+        return len(new)
+
+    def rename(self, new_name: str, old: str | None = None) -> str:
+        """Rename a playlist (the open one by default). Raises PlaylistNameError with a
+        user-facing message."""
+        old = old or self._active
+        assert old is not None
+        self.save_now()
+        renamed = self._saved.rename(old, new_name)
+        if self._is_open(old):
+            self._active = renamed
+            self._remember()
+        else:
+            self._announce()
+        return renamed
+
+    def delete(self, name: str | None = None) -> None:
+        """Delete a playlist (the open one by default). Deleting the open one opens a
+        neighbour (or a fresh "Default")."""
+        if name is not None and not self._is_open(name):
+            self.wait_for_saves()
+            self._saved.delete(name)
+            self._announce()
+            return
         assert self._active is not None
         names = self._saved.names()
         index = next(i for i, n in enumerate(names) if n.casefold() == self._active.casefold())
@@ -186,7 +235,14 @@ class PlaylistSession(QObject):
     def _remember(self) -> None:
         assert self._active is not None
         self._settings.active_playlist = self._active
-        self._bus.publish(SavedPlaylistsChanged(tuple(self._saved.names()), self._active))
+        self._announce()
+
+    def _announce(self) -> None:
+        if self._active is not None:
+            self._bus.publish(SavedPlaylistsChanged(tuple(self._saved.names()), self._active))
+
+    def _is_open(self, name: str) -> bool:
+        return self._active is not None and name.casefold() == self._active.casefold()
 
     def _create_default(self) -> None:
         """First run: keep the single playlist of earlier versions as "Default"."""
@@ -205,3 +261,13 @@ class PlaylistSession(QObject):
     def _on_job_finished(self, job: LoadJob) -> None:
         if job is self._loading:
             self._loading = None
+
+
+def _not_in(tracks: Sequence[Track], present: set[Location]) -> list[Track]:
+    """``tracks`` that aren't in ``present``, each once."""
+    new: list[Track] = []
+    for track in tracks:
+        if track.location not in present:
+            present.add(track.location)
+            new.append(track)
+    return new

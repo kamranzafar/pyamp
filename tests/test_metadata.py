@@ -32,13 +32,13 @@ import pytest
 from mutagen._vorbis import VCommentDict
 from mutagen.aiff import AIFF
 from mutagen.asf import ASFTags, ASFUnicodeAttribute  # type: ignore[attr-defined]
-from mutagen.id3 import RVA2, TALB, TIT2, TPE1, TXXX
+from mutagen.id3 import RVA2, TALB, TCON, TDRC, TIT2, TPE1, TPE2, TPOS, TRCK, TXXX
 from mutagen.mp4 import MP4FreeForm, MP4Tags
 from mutagen.oggopus import OggOpus
 from mutagen.wave import WAVE
 
 from pyamp.core.models import ReplayGain, Track
-from pyamp.library.metadata import MutagenMetadataReader, is_audio_file
+from pyamp.library.metadata import MutagenMetadataReader, audio_files, is_audio_file
 
 reader = MutagenMetadataReader()
 
@@ -85,6 +85,18 @@ def fake_mutagen_file(monkeypatch: pytest.MonkeyPatch, result: Any) -> None:
 )
 def test_is_audio_file(name: str, expected: bool) -> None:
     assert is_audio_file(Path(name)) is expected
+
+
+def test_audio_files_are_found_in_subfolders_in_order(tmp_path: Path) -> None:
+    for name in ("b/2.mp3", "b/1.flac", "a.ogg", "notes.txt", "c/cover.jpg"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).touch()
+    (tmp_path / "folder.mp3").mkdir()  # a folder, despite its name
+    assert audio_files(tmp_path) == [
+        tmp_path / "a.ogg",
+        tmp_path / "b/1.flac",
+        tmp_path / "b/2.mp3",
+    ]
 
 
 def test_untagged_wav_uses_file_name_and_real_duration(tmp_path: Path) -> None:
@@ -287,3 +299,85 @@ def test_junk_gain_values_are_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     tags = {"replaygain_track_gain": ["loud"], "replaygain_track_peak": [""]}
     fake_mutagen_file(monkeypatch, SimpleNamespace(tags=tags))
     assert reader.read(Path("/m/f.flac")).replay_gain is None
+
+
+# -- Album artist, genre, year, track and disc numbers ------------------------------- #
+
+ALBUM_FIELDS = {
+    "album_artist": "Various Artists",
+    "genre": "Trip Hop",
+    "year": 1998,
+    "track_number": 3,
+    "disc_number": 2,
+}
+
+
+def album_fields(track: Track) -> dict[str, object]:
+    return {name: getattr(track, name) for name in ALBUM_FIELDS}
+
+
+def test_id3_album_fields(tmp_path: Path) -> None:
+    path = write_wav(tmp_path / "album.wav")
+    add_frames(
+        path,
+        WAVE,
+        TPE2(encoding=3, text="Various Artists"),
+        TCON(encoding=3, text="Trip Hop"),
+        TDRC(encoding=3, text="1998-04-20"),
+        TRCK(encoding=3, text="3/11"),
+        TPOS(encoding=3, text="2/2"),
+    )
+    assert album_fields(reader.read(path)) == ALBUM_FIELDS
+
+
+def test_id3v1_genre_numbers_become_names(tmp_path: Path) -> None:
+    path = write_wav(tmp_path / "genre.wav")
+    add_frames(path, WAVE, TCON(encoding=3, text="(17)"))
+    assert reader.read(path).genre == "Rock"
+
+
+def test_mp4_album_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    tags = MP4Tags()
+    tags["aART"] = ["Various Artists"]
+    tags["\xa9gen"] = ["Trip Hop"]
+    tags["\xa9day"] = ["1998-04-20T07:00:00Z"]
+    tags["trkn"] = [(3, 11)]
+    tags["disk"] = [(2, 2)]
+    fake_mutagen_file(monkeypatch, SimpleNamespace(tags=tags, info=None))
+    assert album_fields(reader.read(Path("/m/song.m4a"))) == ALBUM_FIELDS
+
+
+def test_asf_album_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    tags = ASFTags()
+    tags["WM/AlbumArtist"] = [ASFUnicodeAttribute("Various Artists")]
+    tags["WM/Genre"] = [ASFUnicodeAttribute("Trip Hop")]
+    tags["WM/Year"] = [ASFUnicodeAttribute("1998")]
+    tags["WM/TrackNumber"] = [ASFUnicodeAttribute("3")]
+    tags["WM/PartOfSet"] = [ASFUnicodeAttribute("2/2")]
+    fake_mutagen_file(monkeypatch, SimpleNamespace(tags=tags, info=None))
+    assert album_fields(reader.read(Path("/m/song.wma"))) == ALBUM_FIELDS
+
+
+@pytest.mark.parametrize("album_artist_key", ["ALBUMARTIST", "ALBUM ARTIST"])
+def test_vorbis_album_fields(monkeypatch: pytest.MonkeyPatch, album_artist_key: str) -> None:
+    tags = VCommentDict()
+    tags[album_artist_key] = ["Various Artists"]
+    tags["GENRE"] = ["Trip Hop"]
+    tags["DATE"] = ["1998"]
+    tags["TRACKNUMBER"] = ["03"]
+    tags["DISCNUMBER"] = ["2"]
+    fake_mutagen_file(monkeypatch, SimpleNamespace(tags=tags, info=None))
+    assert album_fields(reader.read(Path("/m/song.flac"))) == ALBUM_FIELDS
+
+
+@pytest.mark.parametrize(
+    ("raw", "year", "number"),
+    [("", 0, 0), ("unknown", 0, 0), ("c. 1975", 1975, 0), ("20030", 0, 20030), (" 7 ", 0, 7)],
+)
+def test_years_and_numbers_are_parsed_leniently(
+    monkeypatch: pytest.MonkeyPatch, raw: str, year: int, number: int
+) -> None:
+    tags = {"date": [raw], "tracknumber": [raw]}
+    fake_mutagen_file(monkeypatch, SimpleNamespace(tags=tags, info=None))
+    track = reader.read(Path("/m/f.flac"))
+    assert (track.year, track.track_number) == (year, number)

@@ -106,15 +106,51 @@ Editing the open playlist:
 | `Delete` | Remove the selected tracks |
 | Right-click | All of the above |
 
+### Library
+
+**Library → Show Library** (`Alt+L`) opens a window with all your music, browsable by
+artist, album, genre and folder, with a search box. Add music with **Add Folder…** or
+**Add Files…** (in the window or the Library menu). Tags are read once, in the
+background, at low priority, so the music keeps playing while a large folder is
+scanned. PyAmp checks for new, changed and deleted files a few seconds after it
+starts, and when you click **Rescan**. Only files that changed are read again.
+
+- Double-click a track (or press Enter) to play the tracks shown, starting there. They
+  play in a playlist called **Library**, so your other playlists stay as they are.
+- **Add to Playlist ▸** (right-click) adds the selected tracks to any saved playlist,
+  or to a **New Playlist…**. Right-click an artist, album or genre in the sidebar to
+  add all of it (a new playlist is named after it). Tracks already in the playlist are
+  skipped. Local files can also be dragged into the open playlist.
+- **Playlists**, in the sidebar, lists your saved playlists. Pick one to see its tracks
+  (with the library's tags; no music files are read); right-click it to open it in the
+  player, rename it or delete it.
+- Right-click a folder under **Folders** to remove it from the library. The files stay
+  where they are: PyAmp only reads your music files, and never retags, renames or
+  moves them.
+
+If a folder isn't there when PyAmp scans (e.g. on a drive that isn't connected), its
+tracks are kept until it's back. The library is a single `library.sqlite3` file in
+PyAmp's data folder.
+
+The library window also shows music from elsewhere, each in its own part of the
+sidebar under **This Computer**: a [Subsonic server](#subsonic-servers), for one, and
+sources added by plugins. They're browsed, searched and played the same way, and a
+slow or unreachable server never holds up the window. Picking a server's name
+searches the whole server.
+
 ### Audio backends
 
 | Backend | Default | Gapless | Equaliser | Visualiser | Needs |
 |---|---|---|---|---|---|
-| `qt` (QtMultimedia) | yes | no | no | yes | nothing extra |
-| `mpv` (libmpv) | | **yes** | **yes** | yes (analysed) | `brew install mpv` or `apt install libmpv2` |
+| `mpv` (libmpv) | yes | **yes** | **yes** | yes (analysed) | `brew install mpv` or `apt install libmpv2` |
+| `qt` (QtMultimedia) | fallback | no | no | yes | nothing extra |
+
+Choose one in **View → Audio Backend**; the one playing now is marked "(in use)".
+The choice is saved and takes effect the next time PyAmp starts. From the command
+line:
 
 ```bash
-uv run pyamp --backend mpv   # remembered for next time; --backend qt switches back
+uv run pyamp --backend qt   # remembered for next time; --backend mpv switches back
 ```
 
 mpv plays more formats and moves between tracks without a gap. It doesn't expose
@@ -123,7 +159,7 @@ silently and in the background (Qt's decoder on a low-priority thread, much fast
 than real time), and shows the analysed levels for mpv's current position. That
 costs a short burst of CPU when a track starts and almost nothing while it plays;
 the bars also show the equaliser's curve. If libmpv isn't
-installed, PyAmp warns and uses `qt`.
+installed, PyAmp warns and plays through `qt`, trying mpv again on the next start.
 
 #### Using a libmpv that isn't installed system-wide
 
@@ -201,15 +237,18 @@ backend's visualiser works for both.
 
 PyAmp can play your own music library from a Subsonic-compatible server: Navidrome,
 Airsonic(-Advanced), Gonic and others. **Library → Subsonic Server…** asks for the
-server's address, your username and password, and checks them. **Library → Subsonic
-Browser…** (`Ctrl+B`) then lists your artists, their albums and your playlists, and
-searches the library; **Add** puts the selected songs (or all of them) in the playlist,
-**Play** (or a double-click) also starts them.
+server's address, your username and password, and checks them. The server then
+appears in the [library window](#library), below This Computer, with its artists,
+their albums and your playlists. Click an artist to see its albums and all its songs;
+pick the server itself to search it. Songs play and
+are added to playlists like local tracks.
 
 Songs are added with their tags and length, so they show like local files and can be
 seeked. The password is kept in the system keychain (macOS Keychain, Windows Credential
-Manager or Secret Service on Linux), never in a file; without a keychain PyAmp asks
-for it each session. Saved playlists keep the server's songs without your login (PyAmp
+Manager or Secret Service on Linux), never in a file. Untick **Remember the password**
+(or have no keychain) and PyAmp keeps it only until it quits, doesn't touch the
+keychain, and asks again next session (Library → Subsonic Server…); the choice is
+remembered. Saved playlists keep the server's songs without your login (PyAmp
 adds it as each one plays), so they're safe to share or back up.
 
 ### Media keys and system controls
@@ -235,7 +274,8 @@ Like other music players, **closing the window doesn't stop PyAmp**: the window
 hides and the music keeps playing. Bring it back with the Dock icon (macOS) or the
 menu bar/tray icon. **Quit** (⌘Q, File → Quit, the icon's menu or the Dock) ends it.
 
-Two settings in the **View** menu:
+Two settings in the **View** menu (which also has **Audio Backend**, see
+[Audio backends](#audio-backends)):
 
 - **Show Icon in Menu Bar** (on by default).
 - **Keep Running When Window Is Closed** (on by default; turn it off to have
@@ -304,6 +344,11 @@ src/pyamp/
 │   ├── metadata.py     Tag reading via mutagen
 │   ├── playlist_formats.py  M3U / PLS read & write
 │   ├── saved_playlists.py   Named playlists stored as .m3u8 files
+│   ├── catalog.py      Media library index (SQLite): added folders/files and their tags
+│   ├── scanner.py      Brings the index up to date, re-reading only changed files
+│   ├── sources.py      MediaSource: what the library window browses (local or a server)
+│   ├── local_source.py The local library as a source
+│   ├── playlists_source.py  The saved playlists as a source
 │   ├── remote.py       Downloads remote playlists (a station's .pls)
 │   └── loader.py       Files/folders/playlists/streams → Tracks
 ├── media_session/      OS media controls (used by the media-session plugin)
@@ -312,13 +357,17 @@ src/pyamp/
 │   ├── windows.py      System Media Transport Controls (pywinrt)
 │   └── mpris.py        MPRIS over D-Bus (jeepney), served on the Qt main thread
 ├── plugins/            Entry-point based plugin system, now-playing log, media session
-│   └── subsonic/       Subsonic client, keychain account store, server and browser windows
+│   └── subsonic/       Subsonic client and library source, keychain account store, server dialog
 └── ui/                 PySide6 front-end
     ├── skin.py         All colours in one place (seam for .wsz skins)
     ├── actions.py      Playback commands as QActions
     ├── equalizer_window.py  The equaliser window
     ├── background_loader.py  Non-blocking track loading (worker thread)
     ├── playlist_session.py   Which saved playlist is open; auto-save
+    ├── library_scan.py       Library scans on a low-priority worker thread
+    ├── background_calls.py   Slow calls (sources, servers) on worker threads
+    ├── library_window.py     The library window: browse, search, play
+    ├── library_model.py      Library tracks → sortable, draggable table model
     ├── jump_dialog.py        Jump to Track (J)
     ├── about_dialog.py       Help → About: version, licence, notices
     ├── menu_bar.py           Menu bar / system tray icon and its menu
@@ -345,9 +394,9 @@ That is why the whole player can be tested with a `FakeBackend` (see
 |---|---|---|
 | **Observer** | `core/events.py` | Player/playlist publish events; UI, DSP and plugins subscribe. No back-references. |
 | **Facade** | `core/player.py` | One simple API over playlist + backend for UI, shortcuts and plugins. |
-| **Adapter** | `audio/qt_backend.py`, `audio/mpv_backend.py`, `ui/playlist_model.py`, `media_session/macos.py`, `media_session/mpris.py` | Wrap third-party APIs (QtMultimedia, Qt model/view) behind our own interfaces. |
+| **Adapter** | `audio/qt_backend.py`, `audio/mpv_backend.py`, `ui/playlist_model.py`, `media_session/macos.py`, `media_session/mpris.py`, `library/local_source.py`, `plugins/subsonic/source.py` | Wrap third-party APIs (QtMultimedia, Qt model/view, a Subsonic server) behind our own interfaces. |
 | **Strategy** | `core/play_order.py`, `library/playlist_formats.py` | Swap play order or file format without touching callers. |
-| **Factory / Registry** | `audio/registry.py`, `PlaylistFormatRegistry` | Choose implementations by name/extension; lazy imports keep optional deps optional. |
+| **Factory / Registry** | `audio/registry.py`, `PlaylistFormatRegistry`, `library/sources.py` (`MediaSources`) | Choose implementations by name/extension; lazy imports keep optional deps optional. |
 | **Command** | `ui/actions.py` | One `QAction` drives the button, menu item and shortcut. |
 | **Null Object** | `audio/backend.py` (`_NullListener`) | Backends never need `if listener is not None`. |
 | **Dependency Injection** | `app.py` | Everything receives collaborators via constructors; only `app.py` knows concrete classes. |
@@ -373,6 +422,25 @@ the playlist files (switching, renaming, deleting, quitting) waits for it first.
 
 The visualiser only works while the window can be seen: hiding or minimising it pauses
 the FFT and, on the `mpv` backend, the second decoding of the playing file.
+
+The media library is scanned the same way by `ui/library_scan.py`: one scan at a time
+on its own worker thread. The index (`library/catalog.py`) is one SQLite connection
+guarded by a lock, so the scanner fills it while the window reads it. The scanner
+writes in batches and can be cancelled (asking for a scan while one runs restarts
+it); a cancelled scan keeps what it read and forgets nothing, and tracks of a folder
+that isn't there (an unplugged drive) are kept until it's back. `LibraryChanged` is
+published on the main thread when a scan has changed something.
+
+Both worker threads run at low priority, so reading tags never competes with
+playback or the window. The audio itself is decoded and played on the backends' own
+native threads (libmpv's or QtMultimedia's), outside Python.
+
+The library window asks its sources for nodes and tracks through
+`ui/background_calls.py`, on worker threads, so a slow server never freezes it. Each
+source has its own two threads, so a slow or unreachable server only ever delays
+itself, never This Computer or another server. Replies
+come back on the main thread; a reply for something the user has since moved away
+from, or for a part of the sidebar that has been rebuilt, is dropped.
 
 libmpv reports events on its own thread. `audio/mpv_backend.py` only records
 state there and emits signals on a main-thread `QObject`, so the player never
@@ -405,12 +473,20 @@ my-scrobbler = "my_package:MyScrobbler"
 ```
 
 `ctx.ui()` gives plugins with windows a place in the menu bar
-(`add_menu_action("&Library", "My Window…", show)`) and a parent for their windows, and
+(`add_menu_action("&Tools", "My Window…", show)` adds a menu before Help; items for
+`"&Library"` join PyAmp's own Library menu) and a parent for their windows, and
 `ctx.player.set_location_resolver()` lets one rewrite what the player loads (the Subsonic
 plugin adds its login there).
 
+A plugin that brings music from somewhere else (a server, a service) adds a
+`MediaSource` (`library/sources.py`) with `ctx.sources.add(source)`, and the library
+window shows it under This Computer. A source lists nodes to browse (`roots()`,
+`children(node)`) and their tracks (`tracks(node, search)`); it keeps its own index,
+and is called on a worker thread, so it may block on the network. Raise `SourceError`
+with a message for the user when something goes wrong.
+
 See `src/pyamp/plugins/now_playing.py` for a small example, and `plugins/subsonic/` for
-one with windows.
+one with a source and a dialog.
 
 ## Roadmap
 

@@ -32,8 +32,8 @@ from pathlib import Path
 import platformdirs
 
 from pyamp import APP_NAME
-from pyamp.core.models import Location, Track
-from pyamp.library.playlist_formats import M3UFormat
+from pyamp.core.models import Location, StreamUrl, Track
+from pyamp.library.playlist_formats import M3UFormat, PlaylistEntry
 
 SUFFIX = ".m3u8"
 MAX_NAME_LENGTH = 100
@@ -89,6 +89,14 @@ def validate_name(name: str) -> str:
     return name
 
 
+def entry_track(entry: PlaylistEntry) -> Track:
+    """A track from what a playlist says about it (no tags are read)."""
+    location = entry.location
+    if isinstance(location, StreamUrl):
+        return Track.for_stream(location, entry.title, entry.duration_ms)
+    return Track(location, entry.title or location.stem, duration_ms=entry.duration_ms)
+
+
 class SavedPlaylists:
     """The playlists in one directory. Names compare case-insensitively."""
 
@@ -127,10 +135,14 @@ class SavedPlaylists:
         retry_while_locked(lambda: tmp.replace(target))
 
     def read_paths(self, name: str) -> list[Location]:
+        return [entry.location for entry in self.entries(name)]
+
+    def entries(self, name: str) -> list[PlaylistEntry]:
+        """What the playlist lists, with the titles and lengths it gives them."""
         found = self._find(name)
         if found is None:
             raise FileNotFoundError(f"no saved playlist {name!r}")
-        return [entry.location for entry in self._format.read(found)]
+        return self._format.read(found)
 
     def rename(self, old: str, new: str) -> str:
         source = self._find(old)

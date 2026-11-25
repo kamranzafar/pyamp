@@ -158,6 +158,12 @@ class Track:
     title: str
     artist: str = ""
     album: str = ""
+    album_artist: str = ""
+    genre: str = ""
+    #: 0 when unknown, as for the numbers below.
+    year: int = 0
+    track_number: int = 0
+    disc_number: int = 0
     duration_ms: int = 0
     replay_gain: ReplayGain | None = None
 

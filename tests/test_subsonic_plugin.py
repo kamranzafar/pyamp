@@ -28,16 +28,18 @@ import keyring
 import pytest
 from keyring.backend import KeyringBackend
 from keyring.backends.fail import Keyring as FailKeyring
-from PySide6.QtWidgets import QDialog, QMenu, QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import QDialog, QMenu
 
 from pyamp.app import Application
 from pyamp.core.models import StreamUrl
 from pyamp.plugins.subsonic import SubsonicPlugin
 from pyamp.plugins.subsonic.credentials import KEYRING_SERVICE, Account, AccountStore
+from pyamp.plugins.subsonic.source import ALBUM, ARTIST, ARTISTS, PLAYLIST, PLAYLISTS
 from pyamp.plugins.subsonic.ui import ServerDialog
 from tests.conftest import FakeBackend
 from tests.subsonic_server import PASSWORD, USERNAME, SubsonicServer
 from tests.test_background_loader import wait_until
+from tests.test_library_window import click, item, labels, pick, settle, titles
 from tests.test_playlist_ui import app  # noqa: F401  (fixture: the real app, offscreen)
 
 
@@ -47,8 +49,10 @@ class MemoryKeyring(KeyringBackend):
     def __init__(self) -> None:
         super().__init__()
         self.passwords: dict[tuple[str, str], str] = {}
+        self.reads = 0  # each can make the system ask for permission
 
     def get_password(self, service: str, username: str) -> str | None:
+        self.reads += 1
         return self.passwords.get((service, username))
 
     def set_password(self, service: str, username: str, password: str) -> None:
@@ -100,6 +104,7 @@ def answer_dialog(
 
     def run(dialog: ServerDialog) -> int:
         shown.append(dialog)
+        dialog.remember_at_first = dialog.remember.isChecked()  # type: ignore[attr-defined]
         dialog.server.setText(server)
         dialog.username.setText(USERNAME)
         dialog.password.setText(password)
@@ -121,7 +126,11 @@ def test_adds_its_menu_and_waits_to_be_set_up(
     assert plugin.client is None
     menu = next(a.menu() for a in app.window.menuBar().actions() if a.text() == "&Library")
     assert isinstance(menu, QMenu)
-    assert [a.text() for a in menu.actions()] == ["Subsonic &Browser…", "Subsonic &Server…"]
+    # After PyAmp's own library items; the server is browsed in the library window.
+    assert [a.text() for a in menu.actions()][-1] == "Subsonic &Server…"
+    assert "Subsonic" not in " ".join(a.text() for a in menu.actions()[:-1])
+    assert plugin.source is None
+    assert list(app.sources) == [app.local_source, app.playlists_source]  # no server yet
 
 
 def test_connects_and_remembers_the_password_in_the_keychain(
@@ -169,6 +178,37 @@ def test_not_remembering_the_password(
     answer_dialog(monkeypatch, server.url, PASSWORD, remember=False)
     assert plugin.show_server_dialog()
     assert keychain.passwords == {}  # and an earlier one is forgotten
+    assert not accounts.remembers_password()
+
+
+def test_not_remembering_is_remembered_and_keeps_out_of_the_keychain(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    accounts.save(Account(server.url, USERNAME), remember_password=False)
+    plugin = start(app, accounts)  # as PyAmp starts
+    assert keychain.reads == 0  # so the system doesn't ask for anything
+    assert plugin.client is None  # the password is asked for again this session
+    shown = answer_dialog(monkeypatch, server.url, PASSWORD, remember=False)
+    assert plugin.show_server_dialog()
+    assert shown[0].remember_at_first is False  # type: ignore[attr-defined]  # as left
+    assert keychain.reads == 0
+    assert keychain.passwords == {}
+
+
+def test_remembering_is_the_default(
+    accounts: AccountStore, server: SubsonicServer, tmp_path: Path
+) -> None:
+    assert accounts.remembers_password()  # nothing saved yet
+    accounts.directory.mkdir(parents=True, exist_ok=True)
+    accounts.file.write_text(f'{{"server": "{server.url}", "username": "{USERNAME}"}}')
+    assert accounts.remembers_password()  # saved by an earlier PyAmp
+    accounts.file.write_text("[1, 2]")
+    assert accounts.load() is None
+    assert accounts.remembers_password()
 
 
 def test_without_a_keychain_the_password_lasts_the_session(
@@ -200,7 +240,7 @@ def test_a_remembered_account_is_used_at_start_and_plays_with_a_login(
     plugin = start(app, accounts)
     assert plugin.client is not None
     tracks = plugin.client.album_tracks("al1")
-    plugin.add_tracks(tracks, play=True)
+    app.window.play_from_library(tracks, 0)
     backend = app.player._backend
     assert isinstance(backend, FakeBackend)
     played = backend.loaded[-1]
@@ -218,7 +258,7 @@ def test_saved_playlists_hold_no_login(
     remember(accounts, keychain, server)
     plugin = start(app, accounts)
     assert plugin.client is not None
-    plugin.add_tracks(plugin.client.album_tracks("al1"), play=True)
+    app.window.play_from_library(plugin.client.album_tracks("al1"), 0)
     app.playlists.save_now()
     assert app.playlists.active is not None
     text = app.playlists._saved.path(app.playlists.active).read_text()
@@ -228,27 +268,76 @@ def test_saved_playlists_hold_no_login(
         assert secret not in text
 
 
-def child(item: QTreeWidgetItem, index: int) -> QTreeWidgetItem:
-    found = item.child(index)
-    assert found is not None
-    return found
+def test_the_server_is_a_source_in_the_library(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    remember(accounts, keychain, server)
+    plugin = start(app, accounts)
+    assert plugin.source is not None
+    assert list(app.sources) == [app.local_source, app.playlists_source, plugin.source]
+    assert plugin.source.name == f"Subsonic — {server.url.removeprefix('http://')}"
+    answer_dialog(monkeypatch, server.url, PASSWORD)
+    assert plugin.show_server_dialog()  # connecting again replaces it
+    assert list(app.sources) == [app.local_source, app.playlists_source, plugin.source]
+    plugin.deactivate()
+    assert list(app.sources) == [app.local_source, app.playlists_source]
 
 
-def children(item: QTreeWidgetItem) -> list[QTreeWidgetItem]:
-    return [child(item, i) for i in range(item.childCount())]
+def test_browse_an_album_in_the_library_and_play_it(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+) -> None:
+    remember(accounts, keychain, server)
+    start(app, accounts)
+    window = app.window.show_library()
+    settle(window)
+    assert labels(window, 2) == ["Artists", "Playlists"]
+    assert labels(window, 2, (ARTISTS, "")) == ["Massive Attack (1 album)"]
+    assert labels(window, 2, (ARTISTS, ""), (ARTIST, "ar1")) == [
+        "Mezzanine (Massive Attack · 1998)"
+    ]
+    pick(window, 2, (ARTISTS, ""), (ARTIST, "ar1"), (ALBUM, "al1"))
+    assert titles(window) == ["Teardrop", "Angel"]  # album order: by track number
+    assert window.model.data(window.model.index(0, 6)) == "5:30"
+
+    window.play_from(1)
+    assert app.playlists.active == "Library"
+    assert [t.title for t in app.playlist] == ["Teardrop", "Angel"]
+    backend = app.player._backend
+    assert isinstance(backend, FakeBackend)
+    played = backend.loaded[-1]
+    assert isinstance(played, StreamUrl)
+    assert "&u=alice&t=" in played.url  # the plugin added a login to play it
 
 
-def top(tree: QTreeWidget, index: int) -> QTreeWidgetItem:
-    found = tree.topLevelItem(index)
-    assert found is not None
-    return found
+def test_search_the_server_and_its_playlists(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+) -> None:
+    remember(accounts, keychain, server)
+    start(app, accounts)
+    window = app.window.show_library()
+    settle(window)
+    pick(window, 2)
+    assert titles(window) == []  # nothing to list until you search
+    window.search.setText("tear")
+    window.search.returnPressed.emit()
+    settle(window)
+    assert titles(window) == ["Teardrop"]
+    window.search.setText("")
+    pick(window, 2, (PLAYLISTS, ""), (PLAYLIST, "p1"))
+    assert titles(window) == ["Angel"]
 
 
-def tops(tree: QTreeWidget) -> list[QTreeWidgetItem]:
-    return [top(tree, i) for i in range(tree.topLevelItemCount())]
-
-
-def test_browse_an_album_and_add_it(
+def test_server_errors_are_shown_in_the_library(
     app: Application,  # noqa: F811
     accounts: AccountStore,
     keychain: MemoryKeyring,
@@ -256,53 +345,13 @@ def test_browse_an_album_and_add_it(
 ) -> None:
     remember(accounts, keychain, server)
     plugin = start(app, accounts)
-    browser = plugin.show_browser()
-    assert browser is not None
-
-    artists = top(browser.library, 0)
-    artists.setExpanded(True)
-    wait_until(lambda: artists.childCount() == 1)
-    (artist,) = children(artists)
-    assert artist.text(0) == "Massive Attack  (1 album)"
-    artist.setExpanded(True)
-    wait_until(lambda: artist.childCount() == 1)
-    (album,) = children(artist)
-    browser.library.setCurrentItem(album)
-    wait_until(lambda: browser.songs.topLevelItemCount() == 2)
-    assert top(browser.songs, 0).text(4) == "5:30"
-
-    top(browser.songs, 1).setSelected(True)
-    browser.add_button.click()
-    assert [(t.title, t.duration_ms) for t in app.playlist] == [("Angel", 379_000)]
-    browser.songs.clearSelection()
-    browser.play_button.click()  # nothing selected: the whole album
-    assert [t.title for t in app.playlist] == ["Angel", "Teardrop", "Angel"]
-    assert app.playlist.current_index == 1
-
-
-def test_search_and_playlists(
-    app: Application,  # noqa: F811
-    accounts: AccountStore,
-    keychain: MemoryKeyring,
-    server: SubsonicServer,
-) -> None:
-    remember(accounts, keychain, server)
-    browser = start(app, accounts).show_browser()
-    assert browser is not None
-    browser.search.setText("tear")
-    browser.search.returnPressed.emit()
-    wait_until(lambda: browser.songs.topLevelItemCount() == 1)
-    assert top(browser.songs, 0).text(1) == "Teardrop"
-    results = top(browser.library, 0)
-    assert [c.text(0) for c in children(results)] == ["Mezzanine  (Massive Attack · 1998)"]
-
-    playlists = next(t for t in tops(browser.library) if t.text(0) == "Playlists")
-    playlists.setExpanded(True)
-    wait_until(lambda: playlists.childCount() == 1)
-    browser.library.setCurrentItem(child(playlists, 0))
-    wait_until(
-        lambda: browser.songs.topLevelItemCount() == 1 and top(browser.songs, 0).text(1) == "Angel"
-    )
+    assert plugin.client is not None
+    plugin.client._password = "changed on the server"
+    window = app.window.show_library()
+    settle(window)
+    item(window, 2, (ARTISTS, "")).setExpanded(True)
+    settle(window)
+    assert window.status.text() == "Wrong username or password"
 
 
 def test_deactivate_stops_adding_logins(
@@ -321,3 +370,23 @@ def test_deactivate_stops_adding_logins(
     backend = app.player._backend
     assert isinstance(backend, FakeBackend)
     assert backend.loaded[-1] == track.location
+
+
+def test_clicking_an_artist_shows_its_albums_and_songs(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+) -> None:
+    remember(accounts, keychain, server)
+    start(app, accounts)
+    window = app.window.show_library()
+    settle(window)
+    artists = item(window, 2, (ARTISTS, ""))
+    click(window, artists)
+    artist = item(window, 2, (ARTISTS, ""), (ARTIST, "ar1"))
+    click(window, artist)
+    assert artist.isExpanded()
+    assert artist.child(0) is not None
+    assert artist.child(0).text(0) == "Mezzanine (Massive Attack · 1998)"  # type: ignore[union-attr]
+    assert titles(window) == ["Teardrop", "Angel"]  # every album's songs

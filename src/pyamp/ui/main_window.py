@@ -22,13 +22,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, Qt, Signal
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QCloseEvent,
     QDragEnterEvent,
     QDropEvent,
@@ -64,11 +65,14 @@ from pyamp.core.playlist import Playlist, SortKey
 from pyamp.library.metadata import AUDIO_EXTENSIONS
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.library.saved_playlists import PlaylistNameError
+from pyamp.library.sources import MediaSources
 from pyamp.ui.about_dialog import AboutDialog
 from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
 from pyamp.ui.equalizer_window import EqualizerWindow
 from pyamp.ui.jump_dialog import JumpDialog
+from pyamp.ui.library_scan import BackgroundLibraryScanner
+from pyamp.ui.library_window import LibraryWindow
 from pyamp.ui.menu_bar import IS_MACOS, PLACE, MenuBarIcon
 from pyamp.ui.playlist_model import PlaylistModel, dropped_locations
 from pyamp.ui.playlist_session import PlaylistSession
@@ -80,6 +84,12 @@ from pyamp.ui.widgets.sliders import SeekSlider, VolumeSlider
 
 WINDOW_WIDTH = 460
 STATUS_TIMEOUT_MS = 5000
+#: The saved playlist the library plays into, so it never changes the user's others.
+LIBRARY_PLAYLIST = "Library"
+LIBRARY_MENU = "&Library"  # plugins with a library (Subsonic) add to it too
+
+#: How the View → Audio Backend menu names backends (others by their own name).
+BACKEND_LABELS = {"qt": "Qt Multimedia", "mpv": "mpv"}
 
 SORT_OPTIONS = (
     ("&Title", SortKey.TITLE),
@@ -102,6 +112,10 @@ class UiServices:
     settings: Settings
     spectrum_bands: int
     playlists: PlaylistSession
+    library: BackgroundLibraryScanner
+    sources: MediaSources
+    #: Audio backends that can be chosen (View → Audio Backend), e.g. ("mpv", "qt").
+    backends: tuple[str, ...] = ()
 
 
 class MainWindow(QMainWindow):
@@ -115,6 +129,7 @@ class MainWindow(QMainWindow):
         self._s = services
         self._skin = skin
         self._equalizer_window: EqualizerWindow | None = None
+        self._library_window: LibraryWindow | None = None
         self._jump_dialog: JumpDialog | None = None
         self._about_dialog: AboutDialog | None = None
         self._plugin_menus: dict[str, QMenu] = {}
@@ -263,30 +278,27 @@ class MainWindow(QMainWindow):
         )
         self._add_menu_action(list_menu, "&Clear", self._clear_playlist)
 
-        view_menu = menu_bar.addMenu("&View")
-        self.show_icon_action = QAction(f"Show Icon in {PLACE}", self)
-        self.show_icon_action.setCheckable(True)
-        self.show_icon_action.setChecked(self.menu_bar_icon.visible)
-        self.show_icon_action.toggled.connect(self._set_menu_bar_icon)
-        self.keep_running_action = QAction(
-            "Keep Running When Window Is Closed"
-            if IS_MACOS
-            else f"Keep Running in {PLACE} When Closed",
-            self,
-        )
-        self.keep_running_action.setCheckable(True)
-        self.keep_running_action.setChecked(self._s.settings.keep_running_when_closed)
-        self.keep_running_action.toggled.connect(self._set_keep_running)
-        view_menu.addActions([self.show_icon_action, self.keep_running_action])
-        if not MenuBarIcon.available():
-            self.show_icon_action.setEnabled(False)
-            self.show_icon_action.setToolTip(f"This desktop has no {PLACE.lower()}")
-        self._sync_view_menu()
+        self._build_library_menu(menu_bar.addMenu(LIBRARY_MENU))
+
+        self._build_view_menu(menu_bar.addMenu("&View"))
 
         help_menu = self._help_menu = menu_bar.addMenu("&Help")
         self.about_action = self._add_menu_action(help_menu, f"&About {APP_NAME}", self.show_about)
         # macOS shows it as "About PyAmp" in the application menu, where users look for it.
         self.about_action.setMenuRole(QAction.MenuRole.AboutRole)
+
+    def _build_library_menu(self, menu: QMenu) -> None:
+        self._plugin_menus[LIBRARY_MENU] = menu
+        self._add_menu_action(menu, "Show &Library", self.show_library, "Alt+L")
+        menu.addSeparator()
+        self._add_menu_action(
+            menu, "Add &Folder to Library…", lambda: self.show_library().add_folder()
+        )
+        self._add_menu_action(
+            menu, "Add F&iles to Library…", lambda: self.show_library().add_files()
+        )
+        self._add_menu_action(menu, "&Rescan Library", self._s.library.scan)
+        menu.addSeparator()
 
     # -- PluginUi ----------------------------------------------------------- #
 
@@ -308,6 +320,10 @@ class MainWindow(QMainWindow):
     def dialog_parent(self) -> QWidget:
         return self
 
+    def _front(self) -> QWidget:
+        """Where to show a dialog: the window in front (e.g. the library), else this one."""
+        return QApplication.activeWindow() or self
+
     def show_about(self) -> AboutDialog:
         if self._about_dialog is None:
             self._about_dialog = AboutDialog(self._skin, parent=self)
@@ -315,6 +331,57 @@ class MainWindow(QMainWindow):
         self._about_dialog.raise_()
         self._about_dialog.activateWindow()
         return self._about_dialog
+
+    def _build_view_menu(self, view_menu: QMenu) -> None:
+        self.show_icon_action = QAction(f"Show Icon in {PLACE}", self)
+        self.show_icon_action.setCheckable(True)
+        self.show_icon_action.setChecked(self.menu_bar_icon.visible)
+        self.show_icon_action.toggled.connect(self._set_menu_bar_icon)
+        self.keep_running_action = QAction(
+            "Keep Running When Window Is Closed"
+            if IS_MACOS
+            else f"Keep Running in {PLACE} When Closed",
+            self,
+        )
+        self.keep_running_action.setCheckable(True)
+        self.keep_running_action.setChecked(self._s.settings.keep_running_when_closed)
+        self.keep_running_action.toggled.connect(self._set_keep_running)
+        view_menu.addActions([self.show_icon_action, self.keep_running_action])
+        view_menu.addSeparator()
+        self._build_backend_menu(view_menu)
+        if not MenuBarIcon.available():
+            self.show_icon_action.setEnabled(False)
+            self.show_icon_action.setToolTip(f"This desktop has no {PLACE.lower()}")
+        self._sync_view_menu()
+
+    def _build_backend_menu(self, parent: QMenu) -> None:
+        """Choose the audio backend; it's set up as PyAmp starts, so it applies then."""
+        self.backend_menu = parent.addMenu("Audio &Backend")
+        group = QActionGroup(self)
+        in_use = self._s.player.backend_name
+        self.backend_actions: dict[str, QAction] = {}
+        for name in self._s.backends:
+            label = BACKEND_LABELS.get(name, name)
+            action = QAction(f"{label} (in use)" if name == in_use else label, group)
+            action.setCheckable(True)
+            action.setChecked(name == self._s.settings.backend)
+            action.triggered.connect(lambda _=False, name=name: self._choose_backend(name))
+            self.backend_menu.addAction(action)
+            self.backend_actions[name] = action
+        self.backend_menu.addSeparator()
+        note = self.backend_menu.addAction("Takes effect the next time PyAmp starts")
+        note.setEnabled(False)
+
+    def _choose_backend(self, name: str) -> None:
+        if name == self._s.settings.backend:
+            return
+        self._s.settings.backend = name  # saved on quit, used on the next start
+        label = BACKEND_LABELS.get(name, name)
+        if name == self._s.player.backend_name:
+            message = f"PyAmp will keep using {label}"
+        else:
+            message = f"PyAmp will use {label} the next time it starts"
+        self.statusBar().showMessage(message, STATUS_TIMEOUT_MS)
 
     def _set_menu_bar_icon(self, shown: bool) -> None:
         self._s.settings.show_in_menu_bar = shown
@@ -364,22 +431,29 @@ class MainWindow(QMainWindow):
             self._try(lambda: self._s.playlists.new(name), "New Playlist")
 
     def rename_playlist(self) -> None:
-        current = self._s.playlists.active or ""
-        name, ok = QInputDialog.getText(self, "Rename Playlist", "Name:", text=current)
-        if ok and name.strip() != current:
-            self._try(lambda: self._s.playlists.rename(name), "Rename Playlist")
+        """Rename the open playlist (a slot: takes no arguments)."""
+        self.rename_saved_playlist(self._s.playlists.active or "")
 
     def delete_playlist(self) -> None:
-        name = self._s.playlists.active
+        """Delete the open playlist (a slot: takes no arguments)."""
+        self.delete_saved_playlist(self._s.playlists.active or "")
+
+    def rename_saved_playlist(self, current: str) -> None:
+        name, ok = QInputDialog.getText(self._front(), "Rename Playlist", "Name:", text=current)
+        if ok and name.strip() != current:
+            self._try(lambda: self._s.playlists.rename(name, current), "Rename Playlist")
+
+    def delete_saved_playlist(self, name: str) -> None:
         answer = QMessageBox.question(
-            self,
+            self._front(),
             "Delete Playlist",
             f'Delete the playlist "{name}"?\n\nOnly the playlist is deleted; '
             "the music files stay where they are.",
         )
         if answer == QMessageBox.StandardButton.Yes:
-            self._autoplay_jobs.clear()
-            self._s.playlists.delete()
+            if name.casefold() == (self._s.playlists.active or "").casefold():
+                self._autoplay_jobs.clear()
+            self._s.playlists.delete(name)
 
     def remove_duplicates(self) -> None:
         removed = self._s.playlist.remove_duplicates()
@@ -409,6 +483,55 @@ class MainWindow(QMainWindow):
         self._equalizer_window.raise_()
         self._equalizer_window.activateWindow()
         return self._equalizer_window
+
+    def show_library(self) -> LibraryWindow:
+        """Open the library window (one instance, reused)."""
+        if self._library_window is None:
+            self._library_window = LibraryWindow(
+                self._s.library,
+                self._s.sources,
+                self._s.bus,
+                self._s.settings,
+                self._skin,
+                play_tracks=self.play_from_library,
+                add_to_playlist=self.add_to_playlist,
+                playlist_names=lambda: self._s.playlists.names,
+                parent=self,
+            )
+        self._library_window.show()
+        self._library_window.raise_()
+        self._library_window.activateWindow()
+        return self._library_window
+
+    def play_from_library(self, tracks: Sequence[Track], start: int) -> None:
+        """Play ``tracks`` from ``start``, in the "Library" playlist."""
+        self._autoplay_jobs.clear()
+        self._s.playlists.open_tracks(LIBRARY_PLAYLIST, tracks)
+        self._s.player.play_index(start)
+
+    def add_to_playlist(
+        self, tracks: Sequence[Track], name: str | None, suggested: str = ""
+    ) -> str | None:
+        """Add ``tracks`` to the saved playlist ``name``, or to a new one (None: ask for its
+        name, suggesting ``suggested``). Returns what happened, for the user."""
+        if name is None:
+            text, ok = QInputDialog.getText(
+                self._front(), "New Playlist", "Name:", text=suggested or "New playlist"
+            )
+            if not ok:
+                return None
+            try:
+                name = self._s.playlists.create(text)
+            except PlaylistNameError as exc:
+                QMessageBox.warning(self._front(), "New Playlist", str(exc))
+                return None
+        added = self._s.playlists.add_to(name, tracks)
+        noun = "track" if added == 1 else "tracks"
+        message = f"Added {added} {noun} to {name}"
+        if skipped := len(tracks) - added:
+            message += f" ({skipped} already in it)"
+        self.statusBar().showMessage(message, STATUS_TIMEOUT_MS)
+        return message
 
     def _add_menu_action(
         self,

@@ -21,12 +21,14 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QInputDialog, QMenu, QMessageBox
 
 from pyamp import app as app_module
 from pyamp.app import Application, parse_args
@@ -42,9 +44,10 @@ from tests.test_background_loader import wait_until
 
 @pytest.fixture(autouse=True)
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Never touch a real audio device: 'fake' is registered and also the fallback default."""
+    """Never touch a real audio device: 'fake' is registered, the default and the fallback."""
     monkeypatch.setattr(registry, "_registered", {"fake": FakeBackend})
     monkeypatch.setattr(Settings, "backend", "fake")
+    monkeypatch.setattr(app_module, "FALLBACK_BACKEND", "fake")
 
 
 @pytest.fixture
@@ -67,6 +70,7 @@ def cleanup(qt_app: QCoreApplication) -> Iterator[list[Application]]:
     yield apps
     for application in apps:
         application.loader.shutdown()
+        application.library.shutdown()
         application.window.close()
 
 
@@ -226,7 +230,8 @@ def test_unknown_backend_in_settings_falls_back_to_default(
     application = build(store, backend=None)
     cleanup.append(application)
     assert "Unknown backend 'gone'" in caplog.text
-    assert application.player is not None
+    assert application.player.backend_name == "fake"
+    assert application.settings.backend == "fake"  # an unknown name is forgotten
 
 
 def test_unavailable_backend_falls_back_to_default(
@@ -244,7 +249,12 @@ def test_unavailable_backend_falls_back_to_default(
     application = build(store, backend="mpv")
     cleanup.append(application)
     assert "'mpv' is unavailable" in caplog.text
-    assert application.settings.backend == "fake"
+    assert application.player.backend_name == "fake"
+    assert application.settings.backend == "mpv"  # tried again once libmpv is there
+
+
+def test_mpv_is_the_default_backend() -> None:
+    assert Settings.__dataclass_fields__["backend"].default == "mpv"
 
 
 def test_chosen_backend_is_remembered(
@@ -318,3 +328,113 @@ def test_shutdown_survives_unwritable_config_dir(
     cleanup.append(application)
     application.shutdown()  # must not raise
     assert "Could not save session" in caplog.text
+
+
+# -- The media library --------------------------------------------------------------- #
+
+
+def test_library_menu_and_window(store: SettingsStore, cleanup: list[Application]) -> None:
+    application = build(store)
+    cleanup.append(application)
+    window = application.window
+    library = next(a.menu() for a in window.menuBar().actions() if a.text() == "&Library")
+    assert isinstance(library, QMenu)
+    texts = [a.text() for a in library.actions() if not a.isSeparator()]
+    assert texts == [
+        "Show &Library",
+        "Add &Folder to Library…",
+        "Add F&iles to Library…",
+        "&Rescan Library",
+    ]
+    assert library.actions()[0].shortcut().toString() == "Alt+L"
+    library.actions()[0].trigger()
+    assert window.show_library() is window.show_library()  # one window, reused
+    assert window.show_library().isVisible()
+
+
+def test_playing_from_the_library_leaves_other_playlists_alone(
+    store: SettingsStore, cleanup: list[Application], tmp_path: Path
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    application.start([])
+    wait_until(lambda: not application.playlists.loading)
+    mine = Track.from_path(tmp_path / "mine.mp3")
+    application.playlist.add([mine])
+    tracks = [Track.from_path(tmp_path / f"{n}.mp3") for n in "abc"]
+
+    application.window.play_from_library(tracks, 1)
+    assert application.playlists.active == "Library"
+    assert list(application.playlist) == tracks
+    assert application.playlist.current_index == 1
+    saved = SavedPlaylists(store.directory / "playlists")
+    assert saved.read_paths("Default") == [mine.location]
+
+
+def test_adding_from_the_library_to_playlists(
+    store: SettingsStore,
+    cleanup: list[Application],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    application.start([])
+    wait_until(lambda: not application.playlists.loading)
+    window = application.window
+    a, b = (Track.from_path(tmp_path / f"{n}.mp3") for n in "ab")
+
+    assert window.add_to_playlist([a], "Default") == "Added 1 track to Default"
+    assert list(application.playlist) == [a]  # the open playlist, in place
+    assert window.add_to_playlist([a, b], "default") == "Added 1 track to default (1 already in it)"
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *_, **kw: (f"{kw['text']} 1", True))
+    assert window.add_to_playlist([b], None, "Mezzanine") == "Added 1 track to Mezzanine 1"
+    saved = SavedPlaylists(store.directory / "playlists")
+    assert saved.read_paths("Mezzanine 1") == [b.location]
+    assert application.playlists.active == "Default"  # still open; nothing was switched
+
+    warnings: list[str] = []
+    monkeypatch.setattr(QInputDialog, "getText", lambda *_, **kw: ("bad/name", True))
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
+    assert window.add_to_playlist([b], None) is None
+    assert warnings and "can't" in warnings[0]
+    monkeypatch.setattr(QInputDialog, "getText", lambda *_, **kw: ("", False))
+    assert window.add_to_playlist([b], None) is None  # cancelled
+
+
+def test_the_library_lists_the_saved_playlists(
+    store: SettingsStore, cleanup: list[Application], tmp_path: Path
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    application.start([])
+    wait_until(lambda: not application.playlists.loading)
+    library = application.window.show_library()
+    assert [s.name for s in application.sources] == ["This Computer", "Playlists"]
+    playlists = library.sidebar_item(1)
+    assert playlists is not None
+    wait_until(
+        lambda: (
+            [playlists.child(i).text(0) for i in range(playlists.childCount())]  # type: ignore[union-attr]
+            == ["Default (0)"]
+        )
+    )
+    application.window.add_to_playlist([Track.from_path(tmp_path / "a.mp3")], "Default")
+    wait_until(lambda: playlists.childCount() == 1 and playlists.child(0).text(0) == "Default (1)")  # type: ignore[union-attr]
+
+
+def test_the_library_is_scanned_after_start_and_closed_on_quit(
+    store: SettingsStore, cleanup: list[Application], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app_module, "LIBRARY_SCAN_DELAY_MS", 10)
+    application = build(store)
+    cleanup.append(application)
+    finished: list[object] = []
+    application.library.finished.connect(finished.append)
+    application.start([])
+    assert finished == []  # not while starting up
+    wait_until(lambda: bool(finished))
+    application.shutdown()
+    with pytest.raises(sqlite3.ProgrammingError):
+        application.catalog.sources()  # closed

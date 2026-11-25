@@ -38,7 +38,7 @@ import threading
 import time
 from collections.abc import Iterable
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal
 
 from pyamp.core.models import Location, Track
 from pyamp.library.loader import TrackLoader
@@ -85,6 +85,8 @@ class _LoadTask(QRunnable):
         self._signals = signals
 
     def run(self) -> None:  # executes on the worker thread
+        # Reading tags must never compete with playback or the window.
+        QThread.currentThread().setPriority(QThread.Priority.LowPriority)
         try:
             self._load()
         except Exception:

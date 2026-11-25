@@ -48,17 +48,62 @@ AUDIO_EXTENSIONS = frozenset(
 )
 
 #: Our field names -> tag keys, per tag family.
-_ID3_FRAMES = {"title": "TIT2", "artist": "TPE1", "album": "TALB"}
-_MP4_KEYS = {"title": "\xa9nam", "artist": "\xa9ART", "album": "\xa9alb"}
-_ASF_KEYS = {"title": "Title", "artist": "Author", "album": "WM/AlbumTitle"}
+_ID3_FRAMES = {
+    "title": "TIT2",
+    "artist": "TPE1",
+    "album": "TALB",
+    "album_artist": "TPE2",
+    "genre": "TCON",
+    "year": "TDRC",  # mutagen upgrades ID3v2.3's TYER to it
+    "track_number": "TRCK",
+    "disc_number": "TPOS",
+}
+_MP4_KEYS = {
+    "title": "\xa9nam",
+    "artist": "\xa9ART",
+    "album": "\xa9alb",
+    "album_artist": "aART",
+    "genre": "\xa9gen",
+    "year": "\xa9day",
+}
+#: MP4 keeps track and disc numbers as (number, total) pairs.
+_MP4_NUMBER_KEYS = {"track_number": "trkn", "disc_number": "disk"}
+_ASF_KEYS = {
+    "title": "Title",
+    "artist": "Author",
+    "album": "WM/AlbumTitle",
+    "album_artist": "WM/AlbumArtist",
+    "genre": "WM/Genre",
+    "year": "WM/Year",
+    "track_number": "WM/TrackNumber",
+    "disc_number": "WM/PartOfSet",
+}
+#: Vorbis comment names, most common first (they have no fixed spelling).
+_VORBIS_KEYS = {
+    "title": ("title",),
+    "artist": ("artist",),
+    "album": ("album",),
+    "album_artist": ("albumartist", "album artist", "album_artist"),
+    "genre": ("genre",),
+    "year": ("date", "year"),
+    "track_number": ("tracknumber",),
+    "disc_number": ("discnumber",),
+}
 
 #: Opus R128 gains are relative to -23 LUFS; ReplayGain uses -18 LUFS.
 _R128_TO_REPLAYGAIN_DB = 5.0
 _NUMBER = re.compile(r"[-+]?\d+(?:\.\d+)?")
+_LEADING_INT = re.compile(r"\s*(\d+)")  # "3/12" -> 3
+_YEAR = re.compile(r"(?<!\d)(\d{4})(?!\d)")  # "2003-05-01" -> 2003
 
 
 def is_audio_file(path: Path) -> bool:
     return path.suffix.lower() in AUDIO_EXTENSIONS
+
+
+def audio_files(folder: Path) -> list[Path]:
+    """The audio files in ``folder`` and its subfolders, in path order."""
+    return sorted(p for p in folder.rglob("*") if p.is_file() and is_audio_file(p))
 
 
 class MetadataReader(Protocol):
@@ -85,6 +130,11 @@ class MutagenMetadataReader:
             title=fields.get("title") or path.stem,
             artist=fields.get("artist", ""),
             album=fields.get("album", ""),
+            album_artist=fields.get("album_artist", ""),
+            genre=fields.get("genre", ""),
+            year=_year(fields.get("year")),
+            track_number=_leading_int(fields.get("track_number")),
+            disc_number=_leading_int(fields.get("disc_number")),
             duration_ms=int(length * 1000),
             replay_gain=_replay_gain(gains, opus=isinstance(audio, OggOpus)),
         )
@@ -93,7 +143,7 @@ class MutagenMetadataReader:
 # -- Tag families ------------------------------------------------------------ #
 
 type Fields = dict[str, str]
-"""title/artist/album -> value"""
+"""Our field name (title, artist, album, album_artist, ...) -> raw value"""
 type Gains = dict[str, str]
 """lower-case ReplayGain/R128 tag name (e.g. ``replaygain_track_gain``) -> raw value"""
 
@@ -115,7 +165,8 @@ def _id3(tags: Any) -> tuple[Fields, Gains]:
     for field, frame_id in _ID3_FRAMES.items():
         frame = tags.get(frame_id)
         if frame is not None:
-            fields[field] = _first(frame.text)
+            # TCON's genres turns ID3v1 numbers like "(17)" into names.
+            fields[field] = _first(frame.genres if frame_id == "TCON" else frame.text)
     gains: Gains = {}
     for frame in tags.getall("TXXX"):
         if _is_gain_key(frame.desc.lower()) and frame.text:
@@ -131,6 +182,10 @@ def _id3(tags: Any) -> tuple[Fields, Gains]:
 
 def _mp4(tags: Any) -> tuple[Fields, Gains]:
     fields = {field: _first(tags.get(key)) for field, key in _MP4_KEYS.items()}
+    for field, key in _MP4_NUMBER_KEYS.items():
+        pairs = tags.get(key)
+        if pairs:
+            fields[field] = str(pairs[0][0])
     gains: Gains = {}
     for key, values in tags.items():
         name = key.split(":", 2)[-1].lower()  # "----:com.apple.iTunes:replaygain_track_gain"
@@ -154,7 +209,10 @@ def _vorbis(tags: Any) -> tuple[Fields, Gains]:
         except (KeyError, ValueError):
             return ""
 
-    fields = {field: get(field) for field in ("title", "artist", "album")}
+    fields = {
+        field: next((value for key in keys if (value := get(key))), "")
+        for field, keys in _VORBIS_KEYS.items()
+    }
     try:
         # .keys() is needed: iterating a Vorbis comment dict yields (key, value) pairs.
         keys = [k for k in tags.keys() if _is_gain_key(k.lower())]  # noqa: SIM118
@@ -186,6 +244,18 @@ def _number(raw: str | None) -> float | None:
         return None
     match = _NUMBER.search(raw.replace("\u2212", "-"))  # tolerate a Unicode minus sign
     return float(match.group()) if match else None
+
+
+def _leading_int(raw: str | None) -> int:
+    """The number a track or disc tag starts with (``"3/12"`` -> 3); 0 if none."""
+    match = _LEADING_INT.match(raw or "")
+    return int(match.group(1)) if match else 0
+
+
+def _year(raw: str | None) -> int:
+    """The year in a date tag (``"2003"``, ``"2003-05-01"``); 0 if none."""
+    match = _YEAR.search(raw or "")
+    return int(match.group(1)) if match else 0
 
 
 def _replay_gain(gains: Mapping[str, str], *, opus: bool) -> ReplayGain | None:

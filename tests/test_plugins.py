@@ -172,14 +172,25 @@ def test_plugins_can_add_menus_before_help(app: Application) -> None:  # noqa: F
     ui = app.plugins._context.ui()
     assert isinstance(ui, MainWindow)
     calls: list[str] = []
-    ui.add_menu_action("&Library", "Browse…", lambda: calls.append("browse"), "Ctrl+B")
-    ui.add_menu_action("&Library", "Server…", lambda: calls.append("server"))
+    ui.add_menu_action("&Tools", "Browse…", lambda: calls.append("browse"), "Ctrl+B")
+    ui.add_menu_action("&Tools", "Server…", lambda: calls.append("server"))
     titles = [a.text() for a in ui.menuBar().actions()]
-    assert titles[-2:] == ["&Library", "&Help"]
-    library = next(a.menu() for a in ui.menuBar().actions() if a.text() == "&Library")
-    assert isinstance(library, QMenu)
-    browse, server = library.actions()
+    assert titles[-2:] == ["&Tools", "&Help"]
+    tools = next(a.menu() for a in ui.menuBar().actions() if a.text() == "&Tools")
+    assert isinstance(tools, QMenu)
+    browse, server = tools.actions()
     assert browse.shortcut().toString() == "Ctrl+B"
     server.trigger()
     assert calls == ["server"]
     assert ui.dialog_parent() is ui
+
+
+def test_plugins_add_to_the_library_menu(app: Application) -> None:  # noqa: F811
+    ui = app.plugins._context.ui()
+    assert isinstance(ui, MainWindow)
+    ui.add_menu_action("&Library", "My Server…", lambda: None)
+    titles = [a.text() for a in ui.menuBar().actions()]
+    assert titles.count("&Library") == 1
+    library = next(a.menu() for a in ui.menuBar().actions() if a.text() == "&Library")
+    assert isinstance(library, QMenu)
+    assert library.actions()[-1].text() == "My Server…"

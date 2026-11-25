@@ -138,6 +138,15 @@ def isolated_playlists(
     monkeypatch.setattr("pyamp.library.saved_playlists.default_directory", lambda: folder)
 
 
+@pytest.fixture(autouse=True)
+def isolated_library(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No test may touch the user's real media library."""
+    path = tmp_path_factory.mktemp("library") / "library.sqlite3"
+    monkeypatch.setattr("pyamp.library.catalog.default_path", lambda: path)
+
+
 @pytest.fixture
 def bus() -> EventBus:
     return EventBus()

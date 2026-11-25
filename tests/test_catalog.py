@@ -276,7 +276,7 @@ def test_folders_are_the_sources(browsable: Catalog, tmp_path: Path) -> None:
 def test_tracks_of_a_group(
     browsable: Catalog, tmp_path: Path, group: Group, titles: list[str]
 ) -> None:
-    # Folders written with "/" find their tracks on Windows too, where paths use "\\".
+    # Folders written with "/" find their tracks on Windows too, where paths use backslashes.
     group = Group(group.kind, group.name.format(tmp=tmp_path), group.artist)
     assert [t.title for t in browsable.tracks(group=group)] == titles
 

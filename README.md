@@ -142,11 +142,15 @@ searches the whole server.
 
 | Backend | Default | Gapless | Equaliser | Visualiser | Needs |
 |---|---|---|---|---|---|
-| `qt` (QtMultimedia) | yes | no | no | yes | nothing extra |
-| `mpv` (libmpv) | | **yes** | **yes** | yes (analysed) | `brew install mpv` or `apt install libmpv2` |
+| `mpv` (libmpv) | yes | **yes** | **yes** | yes (analysed) | `brew install mpv` or `apt install libmpv2` |
+| `qt` (QtMultimedia) | fallback | no | no | yes | nothing extra |
+
+Choose one in **View → Audio Backend**; the one playing now is marked "(in use)".
+The choice is saved and takes effect the next time PyAmp starts. From the command
+line:
 
 ```bash
-uv run pyamp --backend mpv   # remembered for next time; --backend qt switches back
+uv run pyamp --backend qt   # remembered for next time; --backend mpv switches back
 ```
 
 mpv plays more formats and moves between tracks without a gap. It doesn't expose
@@ -155,7 +159,7 @@ silently and in the background (Qt's decoder on a low-priority thread, much fast
 than real time), and shows the analysed levels for mpv's current position. That
 costs a short burst of CPU when a track starts and almost nothing while it plays;
 the bars also show the equaliser's curve. If libmpv isn't
-installed, PyAmp warns and uses `qt`.
+installed, PyAmp warns and plays through `qt`, trying mpv again on the next start.
 
 #### Using a libmpv that isn't installed system-wide
 
@@ -270,7 +274,8 @@ Like other music players, **closing the window doesn't stop PyAmp**: the window
 hides and the music keeps playing. Bring it back with the Dock icon (macOS) or the
 menu bar/tray icon. **Quit** (⌘Q, File → Quit, the icon's menu or the Dock) ends it.
 
-Two settings in the **View** menu:
+Two settings in the **View** menu (which also has **Audio Backend**, see
+[Audio backends](#audio-backends)):
 
 - **Show Icon in Menu Bar** (on by default).
 - **Keep Running When Window Is Closed** (on by default; turn it off to have

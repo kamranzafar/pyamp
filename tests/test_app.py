@@ -44,9 +44,10 @@ from tests.test_background_loader import wait_until
 
 @pytest.fixture(autouse=True)
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Never touch a real audio device: 'fake' is registered and also the fallback default."""
+    """Never touch a real audio device: 'fake' is registered, the default and the fallback."""
     monkeypatch.setattr(registry, "_registered", {"fake": FakeBackend})
     monkeypatch.setattr(Settings, "backend", "fake")
+    monkeypatch.setattr(app_module, "FALLBACK_BACKEND", "fake")
 
 
 @pytest.fixture
@@ -229,7 +230,8 @@ def test_unknown_backend_in_settings_falls_back_to_default(
     application = build(store, backend=None)
     cleanup.append(application)
     assert "Unknown backend 'gone'" in caplog.text
-    assert application.player is not None
+    assert application.player.backend_name == "fake"
+    assert application.settings.backend == "fake"  # an unknown name is forgotten
 
 
 def test_unavailable_backend_falls_back_to_default(
@@ -247,7 +249,12 @@ def test_unavailable_backend_falls_back_to_default(
     application = build(store, backend="mpv")
     cleanup.append(application)
     assert "'mpv' is unavailable" in caplog.text
-    assert application.settings.backend == "fake"
+    assert application.player.backend_name == "fake"
+    assert application.settings.backend == "mpv"  # tried again once libmpv is there
+
+
+def test_mpv_is_the_default_backend() -> None:
+    assert Settings.__dataclass_fields__["backend"].default == "mpv"
 
 
 def test_chosen_backend_is_remembered(

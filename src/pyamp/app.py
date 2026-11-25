@@ -75,6 +75,8 @@ log = logging.getLogger(__name__)
 
 #: The library is rescanned this long after start, once the music has started.
 LIBRARY_SCAN_DELAY_MS = 5000
+#: Played through when the chosen backend can't be: QtMultimedia ships with PyAmp.
+FALLBACK_BACKEND = "qt"
 
 
 def apply_libmpv_preference(requested: str | None, settings: Settings) -> None:
@@ -200,6 +202,7 @@ class Application:
                 playlists=self.playlists,
                 library=self.library,
                 sources=self.sources,
+                backends=tuple(available_backends()),
             ),
             DEFAULT_SKIN,
         )
@@ -265,19 +268,25 @@ class Application:
         return int(window.winId()) if window is not None else None
 
     def _create_backend(self, requested: str | None) -> AudioBackend:
-        """Create the requested backend and remember its name, so ``--backend`` sticks."""
+        """Create the requested backend and remember its name, so ``--backend`` sticks.
+
+        If it can't be used, play through :data:`FALLBACK_BACKEND` instead. An unknown
+        name is forgotten; an unavailable one (e.g. libmpv missing) is kept, so it's
+        tried again next time.
+        """
         name = requested or self.settings.backend
         try:
             backend = create_backend(name)
         except UnknownBackendError:
-            log.warning("Unknown backend %r; falling back to %r", name, Settings.backend)
+            log.warning("Unknown backend %r; falling back to %r", name, FALLBACK_BACKEND)
+            self.settings.backend = FALLBACK_BACKEND
         except BackendUnavailableError as exc:
-            log.warning("%s; falling back to %r", exc, Settings.backend)
+            log.warning("%s; falling back to %r", exc, FALLBACK_BACKEND)
+            self.settings.backend = name
         else:
             self.settings.backend = name
             return backend
-        self.settings.backend = Settings.backend
-        return create_backend(Settings.backend)
+        return create_backend(FALLBACK_BACKEND)
 
     def _apply_settings(self, settings: Settings) -> None:
         self.player.set_volume(settings.volume)

@@ -29,6 +29,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QPoint, Qt, Signal
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QCloseEvent,
     QDragEnterEvent,
     QDropEvent,
@@ -87,6 +88,9 @@ STATUS_TIMEOUT_MS = 5000
 LIBRARY_PLAYLIST = "Library"
 LIBRARY_MENU = "&Library"  # plugins with a library (Subsonic) add to it too
 
+#: How the View → Audio Backend menu names backends (others by their own name).
+BACKEND_LABELS = {"qt": "Qt Multimedia", "mpv": "mpv"}
+
 SORT_OPTIONS = (
     ("&Title", SortKey.TITLE),
     ("&Artist", SortKey.ARTIST),
@@ -110,6 +114,8 @@ class UiServices:
     playlists: PlaylistSession
     library: BackgroundLibraryScanner
     sources: MediaSources
+    #: Audio backends that can be chosen (View → Audio Backend), e.g. ("mpv", "qt").
+    backends: tuple[str, ...] = ()
 
 
 class MainWindow(QMainWindow):
@@ -281,26 +287,6 @@ class MainWindow(QMainWindow):
         # macOS shows it as "About PyAmp" in the application menu, where users look for it.
         self.about_action.setMenuRole(QAction.MenuRole.AboutRole)
 
-    def _build_view_menu(self, view_menu: QMenu) -> None:
-        self.show_icon_action = QAction(f"Show Icon in {PLACE}", self)
-        self.show_icon_action.setCheckable(True)
-        self.show_icon_action.setChecked(self.menu_bar_icon.visible)
-        self.show_icon_action.toggled.connect(self._set_menu_bar_icon)
-        self.keep_running_action = QAction(
-            "Keep Running When Window Is Closed"
-            if IS_MACOS
-            else f"Keep Running in {PLACE} When Closed",
-            self,
-        )
-        self.keep_running_action.setCheckable(True)
-        self.keep_running_action.setChecked(self._s.settings.keep_running_when_closed)
-        self.keep_running_action.toggled.connect(self._set_keep_running)
-        view_menu.addActions([self.show_icon_action, self.keep_running_action])
-        if not MenuBarIcon.available():
-            self.show_icon_action.setEnabled(False)
-            self.show_icon_action.setToolTip(f"This desktop has no {PLACE.lower()}")
-        self._sync_view_menu()
-
     def _build_library_menu(self, menu: QMenu) -> None:
         self._plugin_menus[LIBRARY_MENU] = menu
         self._add_menu_action(menu, "Show &Library", self.show_library, "Alt+L")
@@ -345,6 +331,57 @@ class MainWindow(QMainWindow):
         self._about_dialog.raise_()
         self._about_dialog.activateWindow()
         return self._about_dialog
+
+    def _build_view_menu(self, view_menu: QMenu) -> None:
+        self.show_icon_action = QAction(f"Show Icon in {PLACE}", self)
+        self.show_icon_action.setCheckable(True)
+        self.show_icon_action.setChecked(self.menu_bar_icon.visible)
+        self.show_icon_action.toggled.connect(self._set_menu_bar_icon)
+        self.keep_running_action = QAction(
+            "Keep Running When Window Is Closed"
+            if IS_MACOS
+            else f"Keep Running in {PLACE} When Closed",
+            self,
+        )
+        self.keep_running_action.setCheckable(True)
+        self.keep_running_action.setChecked(self._s.settings.keep_running_when_closed)
+        self.keep_running_action.toggled.connect(self._set_keep_running)
+        view_menu.addActions([self.show_icon_action, self.keep_running_action])
+        view_menu.addSeparator()
+        self._build_backend_menu(view_menu)
+        if not MenuBarIcon.available():
+            self.show_icon_action.setEnabled(False)
+            self.show_icon_action.setToolTip(f"This desktop has no {PLACE.lower()}")
+        self._sync_view_menu()
+
+    def _build_backend_menu(self, parent: QMenu) -> None:
+        """Choose the audio backend; it's set up as PyAmp starts, so it applies then."""
+        self.backend_menu = parent.addMenu("Audio &Backend")
+        group = QActionGroup(self)
+        in_use = self._s.player.backend_name
+        self.backend_actions: dict[str, QAction] = {}
+        for name in self._s.backends:
+            label = BACKEND_LABELS.get(name, name)
+            action = QAction(f"{label} (in use)" if name == in_use else label, group)
+            action.setCheckable(True)
+            action.setChecked(name == self._s.settings.backend)
+            action.triggered.connect(lambda _=False, name=name: self._choose_backend(name))
+            self.backend_menu.addAction(action)
+            self.backend_actions[name] = action
+        self.backend_menu.addSeparator()
+        note = self.backend_menu.addAction("Takes effect the next time PyAmp starts")
+        note.setEnabled(False)
+
+    def _choose_backend(self, name: str) -> None:
+        if name == self._s.settings.backend:
+            return
+        self._s.settings.backend = name  # saved on quit, used on the next start
+        label = BACKEND_LABELS.get(name, name)
+        if name == self._s.player.backend_name:
+            message = f"PyAmp will keep using {label}"
+        else:
+            message = f"PyAmp will use {label} the next time it starts"
+        self.statusBar().showMessage(message, STATUS_TIMEOUT_MS)
 
     def _set_menu_bar_icon(self, shown: bool) -> None:
         self._s.settings.show_in_menu_bar = shown

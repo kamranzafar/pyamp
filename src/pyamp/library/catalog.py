@@ -376,8 +376,10 @@ def _group_condition(group: Group) -> tuple[str, list[str]]:
         case GroupKind.GENRE:
             return "genre_key = ?", [group.name.casefold()]
         case GroupKind.FOLDER:
-            inside = f"{_escape_like(os.path.join(group.name, ''))}%"  # ends in a separator
-            return "(path = ? OR path LIKE ? ESCAPE '\\')", [group.name, inside]
+            # Written the way paths are stored, whatever separators it came with.
+            folder = str(normalise(Path(group.name)))
+            inside = f"{_escape_like(os.path.join(folder, ''))}%"  # ends in a separator
+            return "(path = ? OR path LIKE ? ESCAPE '\\')", [folder, inside]
 
 
 def _casefold(value: object) -> str:

@@ -64,7 +64,8 @@ def test_shows_tracks_in_the_order_given(model: LibraryModel) -> None:
     assert [t.title for t in model.tracks()] == ["Beta", "alpha", "Gamma"]  # as the source said
     assert row_texts(model, 0) == ["2", "Beta", "Zed", "Two", "2001", "", ""]
     assert row_texts(model, 1) == ["", "alpha", "Ann", "One", "", "", "1:01"]
-    assert model.data(model.index(1, 0), Qt.ItemDataRole.ToolTipRole) == "/m/a.mp3"
+    tooltip = model.data(model.index(1, 0), Qt.ItemDataRole.ToolTipRole)
+    assert tooltip == str(Path("/m/a.mp3"))  # as the system writes paths
 
 
 def test_numbers_are_right_aligned(model: LibraryModel) -> None:

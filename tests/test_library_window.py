@@ -27,7 +27,8 @@ from collections.abc import Hashable, Iterator, Sequence
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QItemSelectionModel, QTimer
+from PySide6.QtCore import QCoreApplication, QItemSelectionModel, QPoint, Qt, QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
 
 from pyamp.config import Settings
@@ -217,6 +218,15 @@ def labels(window: LibraryWindow, source: int, *keys: Hashable) -> list[str]:
     parent.setExpanded(True)
     settle(window)
     return [child.text(0) for child in items(parent)]
+
+
+def click(window: LibraryWindow, target: QTreeWidgetItem, *, double: bool = False) -> None:
+    """Click (or double-click) a sidebar item's name, as the user would."""
+    rect = window.sidebar.visualItemRect(target)
+    point = QPoint(rect.left() + 30, rect.center().y())
+    press = QTest.mouseDClick if double else QTest.mouseClick
+    press(window.sidebar.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    settle(window)
 
 
 def titles(window: LibraryWindow) -> list[str]:
@@ -572,3 +582,18 @@ def test_a_removed_server_lets_go_of_its_threads(
     wait_until(lambda: not window._retired[0].busy)
     window.rebuild()
     assert window._retired == []
+
+
+def test_clicking_a_name_opens_it(music: Path, window: LibraryWindow, bus: EventBus) -> None:
+    refresh(window, bus)
+    window.show()
+    artists = item(window, 0, GroupKind.ARTIST)
+    click(window, artists)
+    assert artists.isExpanded()
+    assert [c.text(0) for c in items(artists)] == ["Massive Attack (2)", "Portishead (1)"]
+    assert window.status.text() == "Pick something in “Artists”"
+    assert titles(window) == []
+    click(window, artists, double=True)  # a double-click doesn't close it again
+    assert artists.isExpanded()
+    click(window, item(window, 0, GroupKind.ARTIST, PORTISHEAD))
+    assert titles(window) == ["Glory Box"]

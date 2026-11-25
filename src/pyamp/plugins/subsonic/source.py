@@ -35,7 +35,8 @@ ARTISTS, ARTIST, ALBUM, PLAYLISTS, PLAYLIST = "artists", "artist", "album", "pla
 
 
 class SubsonicSource:
-    """Artists → albums, and playlists. Picking the whole server searches it."""
+    """Artists → albums, and playlists. An artist's tracks are all its albums' songs;
+    picking the whole server searches it."""
 
     hint = "Search, or pick an album or playlist"
 
@@ -53,7 +54,7 @@ class SubsonicSource:
         kind, item_id = _key(node)
         if kind == ARTISTS:
             items = _ask(self.client.artists)
-            return [_node(ARTIST, i, expandable=True, has_tracks=False) for i in items]
+            return [_node(ARTIST, i, expandable=True) for i in items]
         if kind == ARTIST:
             return [_node(ALBUM, i) for i in _ask(lambda: self.client.albums(item_id))]
         if kind == PLAYLISTS:
@@ -64,7 +65,9 @@ class SubsonicSource:
         if node is None:
             return _ask(lambda: self.client.search(search)[1]) if search.strip() else []
         kind, item_id = _key(node)
-        if kind == ALBUM:
+        if kind == ARTIST:  # every album's songs
+            songs = _ask(lambda: self._artist_songs(item_id))
+        elif kind == ALBUM:
             songs = _ask(lambda: self.client.album_tracks(item_id))
         elif kind == PLAYLIST:
             songs = _ask(lambda: self.client.playlist_tracks(item_id))
@@ -74,6 +77,10 @@ class SubsonicSource:
 
     def actions(self, node: Node) -> list[NodeAction]:
         return []
+
+    def _artist_songs(self, artist_id: str) -> list[Track]:
+        albums = self.client.albums(artist_id)
+        return [song for album in albums for song in self.client.album_tracks(album.id)]
 
 
 def _key(node: Node) -> tuple[str, str]:

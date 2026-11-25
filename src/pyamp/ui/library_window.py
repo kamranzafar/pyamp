@@ -123,6 +123,7 @@ class LibraryWindow(QDialog):
         self.search.setClearButtonEnabled(True)
         self.sidebar = QTreeWidget()
         self.sidebar.setHeaderHidden(True)
+        self.sidebar.setExpandsOnDoubleClick(False)  # a click opens; a second shouldn't close
         self.sidebar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.model = LibraryModel(self)
         self.table = _track_table(self.model)
@@ -142,7 +143,7 @@ class LibraryWindow(QDialog):
         self._search_delay.timeout.connect(self.show_tracks)
         self.search.textChanged.connect(self._search_delay.start)
         self.search.returnPressed.connect(self.show_tracks)
-        self.sidebar.currentItemChanged.connect(self.show_tracks)
+        self.sidebar.currentItemChanged.connect(self._on_picked)
         self.sidebar.itemExpanded.connect(self._on_expanded)
         self.sidebar.itemCollapsed.connect(lambda item: self._expanded.discard(_path(item)))
         self.sidebar.customContextMenuRequested.connect(self._show_sidebar_menu)
@@ -282,8 +283,6 @@ class LibraryWindow(QDialog):
             child.setData(0, _SOURCE, source)
             child.setData(0, _NODE, node)
             child.setToolTip(0, node.tooltip)
-            if not node.has_tracks:
-                child.setFlags(child.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             if node.expandable:
                 child.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
         if not nodes and item.data(0, _NODE) is not None:
@@ -335,6 +334,13 @@ class LibraryWindow(QDialog):
 
     # -- The tracks ---------------------------------------------------------------- #
 
+    def _on_picked(self, item: QTreeWidgetItem | None) -> None:
+        """Show what's picked, and open it: clicking an artist shows its albums."""
+        node = item.data(0, _NODE) if item is not None else None
+        if item is not None and isinstance(node, Node) and node.expandable:
+            item.setExpanded(True)
+        self.show_tracks()
+
     def show_tracks(self) -> None:
         """Ask the picked source for the picked node's tracks matching the search."""
         self._search_delay.stop()
@@ -346,6 +352,11 @@ class LibraryWindow(QDialog):
             self._update_status()
             return
         source, node = picked
+        if node is not None and not node.has_tracks:  # e.g. Artists: pick one of them
+            self._error = ""
+            self.model.set_tracks([])
+            self.status.setText(f"Pick something in “{node.name}”")
+            return
         search = self.search.text()
         self.status.setText(LOADING)
 

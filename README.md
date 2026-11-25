@@ -230,7 +230,8 @@ PyAmp can play your own music library from a Subsonic-compatible server: Navidro
 Airsonic(-Advanced), Gonic and others. **Library → Subsonic Server…** asks for the
 server's address, your username and password, and checks them. The server then
 appears in the [library window](#library), below This Computer, with its artists,
-their albums and your playlists; pick the server itself to search it. Songs play and
+their albums and your playlists. Click an artist to see its albums and all its songs;
+pick the server itself to search it. Songs play and
 are added to playlists like local tracks.
 
 Songs are added with their tags and length, so they show like local files and can be

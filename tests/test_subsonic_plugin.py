@@ -39,7 +39,7 @@ from pyamp.plugins.subsonic.ui import ServerDialog
 from tests.conftest import FakeBackend
 from tests.subsonic_server import PASSWORD, USERNAME, SubsonicServer
 from tests.test_background_loader import wait_until
-from tests.test_library_window import item, labels, pick, settle, titles
+from tests.test_library_window import click, item, labels, pick, settle, titles
 from tests.test_playlist_ui import app  # noqa: F401  (fixture: the real app, offscreen)
 
 
@@ -336,3 +336,23 @@ def test_deactivate_stops_adding_logins(
     backend = app.player._backend
     assert isinstance(backend, FakeBackend)
     assert backend.loaded[-1] == track.location
+
+
+def test_clicking_an_artist_shows_its_albums_and_songs(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+) -> None:
+    remember(accounts, keychain, server)
+    start(app, accounts)
+    window = app.window.show_library()
+    settle(window)
+    artists = item(window, 1, (ARTISTS, ""))
+    click(window, artists)
+    artist = item(window, 1, (ARTISTS, ""), (ARTIST, "ar1"))
+    click(window, artist)
+    assert artist.isExpanded()
+    assert artist.child(0) is not None
+    assert artist.child(0).text(0) == "Mezzanine (Massive Attack · 1998)"  # type: ignore[union-attr]
+    assert titles(window) == ["Teardrop", "Angel"]  # every album's songs

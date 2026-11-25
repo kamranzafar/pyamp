@@ -49,7 +49,7 @@ def test_artists_albums_and_playlists(source: SubsonicSource) -> None:
     assert (artist.label, artist.expandable, artist.has_tracks) == (
         "Massive Attack (1 album)",
         True,
-        False,
+        True,
     )
     (album,) = source.children(artist)
     assert album.label == "Mezzanine (Massive Attack · 1998)"
@@ -58,7 +58,9 @@ def test_artists_albums_and_playlists(source: SubsonicSource) -> None:
     (mix,) = source.children(playlists)
     assert [t.title for t in source.tracks(mix)] == ["Angel"]
     assert source.children(album) == []
-    assert source.tracks(artists) == []  # categories and artists have no tracks of their own
+    assert source.tracks(artists) == []  # a category has no tracks of its own
+    assert [t.title for t in source.tracks(artist)] == ["Teardrop", "Angel"]  # all its albums
+    assert [t.title for t in source.tracks(artist, "tear")] == ["Teardrop"]
 
 
 def test_the_whole_server_is_searched(source: SubsonicSource) -> None:

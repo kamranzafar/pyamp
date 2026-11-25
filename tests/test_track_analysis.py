@@ -110,9 +110,30 @@ def test_equalizer_offsets_follow_the_curve() -> None:
 # -- Real decoding ------------------------------------------------------------------------ #
 
 
+class WavDecoder:
+    """Decodes these tests' WAV files in plain Python, so they run without libmpv (the
+    hidden-libmpv decoder the app uses is tested in test_mpv_backend)."""
+
+    def __init__(self) -> None:
+        self.decoded: list[Path] = []
+
+    def decode(
+        self, source: Path, target: Path, sample_rate: int, cancelled: Callable[[], bool]
+    ) -> bool:
+        try:
+            with wave.open(str(source), "rb") as w:
+                assert w.getframerate() == sample_rate and w.getnchannels() == 1
+                pcm = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
+        except (wave.Error, EOFError, OSError):
+            return False
+        (pcm.astype(np.float32) / 32768).tofile(target)
+        self.decoded.append(source)
+        return True
+
+
 @pytest.fixture
 def analyser(qt_app: QCoreApplication) -> Iterator[TrackAnalyser]:
-    analyser = TrackAnalyser(BANDS)
+    analyser = TrackAnalyser(BANDS, decoder=WavDecoder())
     yield analyser
     analyser.shutdown()
 
@@ -147,12 +168,33 @@ def test_unreadable_file_finishes_empty(analyser: TrackAnalyser, tmp_path: Path)
     assert timeline.rows == []
 
 
-def test_decoding_doesnt_print_file_details(
-    analyser: TrackAnalyser, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-) -> None:
-    timeline = analyser.analyse(write_tones(tmp_path / "quiet.wav", (440,)))
+def test_scratch_files_are_cleaned_up(analyser: TrackAnalyser, tmp_path: Path) -> None:
+    timeline = analyser.analyse(write_tones(tmp_path / "tidy.wav", (440,)))
     wait_until(timeline.finished.is_set)
-    assert "Input #0" not in capfd.readouterr().err
+    scratch = analyser._scratch
+    assert list(scratch.iterdir()) == []  # the decoded samples went once analysed
+    analyser.shutdown()
+    assert not scratch.exists()
+
+
+def test_without_libmpv_there_is_simply_no_analysis(
+    qt_app: QCoreApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import builtins  # noqa: PLC0415
+
+    real_import = builtins.__import__
+
+    def no_libmpv(name: str, *args: object, **kwargs: object) -> object:
+        if name == "pyamp.audio.mpv_backend":
+            raise OSError("Cannot find libmpv")
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "__import__", no_libmpv)
+    analyser = TrackAnalyser(BANDS)
+    timeline = analyser.analyse(write_tones(tmp_path / "x.wav", (440,)))
+    wait_until(timeline.finished.is_set)
+    analyser.shutdown()
+    assert timeline.rows == []
 
 
 # -- Publishing while playing --------------------------------------------------------------- #
@@ -406,6 +448,7 @@ def live(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[tuple[AnalysedSpectrum, PieceAnalyser, Clock]]:
     monkeypatch.setattr(track_analysis, "STREAM_CHECK_MS", 5)
+    monkeypatch.setattr(track_analysis, "LIVE_PIECE_MS", 5)
     analyser, clock = PieceAnalyser(ramp), Clock()
     service = AnalysedSpectrum(bus, analyser, BANDS, clock=clock, streams=saver)  # type: ignore[arg-type]
     yield service, analyser, clock
@@ -431,6 +474,22 @@ def test_live_radio_is_analysed_a_piece_at_a_time(
     assert analyser.requested == []  # no whole-file analysis
     service.tick()
     assert published and published[-1].levels[0] == pytest.approx(0.5)  # the bars move
+
+
+def test_the_first_live_piece_is_looked_for_soon_then_less_often(
+    live: tuple[AnalysedSpectrum, PieceAnalyser, Clock],
+    bus: EventBus,
+    saver: FakeSaver,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, analyser, _clock = live
+    monkeypatch.setattr(track_analysis, "LIVE_PIECE_MS", 1500)
+    bus.publish(TrackChanged(RADIO, 0))
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+    assert service._stream_check.interval() == track_analysis.STREAM_CHECK_MS  # bars soon
+    saver.range = (0.0, 3.0)
+    wait_until(lambda: len(analyser.pieces) == 1)
+    assert service._stream_check.interval() == 1500  # then fewer, longer pieces
 
 
 def test_live_pieces_start_near_playback(
@@ -490,6 +549,20 @@ def test_a_song_too_big_to_buffer_whole_is_analysed_as_it_plays(
     wait_until(lambda: len(analyser.pieces) == 1)
     assert saver.pieces == [(0.0, 6.0)]  # a stretch, not the whole song
     assert analyser.requested == [] and service.timeline is not None
+
+
+def test_pieces_go_only_a_little_ahead_of_playback(
+    live: tuple[AnalysedSpectrum, PieceAnalyser, Clock], bus: EventBus, saver: FakeSaver
+) -> None:
+    """mpv may have minutes of a long song buffered: analysing all of it at once would
+    push the levels being played out of what's kept (the bars would vanish)."""
+    _service, analyser, _clock = live
+    bus.publish(TrackChanged(SONG, 0))
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+    bus.publish(PositionChanged(3_000, 0))
+    saver.fits, saver.range = False, (0.0, 520.0)  # nine minutes buffered
+    wait_until(lambda: len(analyser.pieces) == 1)
+    assert saver.pieces == [(2.0, 3.0 + track_analysis.LIVE_AHEAD_S)]
 
 
 def test_after_a_seek_pieces_start_at_the_new_place(

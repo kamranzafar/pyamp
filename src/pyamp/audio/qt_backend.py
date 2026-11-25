@@ -70,6 +70,8 @@ def audio_buffer_to_mono(buffer: QAudioBuffer) -> NDArray[np.float32] | None:
     dtype, offset, scale = spec
     raw = np.frombuffer(buffer.constData(), dtype=dtype, count=buffer.sampleCount())
     samples = (raw.astype(np.float32) - offset) / scale
+    if channels == 1:
+        return samples  # already mono: nothing to average (the analyser asks for mono)
     return samples.reshape(-1, channels).mean(axis=1, dtype=np.float32)
 
 

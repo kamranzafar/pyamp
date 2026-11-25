@@ -19,26 +19,26 @@
 # Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 """Visualiser levels for backends that don't expose the audio they play (mpv).
 
-Instead of tapping the playback, the file is analysed separately: Qt's
-``QAudioDecoder`` decodes it silently on a low-priority worker thread, much faster
-than real time, and PyAmp's own :class:`~pyamp.dsp.spectrum.SpectrumAnalyzer`
-turns it into one row of band levels per 1/30 s (a :class:`LevelTimeline`).
-:class:`AnalysedSpectrum` then publishes the row for the current playback
-position, 30 times a second, as ordinary ``SpectrumUpdated`` events.
+Instead of tapping the playback, the file is analysed separately on a low-priority
+worker thread: a hidden libmpv (:class:`~pyamp.audio.mpv_backend.MpvPcmDecoder`, nothing
+to do with the one playing) decodes it to raw samples as fast as it can, and PyAmp's own
+:class:`~pyamp.dsp.spectrum.SpectrumAnalyzer` turns them, a block at a time, into one row
+of band levels per 1/30 s (a :class:`LevelTimeline`). :class:`AnalysedSpectrum` then
+publishes the row for the current playback position, 30 times a second, as ordinary
+``SpectrumUpdated`` events. (Qt's decoder did this before, at 4-6 times the CPU.)
 
 A song streamed from a server (e.g. Subsonic) is analysed from the backend's own copy:
 once the backend has all of it buffered, it saves that to a temporary file, so the song
 is never fetched twice. A live stream (radio) never ends, so the backend saves what it
-has newly buffered, a short piece at a time, just ahead of playback; each piece's levels
-go in at its own place, and only the last couple of minutes are kept. The decoder only
-ever opens local files: opening a URL would hold Python's interpreter lock while it
-connects, freezing the window.
+has newly buffered, a piece at a time, just ahead of playback; each piece's levels go in
+at its own place, and only the last couple of minutes are kept.
 """
 
 from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import shutil
 import tempfile
 import threading
@@ -46,14 +46,12 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
-from PySide6.QtCore import QLoggingCategory, QObject, QThread, QTimer, QUrl, Signal, Slot
-from PySide6.QtMultimedia import QAudioDecoder, QAudioFormat
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
-from pyamp.audio.qt_backend import audio_buffer_to_mono
 from pyamp.core.equalizer import BANDS_HZ, Equalizer
 from pyamp.core.events import (
     EqualizerChanged,
@@ -70,9 +68,21 @@ log = logging.getLogger(__name__)
 
 #: Rows per second of audio, and how often levels are published while playing.
 FPS = 30
-#: How often to check whether a streamed song is wholly buffered yet, and to save the
-#: newly buffered stretch of a live stream.
+#: Files are decoded for analysis at this rate (mono), and read back this much at a time.
+ANALYSIS_RATE = 44100
+BLOCK_SAMPLES = ANALYSIS_RATE * 10
+_HOP = ANALYSIS_RATE // FPS
+#: How long the analysis waits for the decoder to write more.
+_WAIT_FOR_SAMPLES_S = 0.02
+#: After the first bars, samples are analysed at least this many at a time.
+MIN_BATCH_SAMPLES = ANALYSIS_RATE
+#: How often to check whether a streamed song is wholly buffered yet.
 STREAM_CHECK_MS = 500
+#: How often to save and analyse a live stream's newly buffered stretch, once its first
+#: piece is under way (that one is looked for every STREAM_CHECK_MS, so the bars start
+#: quickly). Stations send a few seconds ahead, so the levels are still ready before
+#: they're heard; fewer, longer pieces cost less (each is a file and a decoder to start).
+LIVE_PIECE_MS = 1500
 #: How much of a live stream's levels to keep (it may play all day).
 LIVE_KEEP_S = 120.0
 #: A live stream's buffer must be within this of the playback position, or its timing
@@ -80,6 +90,10 @@ LIVE_KEEP_S = 120.0
 LIVE_SLACK_S = 5.0
 #: The shortest stretch of a live stream worth saving and analysing.
 LIVE_MIN_PIECE_S = 0.25
+#: How far ahead of playback pieces are saved. mpv may have minutes buffered (a long song
+#: from a server); analysing all of that at once would be a burst of work, and push the
+#: levels being played out of the few minutes that are kept.
+LIVE_AHEAD_S = 30.0
 
 
 class StreamSaver(Protocol):
@@ -140,6 +154,15 @@ class LevelTimeline:
             self.rows = self.rows[drop:]  # a new list: a reader keeps the one it has
 
 
+class PcmDecoder(Protocol):
+    """Decodes a file to raw mono float32 samples in another file, writing as it goes, so
+    they can be analysed while it's still decoding. Stops when ``cancelled()`` says so."""
+
+    def decode(
+        self, source: Path, target: Path, sample_rate: int, cancelled: Callable[[], bool]
+    ) -> bool: ...
+
+
 @dataclass(frozen=True, slots=True)
 class _Job:
     path: Path
@@ -151,57 +174,72 @@ class _Job:
 
 
 class _Worker(QObject):
-    """Lives on the analysis thread: decodes one file (or piece) at a time."""
+    """Lives on the analysis thread: decodes and analyses one file (or piece) at a time.
 
-    def __init__(self, band_count: int) -> None:
+    Each file is decoded to raw samples (in a scratch folder), then read back a block at a
+    time and analysed a block at a time: little memory, and cancelling is noticed between
+    blocks.
+    """
+
+    def __init__(self, band_count: int, decoder: PcmDecoder, scratch: Path) -> None:
         super().__init__()
         self._band_count = band_count
+        self._decoder = decoder
+        self._scratch = scratch
         self._queue: list[_Job] = []
-        self._current: _Job | None = None
-        self._decoder: QAudioDecoder | None = None
-        self._row = 0
+        self._busy = False
 
     @Slot(object)
     def enqueue(self, job: _Job) -> None:
         self._queue.append(job)
-        if self._current is None:
-            self._next()
+        if self._busy:
+            return  # the loop below takes it
+        self._busy = True
+        try:
+            while self._queue:
+                job = self._queue.pop(0)
+                try:
+                    if not job.timeline.cancelled.is_set():
+                        self._analyse(job)
+                except Exception:
+                    log.exception("Analysing %s for the visualiser failed", job.path.name)
+                finally:
+                    self._done(job)
+        finally:
+            self._busy = False
 
-    def _next(self) -> None:
-        self._release()
-        while self._queue and self._queue[0].timeline.cancelled.is_set():
-            self._done(self._queue.pop(0))
-        if not self._queue:
-            return
-        job = self._current = self._queue.pop(0)
+    def _analyse(self, job: _Job) -> None:
+        """Decode on a helper thread, and analyse the samples as they're written: the
+        first bars are ready almost at once, not after the whole file is decoded."""
         timeline = job.timeline
+        raw = self._scratch / "decoded.f32"
+        _remove(raw)
+        outcome: list[bool] = []
+
+        def decode() -> None:
+            outcome.append(
+                self._decoder.decode(job.path, raw, ANALYSIS_RATE, timeline.cancelled.is_set)
+            )
+
+        decoding = threading.Thread(target=decode, name="pyamp-decode", daemon=True)
+        decoding.start()
         if not job.piece or timeline.analyzer is None:
             timeline.analyzer = SpectrumAnalyzer(band_count=self._band_count)
-        self._row = job.first_row
-        self._pending = np.zeros(0, dtype=np.float32)
-        decoder = self._decoder = QAudioDecoder(self)
-        fmt = QAudioFormat()
-        fmt.setSampleFormat(QAudioFormat.SampleFormat.Float)
-        fmt.setChannelCount(1)  # mono float: all the analyser needs
-        decoder.setAudioFormat(fmt)
-        # Ignore signals from a decoder that's no longer current (e.g. "finished" after
-        # "error", or while it's being stopped), so no queued file is skipped.
-        decoder.bufferReady.connect(lambda: self._on_buffer() if decoder is self._decoder else None)
-        decoder.finished.connect(lambda: self._next() if decoder is self._decoder else None)
-        decoder.error.connect(lambda e: self._on_error(e) if decoder is self._decoder else None)
-        decoder.setSource(QUrl.fromLocalFile(str(job.path)))
-        decoder.start()
-
-    def _release(self) -> None:
-        # Detach first: stopping a decoder can emit "finished" synchronously, and the
-        # handlers ignore signals from a decoder that's no longer current.
-        job, self._current = self._current, None
-        decoder, self._decoder = self._decoder, None
-        if decoder is not None:
-            decoder.stop()
-            decoder.deleteLater()
-        if job is not None:
-            self._done(job)
+        reader = _GrowingFile(raw, timeline.analyzer, timeline, job.first_row)
+        try:
+            while not timeline.cancelled.is_set():
+                finished = not decoding.is_alive()
+                if reader.read_more(finished=finished):
+                    continue
+                if finished:
+                    break  # decoded, and all of it read
+                time.sleep(_WAIT_FOR_SAMPLES_S)
+            decoding.join()
+        finally:
+            reader.close()
+            _remove(raw)
+        if outcome and not outcome[0] and not reader.rows:
+            log.info("Can't analyse %s for the visualiser", job.path.name)
 
     @staticmethod
     def _done(job: _Job) -> None:
@@ -210,35 +248,74 @@ class _Worker(QObject):
         else:
             job.timeline.finished.set()
 
-    def _on_buffer(self) -> None:
-        decoder, job = self._decoder, self._current
-        if decoder is None or job is None:
-            return
-        buffer = decoder.read()
-        timeline = job.timeline
-        if timeline.cancelled.is_set():
-            self._next()
-            return
-        samples = audio_buffer_to_mono(buffer)
-        if samples is None or timeline.analyzer is None:
-            return
-        rate = buffer.format().sampleRate()
-        hop = max(1, rate // FPS)
-        self._pending = np.concatenate([self._pending, samples])
-        while len(self._pending) >= hop:
-            levels = timeline.analyzer.analyze(self._pending[:hop], rate)
-            timeline.put(self._row, levels.astype(np.float32))
-            self._row += 1
-            self._pending = self._pending[hop:]
 
-    def _on_error(self, _error: QAudioDecoder.Error) -> None:
-        if self._decoder is not None and self._current is not None:
-            log.info(
-                "Can't analyse %s for the visualiser: %s",
-                self._current.path.name,
-                self._decoder.errorString(),
-            )
-        self._next()
+class _NoDecoder:
+    """Without libmpv nothing can be analysed (the analysis is only for mpv anyway)."""
+
+    def decode(
+        self, source: Path, target: Path, sample_rate: int, cancelled: Callable[[], bool]
+    ) -> bool:
+        return False
+
+
+def _default_decoder() -> PcmDecoder:
+    try:
+        from pyamp.audio.mpv_backend import MpvPcmDecoder  # noqa: PLC0415  (loads libmpv)
+    except OSError as exc:
+        log.info("No visualiser analysis without libmpv: %s", exc)
+        return _NoDecoder()
+    return MpvPcmDecoder()
+
+
+class _GrowingFile:
+    """Reads a file of float32 samples while it's still being written, and analyses each
+    stretch into the timeline (worker thread)."""
+
+    def __init__(
+        self, path: Path, analyzer: SpectrumAnalyzer, timeline: LevelTimeline, row: int
+    ) -> None:
+        self._path = path
+        self._analyzer = analyzer
+        self._timeline = timeline
+        self._row = row
+        self._file: BinaryIO | None = None
+        self._partial = b""  # bytes of a sample still being written
+        self._leftover = np.zeros(0, dtype=np.float32)  # samples short of a whole row
+        self.rows = 0
+
+    def read_more(self, *, finished: bool) -> bool:
+        """Analyse what has been written since; False if there wasn't enough yet.
+
+        The first stretch is taken as soon as there's any (the first bars come at once);
+        then a second's worth at a time (the analysis is far ahead of playback by then),
+        or the rest once the decoder has ``finished``: fewer, bigger batches cost less.
+        """
+        if self._file is None:
+            if not self._path.exists():
+                return False
+            self._file = self._path.open("rb")
+        if self.rows and not finished:
+            written = os.fstat(self._file.fileno()).st_size - self._file.tell()
+            if written < MIN_BATCH_SAMPLES * 4:
+                return False
+        data = self._file.read(BLOCK_SAMPLES * 4)
+        if not data:
+            return False
+        data = self._partial + data
+        whole = len(data) - len(data) % 4
+        self._partial = data[whole:]
+        samples = np.concatenate([self._leftover, np.frombuffer(data[:whole], np.float32)])
+        levels = self._analyzer.analyze_blocks(samples, ANALYSIS_RATE, _HOP)
+        self._leftover = samples[len(levels) * _HOP :]
+        for values in levels:
+            self._timeline.put(self._row, values)
+            self._row += 1
+        self.rows += len(levels)
+        return True
+
+    def close(self) -> None:
+        if self._file is not None:
+            self._file.close()
 
 
 class TrackAnalyser(QObject):
@@ -246,15 +323,21 @@ class TrackAnalyser(QObject):
 
     _enqueue = Signal(object)
 
-    def __init__(self, band_count: int = 20, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        band_count: int = 20,
+        parent: QObject | None = None,
+        *,
+        decoder: PcmDecoder | None = None,
+    ) -> None:
+        """``decoder``: by default a hidden libmpv (the analysis is for the mpv backend)."""
         super().__init__(parent)
-        # Qt's decoder logs ffmpeg's file details (incl. the path) at info level.
-        QLoggingCategory.setFilterRules(
-            "qt.multimedia.ffmpeg*.info=false\nqt.multimedia.ffmpeg*.debug=false"
-        )
+        if decoder is None:
+            decoder = _default_decoder()
+        self._scratch = Path(tempfile.mkdtemp(prefix="pyamp-analysis-"))
         self._thread = QThread()
         self._thread.setObjectName("pyamp-track-analysis")
-        self._worker = _Worker(band_count)
+        self._worker = _Worker(band_count, decoder, self._scratch)
         self._worker.moveToThread(self._thread)
         self._enqueue.connect(self._worker.enqueue)
         self._thread.start(QThread.Priority.LowPriority)  # never compete with playback or the UI
@@ -286,6 +369,7 @@ class TrackAnalyser(QObject):
         self.cancel_all()
         self._thread.quit()
         self._thread.wait(3000)
+        shutil.rmtree(self._scratch, ignore_errors=True)
 
 
 def equalizer_offsets(
@@ -443,7 +527,9 @@ class AnalysedSpectrum(QObject):
 
     def _watch_stream(self) -> None:
         if self._active and self._stream is not None and (self._live or not self._stream_copy):
-            self._stream_check.start()
+            # Soon at first, so a station's bars start quickly; pieces then slow to
+            # LIVE_PIECE_MS (see _check_stream).
+            self._stream_check.start(STREAM_CHECK_MS)
 
     def _check_stream(self) -> None:
         """Save a song once it's wholly buffered, or a live stream's newly buffered stretch,
@@ -457,6 +543,7 @@ class AnalysedSpectrum(QObject):
             if piece is None:
                 return
             start, end = piece
+            self._stream_check.setInterval(LIVE_PIECE_MS)  # the bars are on their way
         elif streams.stream_is_buffered():
             self._stream_check.stop()
             start, end = 0.0, None
@@ -465,6 +552,7 @@ class AnalysedSpectrum(QObject):
             log.debug("The stream won't fit the buffer whole; analysing it as it plays")
             self._live = True
             self._analyse_current()
+            self._watch_stream()  # at the pace for pieces
             return
         else:
             return  # not yet; check again shortly
@@ -500,6 +588,7 @@ class AnalysedSpectrum(QObject):
             self._drop_live_timeline()
             self._analyse_current()
         begin = max(start, self._live_to if self._live_to is not None else position - 1)
+        end = min(end, position + LIVE_AHEAD_S)
         return (begin, end) if end - begin >= LIVE_MIN_PIECE_S else None
 
     def _on_stream_saved(self, number: int, copy: Path | None, start: float, end: float) -> None:

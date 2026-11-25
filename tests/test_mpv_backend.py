@@ -570,3 +570,62 @@ def test_the_visualiser_shows_a_song_too_big_to_buffer_whole(qt_app: QCoreApplic
         spectrum.shutdown()
         analyser.shutdown()
         player.shutdown()
+
+
+def test_the_hidden_decoder_feeds_the_analysis(
+    qt_app: QCoreApplication, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The visualiser's analysis decodes with its own, hidden libmpv (not the player's)."""
+    import numpy as np  # noqa: PLC0415
+
+    from pyamp.audio.mpv_backend import MpvPcmDecoder  # noqa: PLC0415
+    from pyamp.audio.track_analysis import TrackAnalyser  # noqa: PLC0415
+    from tests.radio import tone_wav  # noqa: PLC0415
+
+    song = tmp_path / "song.wav"
+    song.write_bytes(tone_wav(5.0))  # 22.05 kHz: resampled to the analysis rate
+    raw = tmp_path / "song.f32"
+    assert MpvPcmDecoder().decode(song, raw, 44100)
+    assert np.fromfile(raw, np.float32).size == pytest.approx(5 * 44100, rel=0.01)
+    broken = tmp_path / "broken.mp3"
+    broken.write_bytes(b"not audio" * 100)
+    assert not MpvPcmDecoder().decode(broken, tmp_path / "broken.f32", 44100)
+
+    analyser = TrackAnalyser()
+    timeline = analyser.analyse(song)
+    wait_until(timeline.finished.is_set)
+    analyser.shutdown()
+    assert timeline.seconds == pytest.approx(5.0, abs=0.1)
+    assert max(float(row.max()) for row in timeline.rows if row is not None) > 0.5  # the tone
+    assert "Input #0" not in capfd.readouterr().err  # nothing printed about the file
+
+
+def test_a_long_buffered_stream_still_shows_bars(
+    qt_app: QCoreApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mpv buffers far ahead of a long song: the bars mustn't lose what's playing."""
+    from pyamp.audio import track_analysis  # noqa: PLC0415
+    from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser  # noqa: PLC0415
+    from pyamp.core.events import SpectrumUpdated  # noqa: PLC0415
+
+    # In miniature: minutes buffered and a few kept become ~20 s buffered and 2 s kept.
+    monkeypatch.setattr(track_analysis, "LIVE_KEEP_S", 2.0)
+    monkeypatch.setattr(track_analysis, "LIVE_AHEAD_S", 1.5)
+    bus = EventBus()
+    playlist = Playlist(bus)
+    backend = MpvAudioBackend(ao="null", demuxer_max_bytes=1_000_000)  # ~20 s of this song
+    player = Player(backend, playlist, bus)
+    analyser = TrackAnalyser()
+    spectrum = AnalysedSpectrum(bus, analyser, 20, streams=player)
+    bars: list[SpectrumUpdated] = []
+    bus.subscribe(SpectrumUpdated, bars.append)
+    try:
+        with RadioStation(seconds=60.0) as server:
+            url = StreamUrl(f"{server.url}/plain.wav")
+            playlist.add([Track.for_stream(url, "Long song", 60_000)])
+            player.play_index(0)
+            wait_until(lambda: sum(max(b.levels) > 0 for b in bars) >= 10)
+    finally:
+        spectrum.shutdown()
+        analyser.shutdown()
+        player.shutdown()

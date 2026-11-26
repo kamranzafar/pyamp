@@ -32,10 +32,11 @@ from PySide6.QtWidgets import QInputDialog, QMessageBox
 from pyamp.app import Application
 from pyamp.audio import registry
 from pyamp.config import Settings, SettingsStore
-from pyamp.core.models import Track
+from pyamp.core.models import StreamUrl, Track
 from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.ui.jump_dialog import matches, search_text
 from pyamp.ui.playlist_model import ROWS_MIME
+from pyamp.ui.track_drag import TrackDrag
 from tests.conftest import FakeBackend
 from tests.test_background_loader import make_files, wait_until
 
@@ -181,6 +182,22 @@ def test_dropping_files_from_outside_adds_them(app: Application, tmp_path: Path)
     model = app.window._playlist_view.model()
     assert model.dropMimeData(data, Qt.DropAction.CopyAction, -1, 0, QModelIndex())
     wait_until(lambda: len(app.playlist) == 2)
+
+
+def test_dropping_tracks_from_the_library_adds_them_with_their_tags(
+    app: Application, tmp_path: Path
+) -> None:
+    stream = Track.for_stream(StreamUrl("https://music.example/rest/stream?id=1"), "Teardrop")
+    local = Track(tmp_path / "angel.mp3", "Angel", artist="Massive Attack")
+    model = app.window._playlist_view.model()
+    assert model.dropMimeData(
+        TrackDrag([stream, local]), Qt.DropAction.CopyAction, -1, 0, QModelIndex()
+    )
+    assert list(app.playlist) == [stream, local]  # as they are: streams too, nothing re-read
+    assert app.playlist.current_index == 0  # there was nothing to play: plays the first
+    app.window.add_tracks([local])
+    assert list(app.playlist) == [stream, local, local]
+    assert app.playlist.current_index == 0
 
 
 def test_reorder_is_auto_saved(app: Application, tmp_path: Path) -> None:

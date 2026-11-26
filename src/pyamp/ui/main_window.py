@@ -77,6 +77,7 @@ from pyamp.ui.menu_bar import IS_MACOS, PLACE, MenuBarIcon
 from pyamp.ui.playlist_model import PlaylistModel, dropped_locations
 from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import Skin
+from pyamp.ui.track_drag import dragged_tracks
 from pyamp.ui.widgets.lcd import LcdPanel
 from pyamp.ui.widgets.playlist_selector import PlaylistSelector
 from pyamp.ui.widgets.playlist_view import PlaylistView
@@ -152,6 +153,7 @@ class MainWindow(QMainWindow):
         self._volume.volume_requested.connect(services.player.set_volume)
         model = PlaylistModel(services.playlist, services.bus, skin)
         model.files_dropped.connect(self.add_paths)
+        model.tracks_dropped.connect(self.add_tracks)
         self._playlist_view = PlaylistView(model)
         self._playlist_view.track_activated.connect(services.player.play_index)
         self._playlist_view.remove_requested.connect(services.playlist.remove)
@@ -571,6 +573,15 @@ class MainWindow(QMainWindow):
         self._update_summary()
         return job
 
+    def add_tracks(self, tracks: Sequence[Track]) -> None:
+        """Add tracks PyAmp already knows (e.g. dragged from the library) as they are,
+        tags and all, starting the first if there was nothing to play."""
+        autoplay = len(self._s.playlist) == 0 and not self._s.loader.busy
+        first_new = len(self._s.playlist)
+        self._s.playlist.add(tracks)
+        if autoplay and tracks:
+            self._s.player.play_index(first_new)
+
     def add_url(self) -> None:
         """Add a stream: internet radio (or a station's .pls/.m3u), or an audio file URL."""
         text, ok = QInputDialog.getText(
@@ -685,10 +696,14 @@ class MainWindow(QMainWindow):
     # -- Qt overrides ------------------------------------------------------- #
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
+        if event.mimeData().hasUrls() or dragged_tracks(event.mimeData()):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        if tracks := dragged_tracks(event.mimeData()):
+            event.acceptProposedAction()
+            self.add_tracks(tracks)
+            return
         paths = dropped_locations(event.mimeData().urls())
         if paths:
             event.acceptProposedAction()

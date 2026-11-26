@@ -121,8 +121,8 @@ starts, and when you click **Rescan**. Only files that changed are read again.
   or to a **New Playlist…**. Right-click an artist, album or genre in the sidebar to
   add all of it (a new playlist is named after it). Tracks already in the playlist are
   skipped. Or drag tracks onto a playlist under **Playlists** in the sidebar (onto
-  **Playlists** itself for a new one). Local files can also be dragged into the
-  open playlist.
+  **Playlists** itself for a new one), or into the open playlist in the player (songs
+  from a server keep their tags).
 - **Playlists**, in the sidebar, lists your saved playlists. Pick one to see its tracks
   (with the library's tags; no music files are read); right-click it to open it in the
   player, rename it or delete it.

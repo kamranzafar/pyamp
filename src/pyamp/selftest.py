@@ -74,6 +74,9 @@ class _Recorder:
     def on_stream_title(self, title: str) -> None:
         pass
 
+    def on_station_name(self, name: str) -> None:
+        pass
+
     def on_error(self, message: str) -> None:
         self.errors.append(message)
 

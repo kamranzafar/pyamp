@@ -285,7 +285,10 @@ time it's listed, so it keeps working when the station moves its stream.
 
 While a station plays, the LCD, window title, menu bar menu and system media widgets
 show the current song as the station announces it (Icecast/Shoutcast "ICY" titles;
-the `mpv` backend only, Qt Multimedia doesn't pass them on). Live streams have no
+the `mpv` backend only, Qt Multimedia doesn't pass them on). A stream known only by
+its URL (e.g. added with Add URL) is renamed after the station's own name once it
+plays, in the playlist and everywhere it's shown, so a playlist keeps "Groove Salad"
+rather than "live". Live streams have no
 length, so seeking is off and the playlist shows **LIVE**. On the `mpv` backend the
 visualiser stays still for streams (it analyses files, not live streams); the Qt
 backend's visualiser works for both.

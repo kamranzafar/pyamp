@@ -58,6 +58,7 @@ from pyamp.core.events import (
     PlaylistChanged,
     StreamTitleChanged,
     TrackChanged,
+    TrackRetitled,
 )
 from pyamp.core.models import Location, StreamUrl, Track, format_duration, parse_location
 from pyamp.core.player import Player
@@ -196,8 +197,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.summary, 1)
         self.summary.setContentsMargins(STATUS_INDENT, 0, 0, 0)
 
-        services.bus.subscribe(TrackChanged, self._on_track_changed)
-        services.bus.subscribe(StreamTitleChanged, self._on_stream_title)
+        self._follow_title(services.bus)
         services.bus.subscribe(PlaylistChanged, lambda _: self._update_summary())
         services.bus.subscribe(
             PlaybackError,
@@ -716,8 +716,21 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"{self._window_track_label} - {APP_NAME}")
             self._playlist_view.scrollTo(self._playlist_view.model().index(event.index, 0))
 
+    def _follow_title(self, bus: EventBus) -> None:
+        """Keep the window's title on what's playing."""
+        bus.subscribe(TrackChanged, self._on_track_changed)
+        bus.subscribe(StreamTitleChanged, self._on_stream_title)
+        bus.subscribe(TrackRetitled, self._on_track_retitled)
+
     def _on_stream_title(self, event: StreamTitleChanged) -> None:
         self.setWindowTitle(f"{event.title} — {self._window_track_label} - {APP_NAME}")
+
+    def _on_track_retitled(self, event: TrackRetitled) -> None:
+        self._window_track_label = f"{event.index + 1}. {event.track.display_title}"
+        if title := self._s.player.stream_title:
+            self._on_stream_title(StreamTitleChanged(title))
+        else:
+            self.setWindowTitle(f"{self._window_track_label} - {APP_NAME}")
 
     def _on_tracks_loaded(self, job: LoadJob, tracks: list[Track]) -> None:
         first_new = len(self._s.playlist)

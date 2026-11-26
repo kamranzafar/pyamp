@@ -146,6 +146,7 @@ class _Bridge(QObject):
     duration = Signal(int)
     advanced = Signal(str)
     stream_title = Signal(str)
+    station_name = Signal(str)
     audio_changed = Signal()  # bitrate or sample rate may have changed
     end_of_track = Signal()
     error = Signal(str)
@@ -158,6 +159,7 @@ class _Bridge(QObject):
         self.duration.connect(self._on_duration)
         self.advanced.connect(self._on_advanced)
         self.stream_title.connect(self._on_stream_title)
+        self.station_name.connect(self._on_station_name)
         self.audio_changed.connect(self._on_audio_changed)
         self.end_of_track.connect(self._on_end_of_track)
         self.error.connect(self._on_error)
@@ -184,6 +186,10 @@ class _Bridge(QObject):
     @Slot(str)
     def _on_stream_title(self, title: str) -> None:
         self._backend.listener.on_stream_title(title)
+
+    @Slot(str)
+    def _on_station_name(self, name: str) -> None:
+        self._backend.listener.on_station_name(name)
 
     @Slot()
     def _on_audio_changed(self) -> None:
@@ -406,10 +412,13 @@ class MpvAudioBackend(AudioBackend):
         self._bridge.duration.emit(int((seconds or 0) * 1000))
 
     def _observe_metadata(self, _name: str, metadata: dict[str, str] | None) -> None:
-        # Internet radio (Icecast/Shoutcast) sends the current song as ICY metadata.
-        title = {key.lower(): value for key, value in (metadata or {}).items()}.get("icy-title")
-        if title:
-            self._bridge.stream_title.emit(title.strip())
+        # Internet radio (Icecast/Shoutcast) sends its name and the current song as ICY
+        # metadata. The name goes first, so the song is shown with it.
+        icy = {key.lower(): value for key, value in (metadata or {}).items()}
+        if name := icy.get("icy-name", "").strip():
+            self._bridge.station_name.emit(name)
+        if title := icy.get("icy-title", "").strip():
+            self._bridge.stream_title.emit(title)
 
     def _observe_audio(self, _name: str, _value: object) -> None:
         # The bitrate varies as VBR files and streams play (mpv updates it about once a

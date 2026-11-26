@@ -51,6 +51,11 @@ class StreamUrl:
         return segment or parsed.hostname or self.url
 
     @property
+    def default_title(self) -> str:
+        """What a stream is called when nothing names it: the end of its URL."""
+        return self.stem or self.name
+
+    @property
     def stem(self) -> str:
         name = self.name
         return name.rsplit(".", 1)[0] if "." in name.strip(".") else name
@@ -178,7 +183,7 @@ class Track:
     @classmethod
     def for_stream(cls, url: StreamUrl, title: str | None = None, duration_ms: int = 0) -> Track:
         """A stream, titled from its playlist entry or else its URL (0 length: live)."""
-        return cls(location=url, title=title or url.stem or url.name, duration_ms=duration_ms)
+        return cls(location=url, title=title or url.default_title, duration_ms=duration_ms)
 
     @property
     def is_stream(self) -> bool:

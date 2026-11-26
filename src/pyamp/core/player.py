@@ -44,10 +44,18 @@ from pyamp.core.events import (
     ReplayGainChanged,
     StreamTitleChanged,
     TrackChanged,
+    TrackRetitled,
     Unsubscribe,
     VolumeChanged,
 )
-from pyamp.core.models import Location, PlaybackState, RepeatMode, ReplayGainMode, Track
+from pyamp.core.models import (
+    Location,
+    PlaybackState,
+    RepeatMode,
+    ReplayGainMode,
+    StreamUrl,
+    Track,
+)
 from pyamp.core.play_order import SequentialOrder, ShuffleOrder
 from pyamp.core.playlist import Playlist
 
@@ -390,6 +398,17 @@ class Player:
         if track is not None and track.is_stream and title != self._stream_title:
             self._stream_title = title
             self._bus.publish(StreamTitleChanged(title))
+
+    def on_station_name(self, name: str) -> None:
+        """Name a stream known only by its URL after its station (in the playlist, so it
+        is shown, and saved, that way). A name it already has is kept."""
+        name = name.strip()
+        track, index = self._playlist.current_track, self._playlist.current_index
+        if track is None or index is None or not isinstance(track.location, StreamUrl):
+            return
+        if track.title != track.location.default_title or not name or name == track.title:
+            return
+        self._bus.publish(TrackRetitled(self._playlist.retitle(index, name), index))
 
     def on_audio_info(self, bitrate: int, sample_rate: int) -> None:
         info = AudioInfoChanged(round(max(bitrate, 0) / 1000), max(sample_rate, 0))

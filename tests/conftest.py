@@ -227,6 +227,9 @@ class BackendRecorder:
     def on_stream_title(self, title: str) -> None:
         self._record("stream_title", title)
 
+    def on_station_name(self, name: str) -> None:
+        self._record("station_name", name)
+
     def on_error(self, message: str) -> None:
         self._record("error", message)
 

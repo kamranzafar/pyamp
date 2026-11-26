@@ -195,6 +195,16 @@ class StreamTitleChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class TrackRetitled:
+    """The playing track was renamed where it is, and plays on (e.g. a stream known only
+    by its URL was given the name its station announced). Not a new track: what showed
+    :class:`TrackChanged` shows ``track`` instead, keeping any stream title."""
+
+    track: Track
+    index: int
+
+
+@dataclass(frozen=True, slots=True)
 class PlaybackError:
     message: str
     track: Track | None = None

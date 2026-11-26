@@ -28,6 +28,7 @@ from PySide6.QtCore import QCoreApplication, QModelIndex, Qt
 
 from pyamp.core.models import StreamUrl, Track
 from pyamp.ui.library_model import COLUMNS, LibraryModel
+from pyamp.ui.track_drag import TRACKS_MIME, dragged_tracks
 
 TRACKS = [
     Track(Path("/m/b.mp3"), "Beta", artist="Zed", album="Two", year=2001, track_number=2),
@@ -87,9 +88,11 @@ def test_columns_sort_and_ties_stay_in_the_order_given(model: LibraryModel) -> N
 
 def test_dragged_tracks_are_files(model: LibraryModel) -> None:
     assert model.flags(model.index(0, 0)) & Qt.ItemFlag.ItemIsDragEnabled
-    assert model.mimeTypes() == ["text/uri-list"]
+    assert model.mimeTypes() == [TRACKS_MIME, "text/uri-list"]
     data = model.mimeData([model.index(2, 0), model.index(0, 1), model.index(0, 0)])
     assert [Path(url.toLocalFile()) for url in data.urls()] == [Path("/m/b.mp3"), Path("/m/c.mp3")]
+    assert data.hasFormat(TRACKS_MIME)  # for PyAmp's playlists
+    assert [t.location for t in dragged_tracks(data)] == [Path("/m/b.mp3"), Path("/m/c.mp3")]
 
 
 def test_nothing_for_invalid_indexes(model: LibraryModel) -> None:
@@ -99,9 +102,10 @@ def test_nothing_for_invalid_indexes(model: LibraryModel) -> None:
     assert model.headerData(0, Qt.Orientation.Vertical) is None
 
 
-def test_streams_are_not_dragged(qt_app: QCoreApplication) -> None:
+def test_streams_are_only_dragged_within_pyamp(qt_app: QCoreApplication) -> None:
     model = LibraryModel()
     song = Track.for_stream(StreamUrl("https://server.example/rest/stream?id=1"), "Song")
     model.set_tracks([song, TRACKS[1]])
     data = model.mimeData([model.index(0, 0), model.index(1, 0)])
-    assert [Path(url.toLocalFile()) for url in data.urls()] == [Path("/m/a.mp3")]
+    assert [Path(url.toLocalFile()) for url in data.urls()] == [Path("/m/a.mp3")]  # files only
+    assert dragged_tracks(data) == [song, TRACKS[1]]  # to PyAmp's playlists, tags and all

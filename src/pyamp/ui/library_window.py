@@ -30,8 +30,20 @@ import logging
 from collections.abc import Callable, Hashable, Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QHideEvent, QKeySequence, QShortcut, QShowEvent
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QDragEnterEvent,
+    QDragLeaveEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QHideEvent,
+    QKeySequence,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QShortcut,
+    QShowEvent,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -54,12 +66,14 @@ from pyamp.config import Settings
 from pyamp.core.events import EventBus, MediaSourcesChanged
 from pyamp.core.models import Track, format_duration
 from pyamp.library.metadata import AUDIO_EXTENSIONS
+from pyamp.library.playlists_source import PlaylistsSource
 from pyamp.library.scanner import ScanSummary
 from pyamp.library.sources import MediaSource, MediaSources, Node, SourceError
 from pyamp.ui.background_calls import BackgroundCalls
 from pyamp.ui.library_model import COLUMNS, LibraryModel
 from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.skin import Skin
+from pyamp.ui.track_drag import dragged_tracks
 
 log = logging.getLogger(__name__)
 
@@ -126,7 +140,8 @@ class LibraryWindow(QDialog):
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search")
         self.search.setClearButtonEnabled(True)
-        self.sidebar = QTreeWidget()
+        self.sidebar = _Sidebar(self._drop_target)
+        self.sidebar.tracks_dropped.connect(self._drop_tracks)
         self.sidebar.setHeaderHidden(True)
         self.sidebar.setExpandsOnDoubleClick(False)  # a click opens; a second shouldn't close
         self.sidebar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -435,6 +450,17 @@ class LibraryWindow(QDialog):
         if message is None:
             self._update_status()
 
+    def _drop_target(self, item: QTreeWidgetItem) -> str | None:
+        """The saved playlist that tracks dropped on ``item`` go into ("" for a new one,
+        dropped on Playlists itself); None if they can't be dropped there."""
+        if not isinstance(item.data(0, _SOURCE), PlaylistsSource):
+            return None
+        node = item.data(0, _NODE)
+        return str(node.key) if isinstance(node, Node) else ""
+
+    def _drop_tracks(self, tracks: list[Track], playlist: str) -> None:
+        self._add(tracks, playlist or None, "")
+
     def _playlist_menu(self, parent: QMenu, add: Callable[[str | None], object]) -> QMenu:
         """Add to Playlist ▸ every saved playlist, then New Playlist…"""
         menu = parent.addMenu("&Add to Playlist")
@@ -566,6 +592,74 @@ class LibraryWindow(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(splitter, 1)
         layout.addLayout(bottom)
+
+
+class _Sidebar(QTreeWidget):
+    """The sources and what's in them. Tracks dragged from PyAmp (e.g. the table) can be
+    dropped onto a saved playlist, or onto Playlists itself for a new one; nothing else
+    is dropped here."""
+
+    #: These tracks were dropped for this playlist ("" for a new one). Sent once the
+    #: drop is over, as adding may ask for a name.
+    tracks_dropped = Signal(list, str)
+
+    def __init__(self, drop_target: Callable[[QTreeWidgetItem], str | None]) -> None:
+        super().__init__()
+        self._drop_target = drop_target
+        self._hovered: QTreeWidgetItem | None = None
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if dragged_tracks(event.mimeData()):
+            event.acceptProposedAction()  # each move then says whether it can land there
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        item = self.itemAt(event.position().toPoint())
+        target = self._target(item, event)
+        self._hover(item if target is not None else None)
+        if target is None:
+            event.ignore()
+        else:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        self._hover(None)
+        event.accept()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        target = self._target(self.itemAt(event.position().toPoint()), event)
+        self._hover(None)
+        if target is None:
+            event.ignore()
+            return
+        tracks = dragged_tracks(event.mimeData())
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        QTimer.singleShot(0, lambda: self.tracks_dropped.emit(tracks, target))
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        item = self._hovered
+        if item is None or item.treeWidget() is not self:  # gone meanwhile
+            return
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(self.palette().highlight().color(), 2))
+        painter.drawRoundedRect(self.visualItemRect(item).adjusted(1, 1, -1, -1), 3, 3)
+
+    def _target(self, item: QTreeWidgetItem | None, event: QDropEvent) -> str | None:
+        if item is None or not dragged_tracks(event.mimeData()):
+            return None
+        return self._drop_target(item)
+
+    def _hover(self, item: QTreeWidgetItem | None) -> None:
+        if item is not self._hovered:
+            self._hovered = item
+            self.viewport().update()
 
 
 def _children(item: QTreeWidgetItem) -> list[QTreeWidgetItem]:

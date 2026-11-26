@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from enum import StrEnum
 
@@ -139,6 +140,13 @@ class Playlist(Sequence[Track]):
         self._total_ms -= sum(self._tracks[i].duration_ms for i in doomed)
         self._tracks = [t for i, t in enumerate(self._tracks) if i not in doomed]
         self._changed()
+
+    def retitle(self, index: int, title: str) -> Track:
+        """Rename the track at ``index`` where it is (the cursor stays); returns it."""
+        track = dataclasses.replace(self._tracks[index], title=title)
+        self._tracks[index] = track
+        self._changed()
+        return track
 
     def replace(self, tracks: Iterable[Track]) -> None:
         """Swap in a whole new list (e.g. another saved playlist). Clears the cursor."""

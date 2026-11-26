@@ -41,6 +41,7 @@ from pyamp.core.events import (
     SavedPlaylistsChanged,
     StreamTitleChanged,
     TrackChanged,
+    TrackRetitled,
 )
 from pyamp.core.models import PlaybackState, RepeatMode, Track
 from pyamp.core.player import Player
@@ -101,6 +102,7 @@ class MenuBarIcon(QObject):
 
         bus.subscribe(TrackChanged, self._on_track)
         bus.subscribe(StreamTitleChanged, self._on_stream_title)
+        bus.subscribe(TrackRetitled, self._on_retitled)
         bus.subscribe(PlaybackStateChanged, self._on_state)
         bus.subscribe(PlayModeChanged, self._on_modes)
         bus.subscribe(SavedPlaylistsChanged, self._on_playlists)
@@ -166,6 +168,11 @@ class MenuBarIcon(QObject):
         self.subtitle.setText(_elide(self._track.title))
         self.subtitle.setVisible(True)
         self.icon.setToolTip(f"{event.title} — {self._track.title} - {APP_NAME}")
+
+    def _on_retitled(self, event: TrackRetitled) -> None:
+        self._on_track(TrackChanged(event.track, event.index))
+        if title := self._player.stream_title:
+            self._on_stream_title(StreamTitleChanged(title))
 
     def _on_state(self, event: PlaybackStateChanged) -> None:
         playing = event.state is PlaybackState.PLAYING

@@ -28,7 +28,14 @@ from PySide6.QtCore import QCoreApplication, QUrl
 from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 from pyamp.app import Application
-from pyamp.core.events import EventBus, PositionChanged, StreamTitleChanged, TrackChanged
+from pyamp.core.events import (
+    EventBus,
+    PlaylistChanged,
+    PositionChanged,
+    StreamTitleChanged,
+    TrackChanged,
+    TrackRetitled,
+)
 from pyamp.core.models import StreamUrl, Track
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
@@ -41,6 +48,8 @@ from tests.test_background_loader import wait_until
 from tests.test_playlist_ui import app  # noqa: F401  (fixture: the real app, offscreen)
 
 STATION = Track.for_stream(StreamUrl("https://radio.example/groove"), "Groove Salad")
+#: A stream known only by its URL (e.g. from Add URL), so it's titled "live".
+UNNAMED = Track.for_stream(StreamUrl("https://radio.example/live"))
 # resolve() so it is absolute on Windows too (C:\m\song.mp3)
 SONG = Track(location=Path("/m/song.mp3").resolve(), title="Song", duration_ms=60_000)
 
@@ -62,6 +71,49 @@ def test_stream_titles_are_published_for_streams_only(
     player.play_index(0)
     assert player.stream_title == ""  # reset by the next track
     assert backend.loaded[-2] == STATION.location
+
+
+def test_a_stream_known_by_its_url_is_named_after_its_station(
+    player: Player, playlist: Playlist, backend: FakeBackend, bus: EventBus
+) -> None:
+    retitled: list[TrackRetitled] = []
+    changed: list[PlaylistChanged] = []
+    started: list[TrackChanged] = []
+    bus.subscribe(TrackRetitled, retitled.append)
+    playlist.add([SONG, UNNAMED])
+    player.play_index(1)
+    bus.subscribe(PlaylistChanged, changed.append)
+    bus.subscribe(TrackChanged, started.append)
+    assert UNNAMED.title == "live"
+    backend._listener.on_station_name(" Groove Salad ")
+    named = Track.for_stream(UNNAMED.location, "Groove Salad")  # type: ignore[arg-type]
+    assert playlist[1] == named
+    assert retitled == [TrackRetitled(named, 1)]
+    assert changed == [PlaylistChanged()]  # so the playlist shows, and saves, the name
+    assert started == []  # still the same track: nothing restarts
+    assert playlist.current_index == 1
+    backend._listener.on_station_name("Groove Salad")  # said again: nothing more
+    backend._listener.on_station_name("Another Name")  # it has a name now: kept
+    assert playlist[1].title == "Groove Salad"
+    assert len(retitled) == 1
+
+
+def test_only_an_unnamed_stream_is_renamed(
+    player: Player, playlist: Playlist, backend: FakeBackend, bus: EventBus
+) -> None:
+    retitled: list[TrackRetitled] = []
+    bus.subscribe(TrackRetitled, retitled.append)
+    playlist.add([SONG, STATION, UNNAMED])
+    backend._listener.on_station_name("Nothing playing")
+    player.play_index(0)
+    backend._listener.on_station_name("A file's own tag")
+    player.play_index(1)
+    backend._listener.on_station_name("Groove Salad FM")  # named by its playlist: kept
+    player.play_index(2)
+    backend._listener.on_station_name("   ")  # blank says nothing
+    backend._listener.on_station_name("")
+    assert [t.title for t in playlist] == ["Song", "Groove Salad", "live"]
+    assert retitled == []
 
 
 class Adapter:
@@ -150,6 +202,36 @@ def test_lcd_window_and_menu_bar_show_the_song(app: Application) -> None:  # noq
         "Massive Attack - Teardrop",
         "Groove Salad",
     )
+
+
+def test_the_station_name_shows_everywhere_with_the_song(app: Application) -> None:  # noqa: F811
+    app.playlist.add([UNNAMED])
+    app.player.play_index(0)
+    app.player.on_stream_title("Massive Attack - Teardrop")  # the song may come first
+    app.player.on_station_name("Groove Salad")
+    window = app.window
+    assert window._lcd._title.text() == "1. Groove Salad — Massive Attack - Teardrop"
+    assert window.windowTitle().startswith("Massive Attack - Teardrop — 1. Groove Salad")
+    icon = window.menu_bar_icon
+    assert (icon.title.text(), icon.subtitle.text()) == (
+        "Massive Attack - Teardrop",
+        "Groove Salad",
+    )
+    assert window._playlist_view.model().index(0, 0).data() == "1. Groove Salad"
+    app.playlists.save_now()
+    assert app.playlists.active is not None
+    [entry] = app.playlists._saved.entries(app.playlists.active)
+    assert entry.title == "Groove Salad"  # kept for next time
+
+
+def test_the_station_name_shows_before_any_song(app: Application) -> None:  # noqa: F811
+    app.playlist.add([UNNAMED])
+    app.player.play_index(0)
+    app.player.on_station_name("Groove Salad")
+    window = app.window
+    assert window._lcd._title.text() == "1. Groove Salad"
+    assert window.windowTitle().startswith("1. Groove Salad - ")
+    assert window.menu_bar_icon.title.text() == "Groove Salad"
 
 
 def test_a_saved_playlist_keeps_its_station(app: Application) -> None:  # noqa: F811

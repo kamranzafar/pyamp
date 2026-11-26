@@ -327,6 +327,7 @@ def test_plays_a_radio_stream_and_reports_its_song(
         backend.play()
         wait_until(lambda: PlaybackState.PLAYING in recorder.values("state"))
         wait_until(lambda: "Massive Attack - Teardrop" in recorder.values("stream_title"))
+        assert "PyAmp Test Radio" in recorder.values("station_name")  # its icy-name
         assert recorder.values("error") == []
 
 

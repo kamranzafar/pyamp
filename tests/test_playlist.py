@@ -239,6 +239,18 @@ def test_move_keeps_the_playing_track(playlist: Playlist) -> None:
     assert playlist.current_index == 0
 
 
+def test_retitle_renames_a_track_where_it_is(playlist: Playlist, bus: EventBus) -> None:
+    playlist.add(named("a", "b", "c"))
+    playlist.set_current(1)
+    events: list[PlaylistChanged] = []
+    bus.subscribe(PlaylistChanged, events.append)
+    renamed = playlist.retitle(1, "B side")
+    assert renamed == playlist[1]
+    assert [t.title for t in playlist] == ["a", "B side", "c"]
+    assert playlist.current_index == 1  # still playing
+    assert events == [PlaylistChanged()]
+
+
 def test_move_publishes_one_change(playlist: Playlist, bus: EventBus) -> None:
     playlist.add(named("a", "b"))
     events: list[PlaylistChanged] = []

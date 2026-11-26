@@ -54,6 +54,10 @@ class BackendListener(Protocol):
         """A stream reported what it's playing now (e.g. an internet radio's current song)."""
         ...
 
+    def on_station_name(self, name: str) -> None:
+        """A stream reported its own name (an internet radio station's ICY name)."""
+        ...
+
     def on_error(self, message: str) -> None: ...
     def on_audio_info(self, bitrate: int, sample_rate: int) -> None:
         """The playing audio's bitrate (bits/s) and sample rate (Hz); 0 if unknown.
@@ -87,6 +91,9 @@ class _NullListener:
         pass
 
     def on_stream_title(self, title: str) -> None:
+        pass
+
+    def on_station_name(self, name: str) -> None:
         pass
 
     def on_error(self, message: str) -> None:

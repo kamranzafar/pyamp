@@ -64,9 +64,6 @@ _CANCEL_CHECK_S = 0.1
 #: How much of a stream mpv reads ahead (and half that it keeps behind).
 STREAM_BUFFER_BYTES = 32 * 1024 * 1024
 
-#: How full mpv's read-ahead cache counts as full: a stream bigger than this won't fit.
-CACHE_FULL = 0.9
-
 #: python-mpv, bound to the best libmpv available (see libmpv_loader).
 mpv: Any
 #: Which libmpv that is, e.g. for ``pyamp --version``.
@@ -302,17 +299,6 @@ class MpvAudioBackend(AudioBackend):
             self._mpv.command("af", "add", f"@{EQ_LABEL}:lavfi=[{equalizer_graph(equalizer)}]")
             self._equalizer = equalizer
 
-    def stream_is_buffered(self) -> bool:
-        """Whether mpv has the whole playing file in its cache (it reads network streams
-        ahead, up to ``demuxer-max-bytes``: 150 MiB by default)."""
-        if self._closed or not self._can_dump_cache:
-            return False
-        try:
-            state = self._mpv.demuxer_cache_state
-        except (AttributeError, RuntimeError):  # nothing playing
-            return False
-        return isinstance(state, dict) and bool(state.get("bof-cached") and state.get("eof-cached"))
-
     def buffered_range(self) -> tuple[float, float] | None:
         """The cached stretch around the playback position. After a seek mpv may hold
         several; the one being played is wanted, else the last (where it's reading)."""
@@ -328,35 +314,11 @@ class MpvAudioBackend(AudioBackend):
         candidates = playing or stretches
         return candidates[-1] if candidates else None
 
-    def stream_fits_buffer(self) -> bool:
-        """Whether the playing stream can be cached whole (it's under ``demuxer-max-bytes``,
-        150 MiB by default). Unknown sizes are taken to fit until the cache fills up."""
-        if self._closed:
-            return False
-        try:
-            limit = self._mpv.demuxer_max_bytes
-            size = self._mpv.file_size
-            state = self._mpv.demuxer_cache_state or {}
-        except (AttributeError, RuntimeError):  # nothing playing
-            return True
-        if not limit:
-            return True
-        room = limit * CACHE_FULL
-        if size and size > room:
-            return False
-        return bool(state.get("eof-cached")) or (state.get("fw-bytes") or 0) < room
-
-    def save_stream(self, target: Path, start: float = 0.0, end: float | None = None) -> bool:
+    def save_stream(self, target: Path, start: float, end: float) -> bool:
         """Write mpv's cache of the playing file to ``target`` (Matroska, by its suffix)."""
         if self._closed or not self._can_dump_cache:
             return False
         try:
-            if end is None:  # the whole song
-                if not self.stream_is_buffered():
-                    return False
-                end = self._mpv.duration
-                if not end:
-                    return False
             # Always an explicit end: with "no" (to the end) mpv keeps the command running
             # until playback reaches the end of the file, however much is already cached.
             self._mpv.command("dump-cache", f"{start:.3f}", f"{end:.3f}", str(target))

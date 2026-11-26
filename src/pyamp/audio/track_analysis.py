@@ -76,36 +76,38 @@ _HOP = ANALYSIS_RATE // FPS
 _WAIT_FOR_SAMPLES_S = 0.02
 #: After the first bars, samples are analysed at least this many at a time.
 MIN_BATCH_SAMPLES = ANALYSIS_RATE
-#: How often to check whether a streamed song is wholly buffered yet.
+#: How often to look for a stream's first piece (it's also looked for as soon as the
+#: stream starts to play).
 STREAM_CHECK_MS = 500
-#: How often to save and analyse a live stream's newly buffered stretch, once its first
-#: piece is under way (that one is looked for every STREAM_CHECK_MS, so the bars start
-#: quickly). Stations send a few seconds ahead, so the levels are still ready before
+#: How often to save and analyse a stream's newly buffered stretch, once its first piece
+#: is under way. Stations send a few seconds ahead, so the levels are still ready before
 #: they're heard; fewer, longer pieces cost less (each is a file and a decoder to start).
 LIVE_PIECE_MS = 1500
-#: How much of a live stream's levels to keep (it may play all day).
+#: The longest piece: the first bars come quickly, and a song buffered far ahead is
+#: analysed a piece after another rather than in one long go.
+PIECE_MAX_S = 30.0
+#: How much of a live stream's levels to keep (it may play all day). A song's are all kept,
+#: so seeking in it finds its bars.
 LIVE_KEEP_S = 120.0
-#: A live stream's buffer must be within this of the playback position, or its timing
-#: isn't the player's and its bars would be out of step: then it isn't analysed.
-LIVE_SLACK_S = 5.0
-#: The shortest stretch of a live stream worth saving and analysing.
-LIVE_MIN_PIECE_S = 0.25
-#: How far ahead of playback pieces are saved. mpv may have minutes buffered (a long song
-#: from a server); analysing all of that at once would be a burst of work, and push the
-#: levels being played out of the few minutes that are kept.
+#: How far ahead of playback a live stream's pieces go: further, and analysing them would
+#: push the levels being played out of the few minutes that are kept.
 LIVE_AHEAD_S = 30.0
+#: A station's buffer must be within this of the playback position, or its timing isn't
+#: the player's and its bars would be out of step: then it isn't analysed.
+LIVE_SLACK_S = 5.0
+#: The shortest stretch of a stream worth saving and analysing.
+LIVE_MIN_PIECE_S = 0.25
+#: A position this far from where playback was heading is a seek: its bars are looked
+#: for at once.
+SEEK_S = 2.0
 
 
 class StreamSaver(Protocol):
     """Saves what the backend has buffered of the playing stream (the player, for it)."""
 
-    def stream_is_buffered(self) -> bool: ...
-
-    def stream_fits_buffer(self) -> bool: ...
-
     def buffered_range(self) -> tuple[float, float] | None: ...
 
-    def save_stream(self, target: Path, start: float = 0.0, end: float | None = None) -> bool: ...
+    def save_stream(self, target: Path, start: float, end: float) -> bool: ...
 
 
 class LevelTimeline:
@@ -391,8 +393,8 @@ def equalizer_offsets(
 class AnalysedSpectrum(QObject):
     """Publishes analysed levels for the current position while playing."""
 
-    #: A copy (or None if it failed) of seconds ``start`` to ``end`` (-1: all of it) of the
-    #: stream numbered ``number`` was saved: (number, copy, start, end).
+    #: A copy (or None if it failed) of seconds ``start`` to ``end`` of the stream
+    #: numbered ``number`` was saved: (number, copy, start, end).
     _stream_saved = Signal(int, object, float, float)
 
     def __init__(
@@ -412,15 +414,14 @@ class AnalysedSpectrum(QObject):
         self._clock = clock
         self._timeline: LevelTimeline | None = None
         self._location: Path | None = None  # the current file, analysed while active
-        # A streamed song (with a known length) is analysed from a saved copy.
+        # A stream (a station or a song from a server) is analysed a piece at a time, as
+        # it's buffered, into one timeline.
         self._streams = streams
         self._stream: StreamUrl | None = None
-        self._stream_number = 0  # bumped per track: a copy saved for an older one is dropped
-        self._stream_copy: Path | None = None
-        # A live stream (no length) is analysed a piece at a time into one timeline.
-        self._live = False
-        self._live_timeline: LevelTimeline | None = None
-        self._live_to: float | None = None  # how far it's been saved
+        self._stream_number = 0  # bumped per track: a piece saved for an older one is dropped
+        self._endless = False  # a station: no length, and only its last minutes are kept
+        self._pieces_timeline: LevelTimeline | None = None
+        self._analysed: list[tuple[float, float]] = []  # the stretches saved, in order
         self._pieces = 0  # numbers the pieces' files
         self._heard = False  # whether the current track has started to play
         self._saving = False
@@ -491,7 +492,7 @@ class AnalysedSpectrum(QObject):
             self._timer.stop()
             self._stream_check.stop()
             self._analyser.cancel_all()
-            self._drop_live_timeline()
+            self._drop_pieces()
             self._timeline = None
 
     def shutdown(self) -> None:
@@ -505,59 +506,45 @@ class AnalysedSpectrum(QObject):
         track = event.track
         location = track.location if track else None
         self._location = location if isinstance(location, Path) else None
-        old_copy = self._forget_stream()
+        self._forget_stream()
         if isinstance(location, StreamUrl) and track and self._streams:
             self._stream = location
-            self._live = not track.duration_ms  # radio has no length: it never ends
-        self._analyse_current()  # stops analysing the old copy...
-        _remove(old_copy)  # ...before it's deleted
+            self._endless = not track.duration_ms  # radio has no length: it never ends
+        self._analyse_current()
         self._watch_stream()
         self._position_ms, self._position_at = 0, self._clock()
         self._heard = False
         self._drop_bars()  # the next track's levels start from nothing
 
     def _analyse_current(self) -> None:
-        if self._active and self._live:
-            if self._live_timeline is None:
-                self._live_timeline = LevelTimeline(keep_seconds=LIVE_KEEP_S)
-            self._timeline = self._live_timeline  # filled in as pieces are saved
+        if self._active and self._stream is not None:
+            if self._pieces_timeline is None:
+                keep = LIVE_KEEP_S if self._endless else None
+                self._pieces_timeline = LevelTimeline(keep_seconds=keep)
+            self._timeline = self._pieces_timeline  # filled in as pieces are saved
             return
-        location = (self._location or self._stream_copy) if self._active else None
+        location = self._location if self._active else None
         self._timeline = self._analyser.analyse(location) if location is not None else None
 
-    # -- Streamed songs -------------------------------------------------------------------- #
+    # -- Streams ---------------------------------------------------------------------------- #
 
     def _watch_stream(self) -> None:
-        if self._active and self._stream is not None and (self._live or not self._stream_copy):
-            # Soon at first, so a station's bars start quickly; pieces then slow to
-            # LIVE_PIECE_MS (see _check_stream).
+        if self._active and self._stream is not None:
+            # Soon at first, so the bars start quickly; then at LIVE_PIECE_MS (see
+            # _check_stream).
             self._stream_check.start(STREAM_CHECK_MS)
 
     def _check_stream(self) -> None:
-        """Save a song once it's wholly buffered, or a live stream's newly buffered stretch,
-        on a short-lived thread: writing it mustn't hold up the window."""
+        """Save the stream's next stretch to analyse on a short-lived thread: writing it
+        mustn't hold up the window."""
         streams = self._streams
         if self._saving or streams is None or self._stream is None:
             return
-        end: float | None
-        if self._live:
-            piece = self._next_piece(streams)
-            if piece is None:
-                return
-            start, end = piece
-            self._stream_check.setInterval(LIVE_PIECE_MS)  # the bars are on their way
-        elif streams.stream_is_buffered():
-            self._stream_check.stop()
-            start, end = 0.0, None
-        elif not streams.stream_fits_buffer():
-            # Too big to be buffered whole (e.g. an hour-long mix): a stretch at a time.
-            log.debug("The stream won't fit the buffer whole; analysing it as it plays")
-            self._live = True
-            self._analyse_current()
-            self._watch_stream()  # at the pace for pieces
+        piece = self._next_piece(streams)
+        if piece is None:
             return
-        else:
-            return  # not yet; check again shortly
+        start, end = piece
+        self._stream_check.setInterval(LIVE_PIECE_MS)  # the bars are on their way
         self._saving = True
         number = self._stream_number
         if self._copies is None:
@@ -567,67 +554,83 @@ class AnalysedSpectrum(QObject):
 
         def save() -> None:
             saved = streams.save_stream(target, start, end)
-            self._stream_saved.emit(number, target if saved else None, start, end or -1.0)
+            self._stream_saved.emit(number, target if saved else None, start, end)
 
         threading.Thread(target=save, name="pyamp-stream-copy", daemon=True).start()
 
     def _next_piece(self, streams: StreamSaver) -> tuple[float, float] | None:
-        """The live stream's stretch to save next: what's buffered beyond the last piece."""
+        """The stretch to save next: buffered but not yet analysed, from just before the
+        playback position on (what's playing, then what's coming)."""
         buffered = streams.buffered_range()
-        if buffered is None:
+        timeline = self._pieces_timeline
+        if buffered is None or timeline is None:
             return None
         start, end = buffered
         position = self.position()
         if not start - LIVE_SLACK_S <= position <= end + LIVE_SLACK_S:
-            if self._playing:  # the buffer runs on another clock: its bars would be wrong
+            # A song's times are its file's: it was sought where mpv hasn't fetched yet. A
+            # station's buffer may run on another clock: its bars would be wrong.
+            if self._endless and self._playing:
                 log.info("The stream's timing doesn't match playback; no visualiser for it")
                 self._forget_stream()
                 self._timeline = None
             return None
-        if self._live_to is not None and not start <= self._live_to <= end:
-            # A seek: playback is in another stretch now. Its levels start afresh there
-            # (the old ones may be far away, and only the last few minutes are kept).
-            self._drop_live_timeline()
+        if timeline.first_row and position - 1 < timeline.first_row / FPS:
+            # A station sought back past the levels it keeps: they start afresh there.
+            self._drop_pieces()
             self._analyse_current()
-        begin = max(start, self._live_to if self._live_to is not None else position - 1)
-        end = min(end, position + LIVE_AHEAD_S)
+        begin, gap_end = self._unanalysed(max(start, position - 1))
+        end = min(end, gap_end, begin + PIECE_MAX_S)
+        if self._endless:
+            end = min(end, position + LIVE_AHEAD_S)
         return (begin, end) if end - begin >= LIVE_MIN_PIECE_S else None
+
+    def _unanalysed(self, after: float) -> tuple[float, float]:
+        """The first stretch from ``after`` on that no piece has covered: (start, end)."""
+        begin = after
+        for start, end in self._analysed:
+            if start <= begin < end:
+                begin = end
+            elif begin < start:
+                return begin, start
+        return begin, float("inf")
+
+    def _mark_analysed(self, start: float, end: float) -> None:
+        spans = sorted([*self._analysed, (start, end)])
+        merged = [spans[0]]
+        for a, b in spans[1:]:
+            last_a, last_b = merged[-1]
+            if a <= last_b + 1e-3:  # touching or overlapping
+                merged[-1] = (last_a, max(last_b, b))
+            else:
+                merged.append((a, b))
+        self._analysed = merged
 
     def _on_stream_saved(self, number: int, copy: Path | None, start: float, end: float) -> None:
         self._saving = False
-        if number != self._stream_number:  # the track changed meanwhile
-            _remove(copy)
-            self._watch_stream()  # the new track may be a stream too
+        timeline = self._pieces_timeline
+        if number != self._stream_number or copy is None or timeline is None:
+            _remove(copy)  # for an older track, or hidden meanwhile; failed: tried again
             return
-        if self._live:
-            if copy is not None and self._live_timeline is not None:
-                self._analyser.analyse_piece(copy, self._live_timeline, start)
-                self._live_to = end
-            else:
-                _remove(copy)  # e.g. hidden meanwhile; the next check tries again
-            return
-        if copy is None:
-            log.info("Can't save the stream for the visualiser")
-            return
-        self._stream_copy = copy
-        self._analyse_current()
+        self._analyser.analyse_piece(copy, timeline, start)
+        self._mark_analysed(start, end)
+        if end - start >= PIECE_MAX_S - 1e-3:
+            self._check_stream()  # more is buffered (a song): on to the next piece
 
-    def _forget_stream(self) -> Path | None:
-        """Stop following the current stream; returns its copy, for the caller to delete."""
+    def _forget_stream(self) -> None:
+        """Stop following the current stream (pieces saved for it meanwhile are dropped)."""
         self._stream_number += 1
         self._stream_check.stop()
         self._stream = None
-        self._live = False
-        self._drop_live_timeline()
-        copy, self._stream_copy = self._stream_copy, None
-        return copy
+        self._endless = False
+        self._drop_pieces()
 
-    def _drop_live_timeline(self) -> None:
-        """Stop a live stream's pieces being analysed; it starts afresh when needed."""
-        if self._live_timeline is not None:
-            self._live_timeline.cancelled.set()  # queued pieces are skipped (and deleted)
-        self._live_timeline = None
-        self._live_to = None
+    def _drop_pieces(self) -> None:
+        """Stop a stream's pieces being analysed; it starts afresh when needed."""
+        if self._pieces_timeline is not None:
+            self._pieces_timeline.cancelled.set()  # queued pieces are skipped (and deleted)
+        self._pieces_timeline = None
+        self._analysed = []
 
     def _on_state(self, event: PlaybackStateChanged) -> None:
         # Freeze the interpolated position at the moment the state changes.
@@ -639,13 +642,16 @@ class AnalysedSpectrum(QObject):
             self._timer.stop()  # SpectrumService already clears the bars
 
     def _on_position(self, event: PositionChanged) -> None:
+        heading = self.position()
         self._position_ms, self._position_at = event.position_ms, self._clock()
-        if event.position_ms > 0 and not self._heard:
-            self._heard = True
-            # A station plays once it has buffered a few seconds: look now, rather than
-            # at the next check (up to STREAM_CHECK_MS later), so its bars start with it.
-            if self._active and self._live and self._live_to is None and not self._saving:
-                self._check_stream()
+        starts = event.position_ms > 0 and not self._heard
+        seek = self._heard and abs(event.position_ms / 1000 - heading) > SEEK_S
+        self._heard = self._heard or starts
+        # A stream plays once it has buffered a little, and a seek lands where it may not
+        # have been analysed: look now, rather than at the next check (up to
+        # LIVE_PIECE_MS later), so the bars come with the sound.
+        if (starts or seek) and self._active and self._stream is not None:
+            self._check_stream()
 
     def _on_equalizer(self, event: EqualizerChanged) -> None:
         self._offsets = equalizer_offsets(event.equalizer, self._band_count)

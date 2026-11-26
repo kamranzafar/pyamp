@@ -422,6 +422,7 @@ class AnalysedSpectrum(QObject):
         self._live_timeline: LevelTimeline | None = None
         self._live_to: float | None = None  # how far it's been saved
         self._pieces = 0  # numbers the pieces' files
+        self._heard = False  # whether the current track has started to play
         self._saving = False
         self._copies: Path | None = None  # a temporary folder, made when first needed
         self._stream_check = QTimer(self)
@@ -512,6 +513,7 @@ class AnalysedSpectrum(QObject):
         _remove(old_copy)  # ...before it's deleted
         self._watch_stream()
         self._position_ms, self._position_at = 0, self._clock()
+        self._heard = False
         self._drop_bars()  # the next track's levels start from nothing
 
     def _analyse_current(self) -> None:
@@ -638,6 +640,12 @@ class AnalysedSpectrum(QObject):
 
     def _on_position(self, event: PositionChanged) -> None:
         self._position_ms, self._position_at = event.position_ms, self._clock()
+        if event.position_ms > 0 and not self._heard:
+            self._heard = True
+            # A station plays once it has buffered a few seconds: look now, rather than
+            # at the next check (up to STREAM_CHECK_MS later), so its bars start with it.
+            if self._active and self._live and self._live_to is None and not self._saving:
+                self._check_stream()
 
     def _on_equalizer(self, event: EqualizerChanged) -> None:
         self._offsets = equalizer_offsets(event.equalizer, self._band_count)

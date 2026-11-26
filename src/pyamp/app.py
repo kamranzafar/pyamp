@@ -52,6 +52,7 @@ from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import (
     EventBus,
     LibraryChanged,
+    RadioStationsChanged,
     SavedPlaylistEdited,
     SavedPlaylistsChanged,
     SmartPlaylistsChanged,
@@ -66,6 +67,8 @@ from pyamp.library.local_source import LocalSource
 from pyamp.library.metadata import MutagenMetadataReader
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.library.playlists_source import PlaylistsSource
+from pyamp.library.radio_source import RadioSource
+from pyamp.library.radio_stations import RadioStations
 from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.library.scanner import LibraryScanner
 from pyamp.library.smart_playlists import SmartPlaylists
@@ -77,6 +80,7 @@ from pyamp.ui.icons import app_icon
 from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.main_window import MainWindow, UiServices
 from pyamp.ui.playlist_session import PlaylistSession
+from pyamp.ui.radio_commands import RadioCommands
 from pyamp.ui.skin import DEFAULT_SKIN
 from pyamp.ui.smart_playlist_commands import SmartPlaylistCommands
 
@@ -150,6 +154,8 @@ class Application:
         saved_playlists: SavedPlaylists | None = None,
         catalog: Catalog | None = None,
         smart_playlists: SmartPlaylists | None = None,
+        *,
+        radio_stations: RadioStations | None = None,
     ) -> None:
         self._store = store or SettingsStore()
         self.settings = self._store.load()
@@ -170,7 +176,7 @@ class Application:
             )
         self.playlist_formats = PlaylistFormatRegistry.default()
         self.loader = BackgroundTrackLoader(
-            TrackLoader(MutagenMetadataReader(), self.playlist_formats)
+            track_loader := TrackLoader(MutagenMetadataReader(), self.playlist_formats)
         )
         self.catalog = catalog or Catalog()
         self.library = BackgroundLibraryScanner(
@@ -250,6 +256,22 @@ class Application:
         self.sources.add(self.smart_source)
         for smart_event in (SmartPlaylistsChanged, LibraryChanged):
             self.bus.subscribe(smart_event, lambda _: self.sources.changed(self.smart_source))
+        # Radio stations, last of the app's own sections.
+        self.radio_commands = RadioCommands(
+            stations := radio_stations or RadioStations(),
+            self.bus,
+            parent=lambda: QApplication.activeWindow() or self.window,
+        )
+        self.radio_source = RadioSource(
+            stations,
+            track_loader,  # looks up stations added as .pls/.m3u links
+            add_station=self.radio_commands.new,
+            edit_station=self.radio_commands.edit,
+            delete_station=self.radio_commands.delete,
+        )
+        self.sources.add(self.radio_source)
+        self.bus.subscribe(RadioStationsChanged, lambda _: self.sources.changed(self.radio_source))
+        self.window.save_to_radio = self.radio_commands.add
         # Restore preferences *after* the UI exists, so widgets receive the events.
         self._apply_settings(self.settings)
         if not args.no_plugins:

@@ -268,10 +268,17 @@ distortion.
 
 ### Streams and internet radio
 
-**File → Add URL…** (`Ctrl+U`) adds an `http://` or `https://` stream: an internet
-radio station, a station's `.pls`/`.m3u` (downloaded and expanded), or an audio file
-on a web server. Links dragged from a browser work too, and playlists keep their
-streams (with their names) alongside files.
+**File → Add URL to Playlist…** (`Ctrl+U`) adds an `http://` or `https://` stream to
+the open playlist: an internet radio station, a station's `.pls`/`.m3u` (downloaded and
+expanded), or an audio file on a web server. Links dragged from a browser work too,
+and playlists keep their streams (with their names) alongside files.
+
+To keep stations, use the library's **Radio** section: right-click **Radio** → **Add
+Station…** and give it a name and its URL, or right-click a stream in the playlist →
+**Save to Radio…**. Picking Radio lists every station; play them, or add them to
+playlists, like any other part of the library, and right-click one to edit or delete
+it. A station added as a `.pls` or `.m3u` link is kept that way and looked up each
+time it's listed, so it keeps working when the station moves its stream.
 
 While a station plays, the LCD, window title, menu bar menu and system media widgets
 show the current song as the station announces it (Icecast/Shoutcast "ICY" titles;
@@ -438,8 +445,9 @@ flowchart TB
   interface and chosen by name at start-up. `dsp/` turns the audio into the
   visualiser's levels.
 - **`library/` gets music in**: reading tags, the library index (one SQLite file),
-  saved and smart playlists, and playlist formats. Everything the library window
-  browses (this computer, playlists, smart playlists, a Subsonic or DLNA server) is a
+  saved and smart playlists, radio stations, and playlist formats. Everything the
+  library window browses (this computer, playlists, smart playlists, radio stations, a
+  Subsonic or DLNA server) is a
   `MediaSource`, so the window treats them all alike and a plugin can add more.
 - **`ui/` is the PySide6 front-end**: the player, library and equaliser windows and
   their dialogs. One skin gives every window and dialog its colours and look, and
@@ -455,7 +463,8 @@ flowchart TB
   to the main thread before anything is shown or published. Audio is decoded on the
   backends' own native threads.
 - **PyAmp only reads your music.** Its own state is a few files in its config and data
-  folders: settings, the library index, saved playlists (`.m3u8`) and smart playlists.
+  folders: settings, the library index, saved playlists (`.m3u8`), smart playlists and
+  radio stations.
 
 ### Dependency rule
 

@@ -127,6 +127,8 @@ class MainWindow(QMainWindow):
     #: Whether the window can be seen (shown and not minimised); the visualiser pauses
     #: its work while it can't.
     visibility_changed = Signal(bool)
+    #: Asks to save a stream as a radio station: ``(url, name)``. Set by the app.
+    save_to_radio: Callable[[str, str], object] | None = None
 
     def __init__(self, services: UiServices, skin: Skin) -> None:
         super().__init__()
@@ -428,6 +430,12 @@ class MainWindow(QMainWindow):
         play.setEnabled(bool(rows))
         play.triggered.connect(lambda: self._s.player.play_index(rows[0]))
         menu.addAction(self._remove_action)
+        stream = self._s.playlist[rows[0]] if len(rows) == 1 else None
+        if stream is not None and stream.is_stream and self.save_to_radio is not None:
+            save = self.save_to_radio
+            menu.addAction("Save to &Radio…").triggered.connect(
+                lambda: save(str(stream.location), stream.title)
+            )
         menu.addSeparator()
         menu.addMenu(self._sort_menu)
         menu.addAction(self._dedupe_action)

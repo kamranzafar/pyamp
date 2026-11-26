@@ -33,6 +33,7 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox, QToolButt
 from pyamp.app import Application
 from pyamp.audio import registry
 from pyamp.config import Settings, SettingsStore
+from pyamp.core.events import MediaSourcesChanged
 from pyamp.core.models import StreamUrl, Track
 from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.ui.jump_dialog import matches, search_text
@@ -174,6 +175,32 @@ def test_context_menu_offers_editing_actions(app: Application, tmp_path: Path) -
     ]
 
 
+def test_a_stream_can_be_saved_to_radio(app: Application, tmp_path: Path) -> None:
+    add_songs(app, tmp_path / "m", "a")
+    app.playlist.add([Track.for_stream(StreamUrl("https://jazz.example/live"), "Jazz FM")])
+    view = app.window._playlist_view
+
+    def texts() -> list[str]:
+        return [a.text() for a in app.window._context_menu().actions() if a.text()]
+
+    view.selectRow(0)  # a file
+    assert "Save to &Radio…" not in texts()
+    view.selectAll()  # more than one
+    assert "Save to &Radio…" not in texts()
+    view.selectRow(1)
+    menu = app.window._context_menu()
+    save = next(a for a in menu.actions() if a.text() == "Save to &Radio…")
+    save.trigger()
+    dialog = app.radio_commands.dialog
+    assert dialog is not None
+    assert (dialog.name.text(), dialog.url.text()) == ("Jazz FM", "https://jazz.example/live")
+    changed: list[MediaSourcesChanged] = []
+    app.bus.subscribe(MediaSourcesChanged, changed.append)
+    dialog.accept()
+    assert [s.name for s in app.radio_source.roots()] == ["Jazz FM"]
+    assert changed == [MediaSourcesChanged(app.radio_source)]  # the library shows it
+
+
 # -- Drag & drop ----------------------------------------------------------------------- #
 
 
@@ -297,3 +324,16 @@ def test_import_and_export_a_playlist(
     answer_dialog(monkeypatch, "choose_file", [])
     app.window._import_playlist()
     assert app.playlists.active == "mix"
+
+
+def test_add_station_opens_its_dialog_from_the_library(app: Application) -> None:
+    library = app.window.show_library()
+    radio = library.sidebar_item(3)
+    assert radio is not None and radio.text(0) == "Radio"
+    menu = library.sidebar_menu(radio)
+    assert menu is not None
+    add = next(a for a in menu.actions() if a.text() == "&Add Station…")
+    add.trigger()  # as a click does: Qt passes "checked" along
+    dialog = app.radio_commands.dialog
+    assert dialog is not None and dialog.isVisible()
+    assert (dialog.name.text(), dialog.url.text()) == ("", "")

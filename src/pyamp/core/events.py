@@ -167,6 +167,11 @@ class SmartPlaylistsChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class RadioStationsChanged:
+    """A radio station was added, changed or deleted."""
+
+
+@dataclass(frozen=True, slots=True)
 class AudioInfoChanged:
     """What's playing: bitrate in kbps and sample rate in Hz (0 where unknown).
 

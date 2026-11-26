@@ -157,6 +157,15 @@ def isolated_smart_playlists(
     monkeypatch.setattr("pyamp.library.smart_playlists.default_file", lambda: path)
 
 
+@pytest.fixture(autouse=True)
+def isolated_radio_stations(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No test may touch the user's real radio stations."""
+    path = tmp_path_factory.mktemp("radio") / "radio_stations.json"
+    monkeypatch.setattr("pyamp.library.radio_stations.default_file", lambda: path)
+
+
 @pytest.fixture
 def bus() -> EventBus:
     return EventBus()

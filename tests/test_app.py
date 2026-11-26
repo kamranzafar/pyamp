@@ -418,6 +418,7 @@ def test_the_library_lists_the_saved_playlists(
         "This Computer",
         "Playlists",
         "Smart Playlists",
+        "Radio",
     ]
     playlists = library.sidebar_item(1)
     assert playlists is not None

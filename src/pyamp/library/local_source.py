@@ -25,6 +25,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from pyamp.core.models import Track
+from pyamp.library.artwork import file_artwork
 from pyamp.library.catalog import Catalog, Group, GroupKind
 from pyamp.library.sources import Node, NodeAction
 
@@ -88,3 +89,6 @@ class LocalSource:
             return []
         folder = Path(group.name)
         return [NodeAction("&Remove from Library", lambda: self._remove_source(folder))]
+
+    def artwork(self, track: Track) -> bytes | None:
+        return file_artwork(track.location) if isinstance(track.location, Path) else None

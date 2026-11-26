@@ -111,3 +111,9 @@ def test_folders_can_be_removed(source: LocalSource, removed: list[Path], tmp_pa
 )
 def test_group_names(group: Group, name: str) -> None:
     assert group_name(group) == name
+
+
+def test_a_files_artwork_is_its_own_or_its_folders(source: LocalSource, tmp_path: Path) -> None:
+    (tmp_path / "cover.jpg").write_bytes(b"cover")
+    assert source.artwork(Track(tmp_path / "song.mp3", "Song")) == b"cover"
+    assert source.artwork(Track(tmp_path / "elsewhere" / "song.mp3", "Song")) is None

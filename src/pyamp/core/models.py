@@ -166,6 +166,9 @@ class Track:
     disc_number: int = 0
     duration_ms: int = 0
     replay_gain: ReplayGain | None = None
+    #: Where the track's source finds its picture (e.g. a server's cover id or address);
+    #: "" if it has none or, like a file's, it's found from the track itself.
+    artwork: str = ""
 
     @classmethod
     def from_path(cls, path: Path) -> Track:

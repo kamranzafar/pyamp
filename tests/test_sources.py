@@ -46,6 +46,9 @@ class Source:
     def actions(self, node: Node | None) -> list[NodeAction]:
         return []
 
+    def artwork(self, track: Track) -> bytes | None:
+        return None
+
 
 def test_node_labels() -> None:
     assert Node("k", "Mezzanine").label == "Mezzanine"

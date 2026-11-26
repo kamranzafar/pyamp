@@ -80,5 +80,11 @@ app = BUNDLE(  # noqa: F821
         "NSHighResolutionCapable": True,
         "NSHumanReadableCopyright": "Copyright (C) 2026 Kamran Zafar. GPL-3.0-or-later.",
         "LSApplicationCategoryType": "public.app-category.music",
+        # macOS 15 asks before an app searches the local network; without this the
+        # DLNA plugin's search is blocked without asking.
+        "NSLocalNetworkUsageDescription": (
+            "PyAmp looks for DLNA/UPnP media servers on your network so you can play "
+            "their music."
+        ),
     },
 )

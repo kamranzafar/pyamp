@@ -37,6 +37,7 @@ from pyamp.core.events import EventBus
 from pyamp.core.models import Location, PlaybackState, ReplayGainMode, Track
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
+from pyamp.ui import file_dialogs
 
 # Widget tests must never open real windows (and must work on CI without a display).
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -147,6 +148,15 @@ def isolated_library(
     monkeypatch.setattr("pyamp.library.catalog.default_path", lambda: path)
 
 
+@pytest.fixture(autouse=True)
+def isolated_smart_playlists(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No test may touch the user's real smart playlists."""
+    path = tmp_path_factory.mktemp("smart") / "smart_playlists.json"
+    monkeypatch.setattr("pyamp.library.smart_playlists.default_file", lambda: path)
+
+
 @pytest.fixture
 def bus() -> EventBus:
     return EventBus()
@@ -216,3 +226,20 @@ class BackendRecorder:
 
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
         self._record("audio")
+
+
+def answer_dialog(
+    monkeypatch: pytest.MonkeyPatch, chooser: str, picked: list[Path]
+) -> list[tuple[object, str]]:
+    """Stand in for a file dialog: it picks ``picked`` ([] cancels). Returns the
+    (window, title) of each dialog asked for."""
+    asked: list[tuple[object, str]] = []
+
+    def choose(parent: object, title: str, *args: object) -> None:
+        asked.append((parent, title))
+        done = args[-1]
+        assert callable(done)
+        done(picked)
+
+    monkeypatch.setattr(file_dialogs, chooser, choose)
+    return asked

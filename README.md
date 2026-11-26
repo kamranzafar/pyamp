@@ -120,10 +120,18 @@ starts, and when you click **Rescan**. Only files that changed are read again.
 - **Add to Playlist ▸** (right-click) adds the selected tracks to any saved playlist,
   or to a **New Playlist…**. Right-click an artist, album or genre in the sidebar to
   add all of it (a new playlist is named after it). Tracks already in the playlist are
-  skipped. Local files can also be dragged into the open playlist.
+  skipped. Or drag tracks onto a playlist under **Playlists** in the sidebar (onto
+  **Playlists** itself for a new one), or into the open playlist in the player (songs
+  from a server keep their tags).
 - **Playlists**, in the sidebar, lists your saved playlists. Pick one to see its tracks
   (with the library's tags; no music files are read); right-click it to open it in the
-  player, rename it or delete it.
+  player, rename it or delete it. Changes made in the player show here once saved.
+- **Smart Playlists**, in the sidebar, are rules that pick tracks from the library
+  for you (see [Smart playlists](#smart-playlists)).
+- Under the sidebar is the artwork of the track you've picked (or of the first one
+  listed): the picture in the file's tags, else a `cover`, `folder`, `front` or `album`
+  image (`.jpg`, `.png` or `.webp`) in its folder; a server's cover for its songs. Drag
+  the line above it to make it bigger.
 - Right-click a folder under **Folders** to remove it from the library. The files stay
   where they are: PyAmp only reads your music files, and never retags, renames or
   moves them.
@@ -134,9 +142,38 @@ PyAmp's data folder.
 
 The library window also shows music from elsewhere, each in its own part of the
 sidebar under **This Computer**: each [Subsonic server](#subsonic-servers) you add,
-for one, and sources added by plugins. They're browsed, searched and played the same way, and a
+each [DLNA/UPnP server](#dlnaupnp-servers) on your network, and sources added by
+plugins. They're browsed, searched and played the same way, and a
 slow or unreachable server never holds up the window. Picking a server's name
 searches the whole server.
+
+### Smart playlists
+
+A smart playlist is a set of rules, not a list of tracks: it shows whatever in the
+library matches them right now, so it keeps up with new music after each scan.
+Right-click **Smart Playlists** in the library sidebar and choose **New Smart
+Playlist…**, then add rules such as:
+
+- **Title, Artist, Album, Album artist or Genre** contains, doesn't contain, is, is not
+  or starts with some text (ignoring case). "Genre is" with nothing typed finds tracks
+  with no genre.
+- **Year or Length** (in seconds) is, is not, is at least, is at most or is between.
+  Tracks whose year or length isn't known are left out of ranges.
+- **File type** is or is not, e.g. `flac`.
+- **Folder** is in or is not in one of the library's folders.
+- **Date added** is in, or is not in, the last so many days. A file's date added is its
+  modified date when PyAmp first found it, and stays the same if the file changes.
+
+Choose whether a track must match **all** the rules or **any** of them, how to sort
+them (album order, random, title, artist, year, most recently added, longest or
+shortest first), and, if you like, a limit, e.g. 50 tracks. **Random** with a limit
+picks a new set each time you open the playlist. As you edit, the dialog shows how
+many tracks match. With no rules at all, the whole library matches.
+
+Right-click a smart playlist to edit, duplicate or delete it; play it and add its tracks
+to playlists like any other part of the library. Smart playlists only look in the
+library on this computer (not servers), and change nothing in your music files: they
+are kept in `smart_playlists.json` in PyAmp's data folder.
 
 ### Audio backends
 
@@ -259,12 +296,40 @@ username, if you've added two accounts on one server). Right-click a server's na
 playlist can hold songs from several servers: each plays with its own server's login.
 
 Songs are added with their tags and length, so they show like local files and can be
-seeked. The password is kept in the system keychain (macOS Keychain, Windows Credential
+seeked, and the library shows their album covers. The password is kept in the system keychain (macOS Keychain, Windows Credential
 Manager or Secret Service on Linux), never in a file. Untick **Remember the password**
 (or have no keychain) and PyAmp keeps it only until it quits, doesn't touch the
 keychain, and asks again next session: the server is listed but empty until you
-right-click it and choose **Sign In…**. The choice is remembered for each server. Saved playlists keep the server's songs without your login (PyAmp
-adds it as each one plays), so they're safe to share or back up.
+right-click it and choose **Sign In…**. The choice is remembered for each server.
+**Forget Password** (right-click a server whose password is saved) deletes it from the
+keychain and signs out; sign in again to use the server, ticking Remember to save the
+password again.
+Saved playlists keep the server's songs without your login (PyAmp adds it as each one
+plays), so they're safe to share or back up.
+
+### DLNA/UPnP servers
+
+PyAmp finds the media servers on your network by itself: a NAS, MiniDLNA, Jellyfin,
+Plex, Universal Media Server and anything else that shares music over DLNA/UPnP. Each
+appears in the [library window](#library) below This Computer and is browsed by its
+own folders, as the server arranges them (e.g. Music → Artists → …). Pick a folder to
+list its songs; pick the server itself to search it, if the server supports searching.
+There's no login: songs play from the addresses the server gives. Album art shows if
+the server offers it (MiniDLNA does for folders with a cover image).
+
+PyAmp looks for servers as it starts and on **Library → Refresh DLNA Servers**. A
+server that's asleep or switched off stays listed until the next search. Right-click a
+server's name to **Refresh** it or **Hide Server** (the TV that shares photos, say);
+**Library → Show Hidden DLNA Servers** brings hidden ones back. A server the search
+can't reach (on another subnet, or on a network that blocks it) can be added with
+**Library → Add DLNA Server by Address…**: give its name or IP address (enough for
+MiniDLNA, Plex and Universal Media Server), or the address of its device description
+(e.g. `http://192.168.1.10:8200/rootDesc.xml`).
+
+On macOS, the first search makes the system ask whether PyAmp may find devices on your
+local network; it needs that to find servers. Saved playlists keep a server's song
+addresses, so if the server gets a new IP address, songs saved before won't play from
+the old one.
 
 ### Media keys and system controls
 
@@ -336,13 +401,19 @@ since a windowed program can't print. Licences of bundled components are listed 
 
 ## Architecture
 
+PyAmp is a small desktop app built in layers around a core that knows nothing about
+the screen. The aim is that each part can be understood, tested and replaced on its
+own.
+
+The diagram shows which package uses which (an arrow points at what is used):
+
 ```mermaid
 flowchart TB
     ui["<b>ui/</b><br/>windows: player, library, equaliser"]
     core["<b>core/</b><br/>Player, Playlist, event bus"]
     audio["<b>audio/</b><br/>mpv and Qt backends,<br/>visualiser analysis"]
     library["<b>library/</b><br/>sources, catalog, playlists"]
-    plugins["<b>plugins/</b><br/>Subsonic, media keys"]
+    plugins["<b>plugins/</b><br/>Subsonic, DLNA, media keys"]
 
     ui --> core
     ui --> library
@@ -352,74 +423,41 @@ flowchart TB
 
     audio --> engines[["libmpv / QtMultimedia"]]
     library --> data[("music files,<br/>library.sqlite3")]
-    plugins --> remote[("Subsonic server,<br/>OS media controls")]
+    plugins --> remote[("Subsonic and DLNA servers,<br/>OS media controls")]
 ```
 
-`core` is the centre: the other packages use it, and it depends on none of them (it
-only knows the `AudioBackend` interface). `app.py` builds every object and wires them
-together.
-
-```
-src/pyamp/
-├── app.py              Composition root: builds the object graph, owns session lifecycle
-├── config.py           Settings dataclass + JSON persistence (atomic writes)
-├── core/               Domain logic. NO Qt imports allowed here.
-│   ├── models.py       Track, PlaybackState, RepeatMode (immutable value objects)
-│   ├── events.py       EventBus + event types
-│   ├── play_order.py   Sequential / Shuffle strategies
-│   ├── playlist.py     Playlist model with a "current" cursor
-│   ├── equalizer.py    10-band equaliser model and presets
-│   └── player.py       Player facade: transport, volume, modes
-├── audio/              Sound output
-│   ├── backend.py      AudioBackend ABC + BackendListener protocol
-│   ├── registry.py     Backend factory with lazy imports
-│   ├── qt_backend.py   QtMultimedia adapter (+ PCM tap for the visualiser)
-│   ├── mpv_backend.py  libmpv adapter with gapless playback
-│   └── track_analysis.py  Visualiser levels for backends without PCM (mpv)
-├── dsp/spectrum.py     FFT analyser (pure) + SpectrumService (bus adapter)
-├── library/            Getting tracks in
-│   ├── metadata.py     Tag reading via mutagen
-│   ├── playlist_formats.py  M3U / PLS read & write
-│   ├── saved_playlists.py   Named playlists stored as .m3u8 files
-│   ├── catalog.py      Media library index (SQLite): added folders/files and their tags
-│   ├── scanner.py      Brings the index up to date, re-reading only changed files
-│   ├── sources.py      MediaSource: what the library window browses (local or a server)
-│   ├── local_source.py The local library as a source
-│   ├── playlists_source.py  The saved playlists as a source
-│   ├── remote.py       Downloads remote playlists (a station's .pls)
-│   └── loader.py       Files/folders/playlists/streams → Tracks
-├── media_session/      OS media controls (used by the media-session plugin)
-│   ├── session.py      Player ⇄ NowPlaying snapshots and OS commands (pure)
-│   ├── macos.py        MediaPlayer framework: Now Playing + remote commands
-│   ├── windows.py      System Media Transport Controls (pywinrt)
-│   └── mpris.py        MPRIS over D-Bus (jeepney), served on the Qt main thread
-├── plugins/            Entry-point based plugin system, now-playing log, media session
-│   └── subsonic/       Subsonic client and library source, keychain account store, server dialog
-└── ui/                 PySide6 front-end
-    ├── skin.py         All colours in one place (seam for .wsz skins)
-    ├── actions.py      Playback commands as QActions
-    ├── equalizer_window.py  The equaliser window
-    ├── background_loader.py  Non-blocking track loading (worker thread)
-    ├── playlist_session.py   Which saved playlist is open; auto-save
-    ├── library_scan.py       Library scans on a low-priority worker thread
-    ├── background_calls.py   Slow calls (sources, servers) on worker threads
-    ├── library_window.py     The library window: browse, search, play
-    ├── library_model.py      Library tracks → sortable, draggable table model
-    ├── jump_dialog.py        Jump to Track (J)
-    ├── about_dialog.py       Help → About: version, licence, notices
-    ├── menu_bar.py           Menu bar / system tray icon and its menu
-    ├── playlist_model.py  Playlist → QAbstractTableModel adapter
-    ├── main_window.py
-    └── widgets/        LCD panel, marquee, spectrum, sliders, playlist view
-```
+- **`core/` is the player itself**: tracks, the playlist and its play order, the
+  equaliser, and the `Player` that drives an audio backend. It has no Qt in it and
+  depends only on the `AudioBackend` interface, so it's tested with a fake backend
+  and could sit under a different front-end unchanged.
+- **Parts talk through events, not to each other.** The player and playlist publish
+  immutable events (track changed, position, volume, playlist edited…) on a
+  synchronous event bus. Windows, the visualiser and plugins subscribe to what they
+  need, and nothing holds a reference back to its listeners.
+- **`audio/` plays the sound**: libmpv (gapless) or QtMultimedia, behind one
+  interface and chosen by name at start-up. `dsp/` turns the audio into the
+  visualiser's levels.
+- **`library/` gets music in**: reading tags, the library index (one SQLite file),
+  saved and smart playlists, and playlist formats. Everything the library window
+  browses (this computer, playlists, smart playlists, a Subsonic or DLNA server) is a
+  `MediaSource`, so the window treats them all alike and a plugin can add more.
+- **`ui/` is the PySide6 front-end**: the player, library and equaliser windows and
+  their dialogs. One skin gives every window and dialog its colours and look, and
+  shared dialog parts keep them consistent.
+- **`plugins/` add features from outside the core**, found through Python entry
+  points: the Subsonic and DLNA servers and the OS media controls (`media_session/`).
+  A plugin gets a small context (the event bus, the player, the playlist, the
+  library's sources and a way to reach the window), not the app's internals.
+- **`app.py` builds everything.** It's the only place that knows the concrete
+  classes; every other object is handed its collaborators when it's created.
+- **Slow work never blocks the window.** Loading files, scanning the library, saving
+  playlists and talking to servers run on worker threads, and their results come back
+  to the main thread before anything is shown or published. Audio is decoded on the
+  backends' own native threads.
+- **PyAmp only reads your music.** Its own state is a few files in its config and data
+  folders: settings, the library index, saved playlists (`.m3u8`) and smart playlists.
 
 ### Dependency rule
-
-```
-ui ──► core ◄── audio
- │      ▲  ▲
- └──► library   dsp, plugins
-```
 
 `core` depends on nothing in the app except the `AudioBackend` interface.
 That is why the whole player can be tested with a `FakeBackend` (see
@@ -431,7 +469,7 @@ That is why the whole player can be tested with a `FakeBackend` (see
 |---|---|---|
 | **Observer** | `core/events.py` | Player/playlist publish events; UI, DSP and plugins subscribe. No back-references. |
 | **Facade** | `core/player.py` | One simple API over playlist + backend for UI, shortcuts and plugins. |
-| **Adapter** | `audio/qt_backend.py`, `audio/mpv_backend.py`, `ui/playlist_model.py`, `media_session/macos.py`, `media_session/mpris.py`, `library/local_source.py`, `plugins/subsonic/source.py` | Wrap third-party APIs (QtMultimedia, Qt model/view, a Subsonic server) behind our own interfaces. |
+| **Adapter** | `audio/qt_backend.py`, `audio/mpv_backend.py`, `ui/playlist_model.py`, `media_session/macos.py`, `media_session/mpris.py`, `library/local_source.py`, `plugins/subsonic/source.py`, `plugins/dlna/source.py` | Wrap third-party APIs (QtMultimedia, Qt model/view, Subsonic and DLNA servers) behind our own interfaces. |
 | **Strategy** | `core/play_order.py`, `library/playlist_formats.py` | Swap play order or file format without touching callers. |
 | **Factory / Registry** | `audio/registry.py`, `PlaylistFormatRegistry`, `library/sources.py` (`MediaSources`) | Choose implementations by name/extension; lazy imports keep optional deps optional. |
 | **Command** | `ui/actions.py` | One `QAction` drives the button, menu item and shortcut. |
@@ -511,7 +549,8 @@ my-scrobbler = "my_package:MyScrobbler"
 
 `ctx.ui()` gives plugins with windows a place in the menu bar
 (`add_menu_action("&Tools", "My Window…", show)` adds a menu before Help; items for
-`"&Library"` join PyAmp's own Library menu) and a parent for their windows, and
+`"&Library"` join PyAmp's own Library menu; `add_menu_separator(menu)` sets a plugin's
+items apart from what's above them) and a parent for their windows, and
 `ctx.player.add_location_resolver()` lets one rewrite what the player loads (the Subsonic
 plugin adds its servers' logins there). A resolver returns locations that aren't its own
 unchanged, so several plugins can each add one; the call returns a function that
@@ -522,13 +561,16 @@ A plugin that brings music from somewhere else (a server, a service) adds a
 window shows it under This Computer. A source lists nodes to browse (`roots()`,
 `children(node)`) and their tracks (`tracks(node, search)`); it keeps its own index,
 and is called on a worker thread, so it may block on the network. Raise `SourceError`
-with a message for the user when something goes wrong. `actions(node)` gives commands
+with a message for the user when something goes wrong. `artwork(track)` gives a
+track's picture as image bytes, or None (it may use `Track.artwork`, which the source
+fills in with e.g. a cover id, to find it). `actions(node)` gives commands
 for a node's right-click menu, and `actions(None)` those for the source's own name
 (the Subsonic plugin's Edit Server… and Remove Server); add one source per server, and
 `ctx.sources.replace(old, new)` swaps one in its place.
 
-See `src/pyamp/plugins/now_playing.py` for a small example, and `plugins/subsonic/` for
-one with a source and a dialog.
+See `src/pyamp/plugins/now_playing.py` for a small example, `plugins/subsonic/` for
+one with a source and a dialog, and `plugins/dlna/` for one that finds its servers on
+the network.
 
 ## Roadmap
 
@@ -538,8 +580,6 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
   don't warn.
 - **Smaller downloads**: bundle only the Qt modules and plugins PyAmp uses, so the
   apps shrink from about 170 MB.
-- **DLNA/UPnP media servers** (plugin): find media servers on the local network (NAS,
-  MiniDLNA, Plex/Jellyfin DLNA), browse them and play from them.
 
 Not planned, to keep PyAmp lightweight:
 

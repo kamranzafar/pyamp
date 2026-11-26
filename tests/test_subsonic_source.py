@@ -22,13 +22,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 
 import pytest
 
 from pyamp.library.sources import Node, NodeAction, SourceError
 from pyamp.plugins.subsonic.client import SubsonicClient
 from pyamp.plugins.subsonic.source import ALBUM, ARTISTS, PLAYLISTS, SIGN_IN, SubsonicSource
-from tests.subsonic_server import PASSWORD, USERNAME, SubsonicServer
+from tests.subsonic_server import COVERS, PASSWORD, USERNAME, SubsonicServer
 
 
 @pytest.fixture
@@ -96,6 +97,16 @@ def test_the_servers_own_commands_are_on_its_name(server: SubsonicServer) -> Non
     source = SubsonicSource(SubsonicClient(server.url, USERNAME, PASSWORD), "S", [remove])
     assert source.actions(None) == [remove]
     assert source.actions(source.roots()[0]) == []  # nothing for its artists or albums
+
+
+def test_songs_have_their_covers(source: SubsonicSource, server: SubsonicServer) -> None:
+    teardrop, angel = source.tracks(Node((ALBUM, "al1"), "Mezzanine"))
+    assert source.artwork(teardrop) == COVERS["al-al1"]
+    assert source.artwork(angel) is None  # it has none: the server isn't asked
+    assert source.artwork(replace(teardrop, artwork="gone")) is None  # the server has none
+    server.close()
+    assert source.artwork(teardrop) is None  # unreachable: no picture, no message
+    assert SubsonicSource(None, "Subsonic").artwork(teardrop) is None  # not signed in
 
 
 def test_a_server_not_signed_in_asks_to_sign_in() -> None:

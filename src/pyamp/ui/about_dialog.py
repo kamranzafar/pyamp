@@ -134,9 +134,8 @@ class AboutDialog(QDialog):
     def __init__(self, skin: Skin, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"About {APP_NAME}")
-        self.setStyleSheet(
-            skin.stylesheet() + f"QDialog, QTabWidget QWidget {{ background: {skin.window}; }}"
-        )
+        # The About page sits on the window colour; the rest is the application's.
+        self.setStyleSheet(f"QWidget#aboutPage {{ background: {skin.window}; }}")
         self.resize(560, 520)
         self._link_colour = QColor(skin.lcd)  # readable on the dark skin
 
@@ -148,6 +147,7 @@ class AboutDialog(QDialog):
         notice.setOpenExternalLinks(True)
         notice.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         self.about_page = QWidget()
+        self.about_page.setObjectName("aboutPage")
         about_layout = self.about_layout = QVBoxLayout(self.about_page)
         about_layout.addWidget(icon)
         about_layout.addWidget(notice)

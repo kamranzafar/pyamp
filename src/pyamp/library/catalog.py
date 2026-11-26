@@ -30,7 +30,8 @@ import logging
 import os
 import sqlite3
 import threading
-from collections.abc import Iterable
+import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -40,6 +41,15 @@ import platformdirs
 
 from pyamp import APP_NAME
 from pyamp.core.models import ReplayGain, Track
+from pyamp.library.smart_playlists import (
+    FieldKind,
+    Operator,
+    Rule,
+    RuleField,
+    SmartPlaylist,
+    SortOrder,
+    file_type,
+)
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +88,13 @@ _MIGRATIONS = (
     CREATE INDEX tracks_by_artist ON tracks (artist_key, album_key);
     CREATE INDEX tracks_by_genre ON tracks (genre_key);
     """,
+    # When each file came into the library, for smart playlists: its modified time when
+    # first indexed, kept when it's read again. Existing files get the time they have.
+    """
+    ALTER TABLE tracks ADD COLUMN added_ns INTEGER NOT NULL DEFAULT 0;
+    UPDATE tracks SET added_ns = mtime_ns;
+    CREATE INDEX tracks_by_added ON tracks (added_ns);
+    """,
 )
 SCHEMA_VERSION = len(_MIGRATIONS)
 
@@ -106,9 +123,12 @@ _KEY_COLUMNS = ("artist_key", "album_key", "genre_key", "search_text")
 _STORED_COLUMNS = (*_TrackRow._fields, "mtime_ns", "size", *_KEY_COLUMNS)
 #: The artist that groups a track: its album artist, else its artist.
 _GROUP_ARTIST = "CASE WHEN album_artist != '' THEN album_artist ELSE artist END"
+#: Adds a file, or updates one already indexed (keeping when it was added).
 _PUT = (
-    f"INSERT OR REPLACE INTO tracks ({', '.join(_STORED_COLUMNS)})"
-    f" VALUES ({', '.join('?' * len(_STORED_COLUMNS))})"
+    f"INSERT INTO tracks ({', '.join(_STORED_COLUMNS)}, added_ns)"
+    f" VALUES ({', '.join('?' * len(_STORED_COLUMNS))}, ?)"
+    " ON CONFLICT (path) DO UPDATE SET "
+    + ", ".join(f"{column} = excluded.{column}" for column in _STORED_COLUMNS[1:])
 )
 
 
@@ -273,6 +293,26 @@ class Catalog:
             rows = self._db.execute(f"{_SELECT}{where}{_IN_ALBUM_ORDER}", params).fetchall()
         return [_from_row(_TrackRow._make(row)) for row in rows]
 
+    def smart_tracks(self, playlist: SmartPlaylist, *, now_ns: int | None = None) -> list[Track]:
+        """The tracks that match ``playlist``'s rules, in its order and up to its limit.
+
+        ``now_ns`` is the time "in the last N days" counts back from (default: now).
+        """
+        where, params = _smart_condition(playlist, time.time_ns() if now_ns is None else now_ns)
+        query = f"{_SELECT}{where}{_SMART_ORDER[playlist.sort]}"
+        if playlist.limit:
+            query += f" LIMIT {int(playlist.limit)}"
+        with self._lock:
+            rows = self._db.execute(query, params).fetchall()
+        return [_from_row(_TrackRow._make(row)) for row in rows]
+
+    def smart_count(self, playlist: SmartPlaylist, *, now_ns: int | None = None) -> int:
+        """How many tracks ``playlist`` lists (its limit at most)."""
+        where, params = _smart_condition(playlist, time.time_ns() if now_ns is None else now_ns)
+        with self._lock:
+            (count,) = self._db.execute(f"SELECT COUNT(*) FROM tracks{where}", params).fetchone()
+        return min(int(count), playlist.limit) if playlist.limit else int(count)
+
     def groups(self, kind: GroupKind) -> list[Group]:
         """Every artist, album, genre or folder with its track count, by name.
 
@@ -382,6 +422,87 @@ def _group_condition(group: Group) -> tuple[str, list[str]]:
             return "(path = ? OR path LIKE ? ESCAPE '\\')", [folder, inside]
 
 
+#: The SQL each smart playlist order sorts by; ties go in album order.
+_SMART_ORDER = {
+    SortOrder.ALBUM: _IN_ALBUM_ORDER,
+    SortOrder.RANDOM: " ORDER BY random()",
+    SortOrder.TITLE: " ORDER BY casefold(title), path",
+    SortOrder.ARTIST: " ORDER BY casefold(artist), album_key, disc_number, track_number, path",
+    SortOrder.YEAR: f" ORDER BY year,{_IN_ALBUM_ORDER.removeprefix(' ORDER BY')}",
+    SortOrder.NEWEST: f" ORDER BY added_ns DESC,{_IN_ALBUM_ORDER.removeprefix(' ORDER BY')}",
+    SortOrder.LONGEST: f" ORDER BY duration_ms DESC,{_IN_ALBUM_ORDER.removeprefix(' ORDER BY')}",
+    SortOrder.SHORTEST: f" ORDER BY duration_ms,{_IN_ALBUM_ORDER.removeprefix(' ORDER BY')}",
+}
+#: What each text or number rule compares (fixed SQL: values only ever go in parameters).
+_RULE_COLUMNS = {
+    RuleField.TITLE: "casefold(title)",
+    RuleField.ARTIST: "casefold(artist)",
+    RuleField.ALBUM: "album_key",
+    RuleField.ALBUM_ARTIST: "casefold(album_artist)",
+    RuleField.GENRE: "genre_key",
+    RuleField.YEAR: "year",
+    RuleField.LENGTH: "(duration_ms / 1000)",  # whole seconds, as the length is shown
+}
+_NS_PER_DAY = 86_400 * 1_000_000_000
+
+
+def _smart_condition(playlist: SmartPlaylist, now_ns: int) -> tuple[str, list[object]]:
+    """A WHERE clause (or "") and its parameters for ``playlist``'s rules."""
+    conditions: list[str] = []
+    params: list[object] = []
+    for rule in playlist.rules:
+        condition, rule_params = _rule_condition(rule, now_ns)
+        conditions.append(f"({condition})")
+        params.extend(rule_params)
+    if not conditions:
+        return "", []
+    joiner = " AND " if playlist.match_all else " OR "
+    return f" WHERE {joiner.join(conditions)}", params
+
+
+def _rule_condition(rule: Rule, now_ns: int) -> tuple[str, list[object]]:
+    """A WHERE condition (and its parameters) for one smart playlist rule."""
+    match rule.field.kind:
+        case FieldKind.FOLDER:
+            condition, params = _group_condition(Group(GroupKind.FOLDER, str(rule.value).strip()))
+            negate = rule.operator is Operator.NOT_IN_FOLDER
+            return (f"NOT {condition}" if negate else condition), list(params)
+        case FieldKind.DATE:
+            cutoff = now_ns - int(rule.value) * _NS_PER_DAY
+            before = rule.operator is Operator.NOT_IN_LAST
+            return ("added_ns < ?" if before else "added_ns >= ?"), [cutoff]
+        case FieldKind.FILE_TYPE:
+            not_ = "NOT " if rule.operator is Operator.IS_NOT else ""
+            suffix = _like(f".{file_type(str(rule.value))}", "%", "")
+            return f"casefold(path) {not_}{_LIKE_PARAM}", [suffix]
+        case FieldKind.TEXT:
+            value: object = str(rule.value).strip().casefold()
+        case FieldKind.NUMBER:
+            value = rule.value
+    template, make_params = _COMPARISONS[rule.operator]
+    return template.format(c=_RULE_COLUMNS[rule.field]), make_params(value, rule.to)
+
+
+_LIKE_PARAM = "LIKE ? ESCAPE '\\'"
+#: How a text or number rule compares its column ``{c}``, and its parameters from the
+#: value and the upper bound. Ranges leave out tracks whose year or length isn't known.
+_COMPARISONS: dict[Operator, tuple[str, Callable[[object, int], list[object]]]] = {
+    Operator.CONTAINS: (f"{{c}} {_LIKE_PARAM}", lambda v, _: [_like(v, "%", "%")]),
+    Operator.NOT_CONTAINS: (f"{{c}} NOT {_LIKE_PARAM}", lambda v, _: [_like(v, "%", "%")]),
+    Operator.STARTS_WITH: (f"{{c}} {_LIKE_PARAM}", lambda v, _: [_like(v, "", "%")]),
+    Operator.IS: ("{c} = ?", lambda v, _: [v]),
+    Operator.IS_NOT: ("{c} != ?", lambda v, _: [v]),
+    Operator.AT_LEAST: ("{c} > 0 AND {c} >= ?", lambda v, _: [v]),
+    Operator.AT_MOST: ("{c} > 0 AND {c} <= ?", lambda v, _: [v]),
+    Operator.BETWEEN: ("{c} > 0 AND {c} BETWEEN ? AND ?", lambda v, to: [v, to]),
+}
+
+
+def _like(value: object, before: str, after: str) -> str:
+    """A LIKE pattern matching ``value`` (case-folded) literally, between the wildcards."""
+    return f"{before}{_escape_like(str(value).strip().casefold())}{after}"
+
+
 def _casefold(value: object) -> str:
     return str(value).casefold()
 
@@ -423,7 +544,7 @@ def _to_row(track: Track, stamp: FileStamp) -> tuple[object, ...]:
         track.genre.casefold(),
         search_text(track),
     )
-    return (*row, stamp.mtime_ns, stamp.size, *keys)
+    return (*row, stamp.mtime_ns, stamp.size, *keys, stamp.mtime_ns)  # then added_ns
 
 
 def _from_row(row: _TrackRow) -> Track:

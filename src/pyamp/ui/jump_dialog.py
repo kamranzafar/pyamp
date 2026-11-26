@@ -28,7 +28,6 @@ from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QDialog, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
 
 from pyamp.core.models import Track
-from pyamp.ui.skin import Skin
 
 MAX_MATCHES = 500
 
@@ -68,22 +67,17 @@ class JumpDialog(QDialog):
 
     jump_requested = Signal(int)
 
-    def __init__(self, tracks: Sequence[Track], skin: Skin, parent: QWidget | None = None) -> None:
+    def __init__(self, tracks: Sequence[Track], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._tracks = tracks
         self._texts: list[str] | None = None  # worked out on the first search
         self.setWindowTitle("Jump to Track")
-        self.setStyleSheet(skin.stylesheet() + f"QDialog {{ background: {skin.window}; }}")
         self.resize(420, 360)
 
         self.query = QLineEdit()
         self.query.setPlaceholderText("Type to search titles and file names")
         self.query.setClearButtonEnabled(True)
         self.results = QListWidget()
-        self.results.setStyleSheet(
-            f"QListWidget {{ background: {skin.panel}; color: {skin.playlist_text}; "
-            f"selection-background-color: {skin.selection}; border: 1px solid {skin.border}; }}"
-        )
         layout = QVBoxLayout(self)
         layout.addWidget(self.query)
         layout.addWidget(self.results)

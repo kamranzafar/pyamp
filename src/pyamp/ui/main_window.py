@@ -39,9 +39,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QFileDialog,
     QHBoxLayout,
     QInputDialog,
+    QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -66,6 +66,7 @@ from pyamp.library.metadata import AUDIO_EXTENSIONS
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.library.saved_playlists import PlaylistNameError
 from pyamp.library.sources import MediaSources
+from pyamp.ui import file_dialogs
 from pyamp.ui.about_dialog import AboutDialog
 from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
@@ -77,6 +78,7 @@ from pyamp.ui.menu_bar import IS_MACOS, PLACE, MenuBarIcon
 from pyamp.ui.playlist_model import PlaylistModel, dropped_locations
 from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import Skin
+from pyamp.ui.track_drag import dragged_tracks
 from pyamp.ui.widgets.lcd import LcdPanel
 from pyamp.ui.widgets.playlist_selector import PlaylistSelector
 from pyamp.ui.widgets.playlist_view import PlaylistView
@@ -84,6 +86,9 @@ from pyamp.ui.widgets.sliders import SeekSlider, VolumeSlider
 
 WINDOW_WIDTH = 460
 STATUS_TIMEOUT_MS = 5000
+#: Indents the playlist summary in the status bar to where Qt draws messages (a few
+#: pixels in), so neither sits against the window's edge and both line up.
+STATUS_INDENT = 4
 #: The saved playlist the library plays into, so it never changes the user's others.
 LIBRARY_PLAYLIST = "Library"
 LIBRARY_MENU = "&Library"  # plugins with a library (Subsonic) add to it too
@@ -134,7 +139,6 @@ class MainWindow(QMainWindow):
         self._about_dialog: AboutDialog | None = None
         self._plugin_menus: dict[str, QMenu] = {}
         self.setWindowTitle(APP_NAME)
-        self.setStyleSheet(skin.stylesheet())
         self.setAcceptDrops(True)
         self.resize(WINDOW_WIDTH, 520)
         self.setMinimumWidth(WINDOW_WIDTH)
@@ -152,6 +156,7 @@ class MainWindow(QMainWindow):
         self._volume.volume_requested.connect(services.player.set_volume)
         model = PlaylistModel(services.playlist, services.bus, skin)
         model.files_dropped.connect(self.add_paths)
+        model.tracks_dropped.connect(self.add_tracks)
         self._playlist_view = PlaylistView(model)
         self._playlist_view.track_activated.connect(services.player.play_index)
         self._playlist_view.remove_requested.connect(services.playlist.remove)
@@ -183,6 +188,11 @@ class MainWindow(QMainWindow):
 
         self._build_layout()
         self._build_menus()
+        # The playlist's size and length, always shown; messages (e.g. errors) show over
+        # it for a few seconds, then it's back.
+        self.summary = QLabel()
+        self.statusBar().addWidget(self.summary, 1)
+        self.summary.setContentsMargins(STATUS_INDENT, 0, 0, 0)
 
         services.bus.subscribe(TrackChanged, self._on_track_changed)
         services.bus.subscribe(StreamTitleChanged, self._on_stream_title)
@@ -317,6 +327,14 @@ class MainWindow(QMainWindow):
             self.menuBar().insertMenu(self._help_menu.menuAction(), target)
             self._plugin_menus[menu] = target
         self._add_menu_action(target, text, triggered, shortcut)
+
+    def add_menu_separator(self, menu: str) -> None:
+        target = self._plugin_menus.get(menu)
+        if target is None:
+            return  # a menu not made yet: its first item needs nothing above it
+        actions = target.actions()
+        if actions and not actions[-1].isSeparator():
+            target.addSeparator()
 
     def dialog_parent(self) -> QWidget:
         return self
@@ -460,7 +478,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Removed {removed} {noun}", STATUS_TIMEOUT_MS)
 
     def show_jump_dialog(self) -> JumpDialog:
-        dialog = JumpDialog(list(self._s.playlist), self._skin, parent=self)
+        dialog = JumpDialog(list(self._s.playlist), parent=self)
         dialog.jump_requested.connect(self._s.player.play_index)
         dialog.open()
         self._jump_dialog = dialog
@@ -563,6 +581,15 @@ class MainWindow(QMainWindow):
         self._update_summary()
         return job
 
+    def add_tracks(self, tracks: Sequence[Track]) -> None:
+        """Add tracks PyAmp already knows (e.g. dragged from the library) as they are,
+        tags and all, starting the first if there was nothing to play."""
+        autoplay = len(self._s.playlist) == 0 and not self._s.loader.busy
+        first_new = len(self._s.playlist)
+        self._s.playlist.add(tracks)
+        if autoplay and tracks:
+            self._s.player.play_index(first_new)
+
     def add_url(self) -> None:
         """Add a stream: internet radio (or a station's .pls/.m3u), or an audio file URL."""
         text, ok = QInputDialog.getText(
@@ -576,46 +603,56 @@ class MainWindow(QMainWindow):
             return
         self.add_paths([location])
 
+    # The file dialogs are sheets on this window (see file_dialogs), so it keeps the focus.
+
     def _add_files(self) -> None:
         patterns = " ".join(f"*{ext}" for ext in sorted(AUDIO_EXTENSIONS))
-        files, _ = QFileDialog.getOpenFileNames(
-            self, "Add Files", self._s.settings.last_directory, f"Audio files ({patterns})"
+        file_dialogs.choose_files(
+            self,
+            "Add Files",
+            self._s.settings.last_directory,
+            f"Audio files ({patterns})",
+            self._add_from_dialog,
         )
-        self._add_from_dialog([Path(f) for f in files])
 
     def _add_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
-            self, "Add Folder", self._s.settings.last_directory
+        file_dialogs.choose_folder(
+            self, "Add Folder", self._s.settings.last_directory, self._add_from_dialog
         )
-        self._add_from_dialog([Path(folder)] if folder else [])
 
     def _import_playlist(self) -> None:
         """Import a playlist file as a new saved playlist (named after the file)."""
-        file, _ = QFileDialog.getOpenFileName(
+        file_dialogs.choose_file(
             self,
             "Import Playlist",
             self._s.settings.last_directory,
             self._s.playlist_formats.file_dialog_filter(),
+            self._import_picked,
         )
-        if file:
-            path = Path(file)
+
+    def _import_picked(self, files: list[Path]) -> None:
+        if files:
+            path = files[0]
             self._autoplay_jobs.clear()
             self._try(lambda: self._s.playlists.new(path.stem), "Import Playlist")
             self._add_from_dialog([path])
 
     def _export_playlist(self) -> None:
-        file, _ = QFileDialog.getSaveFileName(
+        suggested = (
+            Path(self._s.settings.last_directory) / f"{self._s.playlists.active or 'playlist'}.m3u8"
+        )
+        file_dialogs.choose_save_file(
             self,
             "Export Playlist",
-            str(
-                Path(self._s.settings.last_directory)
-                / f"{self._s.playlists.active or 'playlist'}.m3u8"
-            ),
+            str(suggested),
             self._s.playlist_formats.file_dialog_filter(),
+            self._export_to,
         )
-        if not file:
+
+    def _export_to(self, files: list[Path]) -> None:
+        if not files:
             return
-        path = Path(file)
+        path = files[0]
         if not path.suffix:
             path = path.with_suffix(".m3u8")
         try:
@@ -672,15 +709,24 @@ class MainWindow(QMainWindow):
         playlist = self._s.playlist
         total = format_duration(playlist.total_duration_ms)
         loading = " · loading…" if self._s.loader.busy else ""
-        self.statusBar().showMessage(f"{len(playlist)} tracks · {total}{loading}")
+        self.summary.setText(f"{len(playlist)} tracks · {total}{loading}")
 
     # -- Qt overrides ------------------------------------------------------- #
 
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.StatusTip:
+            return True  # hovering a button or menu item keeps the status bar as it is
+        return super().event(event)
+
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
+        if event.mimeData().hasUrls() or dragged_tracks(event.mimeData()):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        if tracks := dragged_tracks(event.mimeData()):
+            event.acceptProposedAction()
+            self.add_tracks(tracks)
+            return
         paths = dropped_locations(event.mimeData().urls())
         if paths:
             event.acceptProposedAction()

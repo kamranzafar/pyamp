@@ -27,17 +27,20 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QMimeData, QModelIndex, Qt, QUrl
-from PySide6.QtWidgets import QInputDialog, QMessageBox
+from PySide6.QtGui import QStatusTipEvent
+from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox, QToolButton
 
 from pyamp.app import Application
 from pyamp.audio import registry
 from pyamp.config import Settings, SettingsStore
-from pyamp.core.models import Track
+from pyamp.core.models import StreamUrl, Track
 from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.ui.jump_dialog import matches, search_text
 from pyamp.ui.playlist_model import ROWS_MIME
-from tests.conftest import FakeBackend
+from pyamp.ui.track_drag import TrackDrag
+from tests.conftest import FakeBackend, answer_dialog
 from tests.test_background_loader import make_files, wait_until
+from tests.test_metadata import write_wav
 
 
 @pytest.fixture
@@ -144,6 +147,21 @@ def test_sort_and_dedupe_menu_actions(app: Application, tmp_path: Path) -> None:
     assert "Removed 1 duplicate" in app.window.statusBar().currentMessage()
 
 
+def test_the_status_bar_keeps_showing_the_playlist(app: Application, tmp_path: Path) -> None:
+    add_songs(app, tmp_path / "m", "a", "b")
+    window = app.window
+    assert window.summary.text() == "2 tracks · 0:00"
+    # Hovering a button or menu item doesn't put its label in the status bar.
+    button = window.findChildren(QToolButton)[0]
+    before = window.statusBar().currentMessage()
+    QApplication.sendEvent(button, QStatusTipEvent("Previous"))
+    QApplication.sendEvent(button, QStatusTipEvent(""))  # and leaving it
+    assert window.statusBar().currentMessage() == before
+    window.statusBar().showMessage("Exported mix.m3u8", 50)  # a message shows for a while
+    wait_until(lambda: window.statusBar().currentMessage() == "")
+    assert window.summary.text() == "2 tracks · 0:00"  # and the playlist is still there
+
+
 def test_context_menu_offers_editing_actions(app: Application, tmp_path: Path) -> None:
     add_songs(app, tmp_path / "m", "a")
     texts = [a.text() for a in app.window._context_menu().actions() if a.text()]
@@ -183,6 +201,22 @@ def test_dropping_files_from_outside_adds_them(app: Application, tmp_path: Path)
     wait_until(lambda: len(app.playlist) == 2)
 
 
+def test_dropping_tracks_from_the_library_adds_them_with_their_tags(
+    app: Application, tmp_path: Path
+) -> None:
+    stream = Track.for_stream(StreamUrl("https://music.example/rest/stream?id=1"), "Teardrop")
+    local = Track(tmp_path / "angel.mp3", "Angel", artist="Massive Attack")
+    model = app.window._playlist_view.model()
+    assert model.dropMimeData(
+        TrackDrag([stream, local]), Qt.DropAction.CopyAction, -1, 0, QModelIndex()
+    )
+    assert list(app.playlist) == [stream, local]  # as they are: streams too, nothing re-read
+    assert app.playlist.current_index == 0  # there was nothing to play: plays the first
+    app.window.add_tracks([local])
+    assert list(app.playlist) == [stream, local, local]
+    assert app.playlist.current_index == 0
+
+
 def test_reorder_is_auto_saved(app: Application, tmp_path: Path) -> None:
     add_songs(app, tmp_path / "m", "a", "b")
     drag_rows(app, [1], 0)
@@ -218,3 +252,48 @@ def test_jump_dialog_plays_the_chosen_track(app: Application, tmp_path: Path) ->
     dialog._jump()
     assert app.playlist.current_index == 2
     assert not dialog.isVisible()
+
+
+def test_add_files_and_folders(
+    app: Application, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    song = write_wav(tmp_path / "one.wav")
+    folder = tmp_path / "more"
+    folder.mkdir()
+    write_wav(folder / "two.wav")
+    asked = answer_dialog(monkeypatch, "choose_files", [song])
+    app.window._add_files()
+    assert asked == [(app.window, "Add Files")]  # on the window: a sheet on macOS
+    wait_until(lambda: titles(app) == ["one"])
+    answer_dialog(monkeypatch, "choose_folder", [folder])
+    app.window._add_folder()
+    wait_until(lambda: titles(app) == ["one", "two"])
+    assert app.settings.last_directory == str(folder)
+    answer_dialog(monkeypatch, "choose_files", [])
+    app.window._add_files()  # cancelled
+    answer_dialog(monkeypatch, "choose_folder", [])
+    app.window._add_folder()
+    assert titles(app) == ["one", "two"]
+
+
+def test_import_and_export_a_playlist(
+    app: Application, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    add_songs(app, tmp_path / "m", "a", "b")
+    exported = tmp_path / "mix"  # no suffix: .m3u8 is added
+    asked = answer_dialog(monkeypatch, "choose_save_file", [exported])
+    app.window._export_playlist()
+    assert asked == [(app.window, "Export Playlist")]
+    assert (tmp_path / "mix.m3u8").is_file()
+    assert app.window.statusBar().currentMessage() == "Exported mix.m3u8"
+
+    answer_dialog(monkeypatch, "choose_file", [tmp_path / "mix.m3u8"])
+    app.window._import_playlist()
+    assert app.playlists.active == "mix"
+    wait_until(lambda: titles(app) == ["a", "b"])
+
+    answer_dialog(monkeypatch, "choose_save_file", [])
+    app.window._export_playlist()  # cancelled
+    answer_dialog(monkeypatch, "choose_file", [])
+    app.window._import_playlist()
+    assert app.playlists.active == "mix"

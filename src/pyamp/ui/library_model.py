@@ -23,7 +23,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import (
@@ -33,11 +32,11 @@ from PySide6.QtCore import (
     QObject,
     QPersistentModelIndex,
     Qt,
-    QUrl,
 )
 
 from pyamp.core.models import Track, format_duration
 from pyamp.library.catalog import album_order
+from pyamp.ui.track_drag import TRACKS_MIME, TrackDrag
 
 type _Index = QModelIndex | QPersistentModelIndex
 
@@ -149,20 +148,18 @@ class LibraryModel(QAbstractTableModel):
             descending = order is Qt.SortOrder.DescendingOrder
             self._tracks.sort(key=COLUMNS[column].sort_key, reverse=descending)
 
-    # -- Dragging into the playlist (or anywhere that takes files) --------------- #
+    # -- Dragging: to a playlist (tags and all), or files to anywhere that takes them -- #
 
     def flags(self, index: _Index) -> Qt.ItemFlag:
         flags = super().flags(index)
         return flags | Qt.ItemFlag.ItemIsDragEnabled if index.isValid() else flags
 
     def mimeTypes(self) -> list[str]:
-        return ["text/uri-list"]
+        return [TRACKS_MIME, "text/uri-list"]
 
     def mimeData(self, indexes: Sequence[QModelIndex]) -> QMimeData:
-        """The dragged tracks' files. Streams (e.g. from a server) aren't dragged: as a
-        bare URL they'd lose their tags; Add to Playlist keeps them."""
+        """The dragged tracks themselves, for PyAmp's playlists, and their files, for
+        other apps. Streams (e.g. from a server) only go to PyAmp's playlists: as a bare
+        URL they'd lose their tags."""
         rows = sorted({index.row() for index in indexes if index.isValid()})
-        locations = [self._tracks[row].location for row in rows]
-        data = QMimeData()
-        data.setUrls([QUrl.fromLocalFile(str(p)) for p in locations if isinstance(p, Path)])
-        return data
+        return TrackDrag([self._tracks[row] for row in rows])

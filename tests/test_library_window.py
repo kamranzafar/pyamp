@@ -27,10 +27,19 @@ from collections.abc import Hashable, Iterator, Sequence
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QItemSelectionModel, QPoint, Qt, QTimer
-from PySide6.QtGui import QAction
+from PySide6.QtCore import (
+    QBuffer,
+    QByteArray,
+    QCoreApplication,
+    QIODevice,
+    QItemSelectionModel,
+    QPoint,
+    Qt,
+    QTimer,
+)
+from PySide6.QtGui import QAction, QImage, QImageWriter
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QFileDialog, QMenu, QTreeWidgetItem
+from PySide6.QtWidgets import QMenu, QTreeWidgetItem
 
 from pyamp.config import Settings
 from pyamp.core.events import EventBus, LibraryChanged
@@ -43,6 +52,7 @@ from pyamp.library.sources import MediaSources, Node, NodeAction, SourceError, m
 from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.library_window import LOADING, LibraryWindow
 from pyamp.ui.skin import DEFAULT_SKIN
+from tests.conftest import answer_dialog
 from tests.test_background_loader import wait_until
 from tests.test_metadata import write_wav
 
@@ -86,6 +96,10 @@ class FakeServer:
             "a1": [stream("Teardrop"), stream("Angel")],
             "a2": [stream("Roads")],
         }
+        self.covers = {"Teardrop": png(), "Roads": png()}
+        self.asked_for_artwork: list[str] = []
+        self.artwork_gate = threading.Event()  # cleared: covers are slow to come
+        self.artwork_gate.set()
 
     def _check(self, key: Hashable) -> None:
         self.reached.set()
@@ -111,6 +125,21 @@ class FakeServer:
 
     def actions(self, node: Node | None) -> list[NodeAction]:
         return []
+
+    def artwork(self, track: Track) -> bytes | None:
+        self.asked_for_artwork.append(track.title)
+        self.artwork_gate.wait(timeout=5)
+        return self.covers.get(track.title)
+
+
+def png() -> bytes:
+    """A tiny real image."""
+    image = QImage(4, 4, QImage.Format.Format_RGB32)
+    image.fill(Qt.GlobalColor.red)
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    QImageWriter(buffer, QByteArray(b"png")).write(image)
+    return bytes(buffer.data().data())
 
 
 @pytest.fixture
@@ -422,7 +451,7 @@ def test_adding_a_folder_scans_it(
     folder = tmp_path / "new"
     folder.mkdir()
     write_wav(folder / "song.wav")
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_: str(folder))
+    answer_dialog(monkeypatch, "choose_folder", [folder])
     window.add_folder()
     assert "Scanning…" in window.status.text()
     library.progress.emit(1234)
@@ -440,13 +469,14 @@ def test_adding_files(
     window: LibraryWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     song = write_wav(tmp_path / "one.wav")
-    monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *_: ([str(song)], ""))
+    asked = answer_dialog(monkeypatch, "choose_files", [song])
     window.add_files()
     wait_until(lambda: titles(window) == ["one"])
     assert window._settings.last_directory == str(tmp_path)
-    monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *_: ([], ""))
+    assert asked == [(window, "Add Files to Library")]  # on this window: a sheet on macOS
+    answer_dialog(monkeypatch, "choose_files", [])
     window.add_files()  # cancelled
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_: "")
+    answer_dialog(monkeypatch, "choose_folder", [])
     window.add_folder()  # cancelled
     assert titles(window) == ["one"]
 
@@ -489,6 +519,42 @@ def test_a_source_change_keeps_the_selection_elsewhere(
     sources.add(FakeServer())
     settle(window)
     assert titles(window) == ["Glory Box"]
+
+
+def test_the_picked_tracks_artwork(window: LibraryWindow, server: FakeServer) -> None:
+    assert not window.artwork.has_image  # nothing listed
+    pick(window, 1, "albums", "a1")
+    wait_until(lambda: window.artwork.has_image)  # nothing picked: the first track's
+    assert server.asked_for_artwork == ["Teardrop"]
+    window.table.setCurrentIndex(window.model.index(1, 0))
+    wait_until(lambda: not window.artwork.has_image)  # Angel has none
+    window.table.setCurrentIndex(window.model.index(0, 0))
+    wait_until(lambda: window.artwork.has_image)
+    assert server.asked_for_artwork == ["Teardrop", "Angel"]  # asked once each
+    window.show()
+    window.close()
+    wait_until(lambda: not window.artwork.has_image)  # closed: nothing listed
+
+
+def test_a_late_picture_doesnt_replace_a_newer_one(
+    window: LibraryWindow, server: FakeServer
+) -> None:
+    pick(window, 1, "albums", "a1")
+    wait_until(lambda: server.asked_for_artwork == ["Teardrop"])
+    wait_until(lambda: window.artwork.has_image)
+    server.covers["Angel"] = png()
+    server.artwork_gate.clear()
+    window.table.setCurrentIndex(window.model.index(1, 0))
+    window.show_artwork()  # Angel's is on its way...
+    window.table.setCurrentIndex(window.model.index(0, 0))
+    window.show_artwork()  # ...but Teardrop's is known already
+    assert window.artwork.has_image
+    del server.covers["Angel"]  # had Angel's come, it would show none
+    server.artwork_gate.set()
+    wait_until(lambda: server.asked_for_artwork == ["Teardrop", "Angel"])
+    QTest.qWait(50)
+    assert window.artwork.has_image
+    assert window.artwork_track() == server.albums["a1"][0]
 
 
 def test_a_slow_source_never_blocks_the_window(window: LibraryWindow, server: FakeServer) -> None:

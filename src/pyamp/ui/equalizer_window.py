@@ -30,7 +30,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QSlider,
     QVBoxLayout,
     QWidget,
@@ -39,6 +38,7 @@ from PySide6.QtWidgets import (
 from pyamp.core.equalizer import BANDS_HZ, GAIN_RANGE_DB, PRESETS, Equalizer
 from pyamp.core.events import EqualizerChanged, EventBus
 from pyamp.core.player import Player
+from pyamp.ui.dialog_parts import plain_button
 from pyamp.ui.skin import Skin
 
 #: Slider positions per dB (sliders are integer, gains move in 0.5 dB steps).
@@ -64,12 +64,12 @@ class EqualizerWindow(QDialog):
         self._player = player
         self.setWindowTitle("Equaliser")
         self.setObjectName("central")
-        self.setStyleSheet(skin.stylesheet() + _extra_style(skin))
+        self.setStyleSheet(_extra_style(skin))  # the rest is the application's
 
         self.enabled = QCheckBox("On")
         self.presets = QComboBox()
         self.presets.addItems([*PRESETS, CUSTOM])
-        self.flat = QPushButton("Flat")
+        self.flat = plain_button("Flat")
         self.note = QLabel(UNSUPPORTED_NOTE)
         self.note.setWordWrap(True)
         self.preamp = _gain_slider("Preamp")
@@ -196,7 +196,6 @@ def _gain_slider(name: str) -> QSlider:
 
 def _extra_style(skin: Skin) -> str:
     return f"""
-    QDialog#central {{ background: {skin.window}; }}
     QSlider::groove:vertical {{
         width: 6px; background: #111118; border: 1px solid {skin.border};
     }}
@@ -208,9 +207,4 @@ def _extra_style(skin: Skin) -> str:
     QSlider::add-page:vertical:disabled {{ background: #2a3326; }}
     QSlider::handle:vertical:disabled {{ background: #55524a; }}
     QLabel#bandLabel {{ color: {skin.text_dim}; font-size: 10px; }}
-    QCheckBox {{ color: {skin.text}; }}
-    QComboBox, QPushButton {{
-        background: #2c2c38; color: {skin.text}; border: 1px solid #15151c; padding: 2px 6px;
-    }}
-    QCheckBox:disabled, QComboBox:disabled, QPushButton:disabled {{ color: {skin.text_dim}; }}
     """

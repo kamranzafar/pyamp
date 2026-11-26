@@ -126,3 +126,9 @@ def test_playlist_commands(source: PlaylistsSource, commands: list[tuple[str, st
         action.run()
     assert commands == [("open", "Mix"), ("rename", "Mix"), ("delete", "Mix")]
     assert source.actions(None) == []  # nothing for the whole list
+
+
+def test_artwork_for_files_only(source: PlaylistsSource, tmp_path: Path) -> None:
+    (tmp_path / "folder.png").write_bytes(b"cover")
+    assert source.artwork(Track(tmp_path / "song.mp3", "Song")) == b"cover"
+    assert source.artwork(Track.for_stream(RADIO)) is None  # its server isn't known here

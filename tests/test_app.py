@@ -26,9 +26,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QCoreApplication
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QInputDialog, QMenu, QMessageBox
+from PySide6.QtCore import QCoreApplication, QItemSelectionModel, QMimeData, QPointF, Qt, QUrl
+from PySide6.QtGui import QAction, QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtWidgets import QInputDialog, QMenu, QMessageBox, QTreeWidgetItem
 
 from pyamp import app as app_module
 from pyamp.app import Application, parse_args
@@ -36,8 +36,11 @@ from pyamp.audio import libmpv_loader, registry
 from pyamp.audio.registry import BackendUnavailableError
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.equalizer import Equalizer
-from pyamp.core.models import RepeatMode, ReplayGainMode, Track
+from pyamp.core.events import LibraryChanged
+from pyamp.core.models import RepeatMode, ReplayGainMode, StreamUrl, Track
+from pyamp.library.catalog import FileStamp
 from pyamp.library.saved_playlists import SavedPlaylists
+from pyamp.ui.library_window import LibraryWindow
 from tests.conftest import FakeBackend, FakeGaplessBackend
 from tests.test_background_loader import wait_until
 
@@ -411,7 +414,11 @@ def test_the_library_lists_the_saved_playlists(
     application.start([])
     wait_until(lambda: not application.playlists.loading)
     library = application.window.show_library()
-    assert [s.name for s in application.sources] == ["This Computer", "Playlists"]
+    assert [s.name for s in application.sources] == [
+        "This Computer",
+        "Playlists",
+        "Smart Playlists",
+    ]
     playlists = library.sidebar_item(1)
     assert playlists is not None
     wait_until(
@@ -422,6 +429,136 @@ def test_the_library_lists_the_saved_playlists(
     )
     application.window.add_to_playlist([Track.from_path(tmp_path / "a.mp3")], "Default")
     wait_until(lambda: playlists.childCount() == 1 and playlists.child(0).text(0) == "Default (1)")  # type: ignore[union-attr]
+
+
+def test_the_library_follows_edits_to_the_open_playlist(
+    store: SettingsStore, cleanup: list[Application], tmp_path: Path
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    application.start([])
+    wait_until(lambda: not application.playlists.loading)
+    a, b = (Track(tmp_path / f"{name}.mp3", name) for name in "ab")
+    application.window.add_tracks([a, b])
+    library = application.window.show_library()
+    playlists = library.sidebar_item(1)
+    assert playlists is not None
+    wait_until(
+        lambda: (default := playlists.child(0)) is not None and default.text(0) == "Default (2)"
+    )
+    default = playlists.child(0)
+    assert default is not None
+    library.sidebar.setCurrentItem(default)
+    wait_until(lambda: [t.title for t in library.model.tracks()] == ["a", "b"])
+
+    application.playlist.remove([0])  # in the player
+    wait_until(
+        lambda: (default := playlists.child(0)) is not None and default.text(0) == "Default (1)"
+    )
+    wait_until(lambda: [t.title for t in library.model.tracks()] == ["b"])  # still picked
+
+
+def test_smart_playlists_are_made_in_the_library_and_follow_scans(
+    store: SettingsStore, cleanup: list[Application], tmp_path: Path
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    stamp = FileStamp(1, 2)
+    application.catalog.put([(Track(tmp_path / "a.mp3", "Teardrop", genre="Trip Hop"), stamp)])
+    application.start([])
+    library = application.window.show_library()
+    smart = library.sidebar_item(2)
+    assert smart is not None and smart.text(0) == "Smart Playlists"
+
+    menu = library.sidebar_menu(smart)  # right-click on Smart Playlists
+    assert menu is not None
+    (new,) = menu.actions()
+    new.trigger()
+    dialog = application.smart_commands.dialog
+    assert dialog is not None
+    dialog.name.setText("Trip Hop")
+    dialog.rows[0].text.setText("hop")
+    dialog.ok_button.click()
+    wait_until(lambda: smart.childCount() == 1 and smart.child(0).text(0) == "Trip Hop (1)")  # type: ignore[union-attr]
+
+    playlist = smart.child(0)
+    assert playlist is not None
+    library.sidebar.setCurrentItem(playlist)
+    wait_until(lambda: [t.title for t in library.model.tracks()] == ["Teardrop"])
+    assert library._drop_target(playlist) is None  # tracks can't be dropped on one
+
+    roads = Track(tmp_path / "b.mp3", "Roads", genre="trip hop")
+    application.catalog.put([(roads, stamp)])
+    application.bus.publish(LibraryChanged())  # as a scan does
+    wait_until(lambda: (item := smart.child(0)) is not None and item.text(0) == "Trip Hop (2)")
+    wait_until(lambda: {t.title for t in library.model.tracks()} == {"Teardrop", "Roads"})
+
+
+def drag_onto(library: LibraryWindow, item: QTreeWidgetItem | None, data: QMimeData) -> bool:
+    """Drag ``data`` over ``item`` in the library's sidebar and drop it, as a mouse would
+    (the drop is added once Qt is done with it); whether the sidebar took it."""
+    assert item is not None
+    sidebar = library.sidebar
+    point = sidebar.visualItemRect(item).center()
+    copy, left = Qt.DropAction.CopyAction, Qt.MouseButton.LeftButton
+    none = Qt.KeyboardModifier.NoModifier
+    enter = QDragEnterEvent(point, copy, data, left, none)
+    sidebar.dragEnterEvent(enter)
+    move = QDragMoveEvent(point, copy, data, left, none)
+    sidebar.dragMoveEvent(move)
+    drop = QDropEvent(QPointF(point), copy, data, left, none)
+    sidebar.dropEvent(drop)
+    QCoreApplication.processEvents()
+    return enter.isAccepted() and move.isAccepted() and drop.isAccepted()
+
+
+def drag_rows(library: LibraryWindow, *rows: int) -> QMimeData:
+    """Select ``rows`` in the library's table and start dragging them."""
+    model, selection = library.model, library.table.selectionModel()
+    flags = QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
+    selection.clearSelection()
+    for row in rows:
+        selection.select(model.index(row, 0), flags)
+    return model.mimeData([model.index(row, 0) for row in rows])
+
+
+@pytest.mark.filterwarnings("ignore:Function.*is marked as deprecated:DeprecationWarning")
+def test_tracks_are_dragged_onto_a_playlist_in_the_library(
+    store: SettingsStore,
+    cleanup: list[Application],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    application.start([])
+    wait_until(lambda: not application.playlists.loading)
+    library = application.window.show_library()
+    playlists = library.sidebar_item(1)
+    assert playlists is not None
+    wait_until(
+        lambda: (default := playlists.child(0)) is not None and default.text(0) == "Default (0)"
+    )
+    stream = Track(StreamUrl("https://music.example/rest/stream?id=s1"), "Teardrop",
+                   artist="Massive Attack", duration_ms=330_000)  # fmt: skip
+    local = Track(tmp_path / "angel.mp3", "Angel", artist="Massive Attack")
+    library.model.set_tracks([stream, local])
+
+    dragged = drag_rows(library, 0, 1)
+    assert dragged.urls() == [QUrl.fromLocalFile(str(local.location))]  # to the player: files
+    assert drag_onto(library, playlists.child(0), dragged)  # onto "Default"
+    assert list(application.playlist) == [stream, local]  # with their tags, streams too
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *_, **kw: ("Mix", True))
+    assert drag_onto(library, playlists, drag_rows(library, 1))  # onto Playlists: a new one
+    assert "Mix" in application.playlists.names
+
+    before = list(application.playlist)
+    assert not drag_onto(library, library.sidebar_item(0), drag_rows(library, 0))  # This Computer
+    files = QMimeData()
+    files.setUrls([QUrl.fromLocalFile(str(tmp_path / "other.mp3"))])  # from Finder
+    assert not drag_onto(library, playlists.child(0), files)
+    assert list(application.playlist) == before
 
 
 def test_the_library_is_scanned_after_start_and_closed_on_quit(

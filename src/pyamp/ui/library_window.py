@@ -22,26 +22,40 @@
 The local library comes first, then sources from plugins (a Subsonic server, ...). All
 calls to sources run on worker threads (:class:`BackgroundCalls`), so a slow server
 never freezes the window; only the latest request for tracks fills the table.
+
+Under the sidebar is the picked track's artwork (or the first one listed), which its
+source finds: a file's own picture, or a server's cover.
 """
 
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from collections.abc import Callable, Hashable, Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QHideEvent, QKeySequence, QShortcut, QShowEvent
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QDragEnterEvent,
+    QDragLeaveEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QHideEvent,
+    QKeySequence,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QShortcut,
+    QShowEvent,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
-    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QMenu,
-    QPushButton,
     QSplitter,
     QTableView,
     QTreeWidget,
@@ -54,12 +68,17 @@ from pyamp.config import Settings
 from pyamp.core.events import EventBus, MediaSourcesChanged
 from pyamp.core.models import Track, format_duration
 from pyamp.library.metadata import AUDIO_EXTENSIONS
+from pyamp.library.playlists_source import PlaylistsSource
 from pyamp.library.scanner import ScanSummary
 from pyamp.library.sources import MediaSource, MediaSources, Node, SourceError
+from pyamp.ui import file_dialogs
 from pyamp.ui.background_calls import BackgroundCalls
+from pyamp.ui.dialog_parts import plain_button
 from pyamp.ui.library_model import COLUMNS, LibraryModel
 from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.skin import Skin
+from pyamp.ui.track_drag import dragged_tracks
+from pyamp.ui.widgets.artwork_view import ArtworkView
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +87,10 @@ SEARCH_DELAY_MS = 200
 LOADING = "Loading…"
 #: Worker threads per source: enough to list a node while its tracks load.
 CALLS_PER_SOURCE = 2
+#: The artwork waits for the picked track to settle this long (e.g. arrowing down).
+ARTWORK_DELAY_MS = 120
+#: Pictures kept, so moving between an album's songs doesn't ask for its cover again.
+ARTWORK_CACHE = 64
 
 # Sidebar item data: the source an item belongs to, its node (None for the source's own
 # item) and whether what's inside it has been asked for.
@@ -118,27 +141,36 @@ class LibraryWindow(QDialog):
         self._known: set[int] = set()
         #: An item to select again once the sidebar has loaded down to it.
         self._restore: tuple[int, tuple[Hashable, ...]] | None = None
+        #: The source the table's tracks came from (it finds their artwork).
+        self._tracks_source: MediaSource | None = None
+        self._artwork_request = 0
+        self._artwork_cache: OrderedDict[tuple[int, object], bytes | None] = OrderedDict()
         self.setWindowTitle("Library")
         self.setObjectName("central")
-        self.setStyleSheet(skin.stylesheet() + _extra_style(skin))
+        self.setStyleSheet(_extra_style(skin))  # the rest is the application's
         self.resize(900, 560)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search")
         self.search.setClearButtonEnabled(True)
-        self.sidebar = QTreeWidget()
+        self.sidebar = _Sidebar(self._drop_target)
+        self.sidebar.tracks_dropped.connect(self._drop_tracks)
         self.sidebar.setHeaderHidden(True)
         self.sidebar.setExpandsOnDoubleClick(False)  # a click opens; a second shouldn't close
         self.sidebar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.model = LibraryModel(self)
         self.table = _track_table(self.model)
+        self.artwork = ArtworkView()
         self.status = QLabel()
-        self.add_folder_button = QPushButton("Add Folder…")
-        self.add_files_button = QPushButton("Add Files…")
-        self.rescan_button = QPushButton("Rescan")
+        self.add_folder_button = plain_button("Add Folder…")
+        self.add_files_button = plain_button("Add Files…")
+        self.rescan_button = plain_button("Rescan")
         self._search_delay = QTimer(self)
         self._search_delay.setSingleShot(True)
         self._search_delay.setInterval(SEARCH_DELAY_MS)
+        self._artwork_delay = QTimer(self)
+        self._artwork_delay.setSingleShot(True)
+        self._artwork_delay.setInterval(ARTWORK_DELAY_MS)
         self._layout()
         self._connect(library)
         bus.subscribe(MediaSourcesChanged, self._on_sources_changed)
@@ -153,6 +185,9 @@ class LibraryWindow(QDialog):
         self.sidebar.itemCollapsed.connect(lambda item: self._expanded.discard(_path(item)))
         self.sidebar.customContextMenuRequested.connect(self._show_sidebar_menu)
         self.table.doubleClicked.connect(lambda index: self.play_from(index.row()))
+        self._artwork_delay.timeout.connect(self.show_artwork)
+        self.table.selectionModel().currentRowChanged.connect(self._artwork_delay.start)
+        self.model.modelReset.connect(self._artwork_delay.start)
         self.table.customContextMenuRequested.connect(self._show_table_menu)
         for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             shortcut = QShortcut(QKeySequence(key), self.table)
@@ -170,6 +205,7 @@ class LibraryWindow(QDialog):
         """Show every source again (e.g. one was added), keeping what was open and picked."""
         self._restore = self._restore or _location(self.sidebar.currentItem())
         self._retire_calls()
+        self._artwork_cache.clear()
         self._generation = {i: self._generation.get(i, 0) + 1 for i in range(len(self._sources))}
         self.sidebar.blockSignals(True)
         self.sidebar.clear()
@@ -194,6 +230,7 @@ class LibraryWindow(QDialog):
         item = self._top(position) if position is not None else None
         if position is None or item is None:
             return
+        self._artwork_cache.clear()  # e.g. a rescan found new covers
         current = _location(self.sidebar.currentItem())
         if current is not None and current[0] == position:
             self._restore = current
@@ -373,10 +410,47 @@ class LibraryWindow(QDialog):
                 self._show_error(error)
                 return
             self._error = ""
+            self._tracks_source = source
             self.model.set_tracks(tracks)
             self._update_status()
 
         self._calls_for(source).run(lambda: source.tracks(node, search), done)
+
+    # -- The artwork --------------------------------------------------------------- #
+
+    def artwork_track(self) -> Track | None:
+        """The track whose artwork is shown: the table's current one, else the first."""
+        row = self.table.currentIndex().row()
+        if 0 <= row < self.model.rowCount():
+            return self.model.track(row)
+        return self.model.track(0) if self.model.rowCount() else None
+
+    def show_artwork(self) -> None:
+        """Show :meth:`artwork_track`'s picture, asking its source for it if need be."""
+        self._artwork_delay.stop()
+        self._artwork_request += 1  # and a reply still on its way is dropped
+        request = self._artwork_request
+        track, source = self.artwork_track(), self._tracks_source
+        if track is None or source is None:
+            self.artwork.show_image(None)
+            return
+        key = (id(source), track.artwork or track.location)
+        if key in self._artwork_cache:
+            self._artwork_cache.move_to_end(key)
+            self.artwork.show_image(self._artwork_cache[key])
+            return
+
+        def done(data: bytes | None, error: BaseException | None) -> None:
+            if error is not None:
+                log.debug("No artwork for %s", track.location, exc_info=error)
+            elif source is self._tracks_source:  # not a source since rebuilt
+                self._artwork_cache[key] = data
+                while len(self._artwork_cache) > ARTWORK_CACHE:
+                    self._artwork_cache.popitem(last=False)
+            if request == self._artwork_request:
+                self.artwork.show_image(data if error is None else None)
+
+        self._calls_for(source).run(lambda: source.artwork(track), done)
 
     def _show_error(self, error: BaseException | None) -> None:
         if isinstance(error, SourceError):
@@ -435,6 +509,17 @@ class LibraryWindow(QDialog):
         if message is None:
             self._update_status()
 
+    def _drop_target(self, item: QTreeWidgetItem) -> str | None:
+        """The saved playlist that tracks dropped on ``item`` go into ("" for a new one,
+        dropped on Playlists itself); None if they can't be dropped there."""
+        if not isinstance(item.data(0, _SOURCE), PlaylistsSource):
+            return None
+        node = item.data(0, _NODE)
+        return str(node.key) if isinstance(node, Node) else ""
+
+    def _drop_tracks(self, tracks: list[Track], playlist: str) -> None:
+        self._add(tracks, playlist or None, "")
+
     def _playlist_menu(self, parent: QMenu, add: Callable[[str | None], object]) -> QMenu:
         """Add to Playlist ▸ every saved playlist, then New Playlist…"""
         menu = parent.addMenu("&Add to Playlist")
@@ -447,21 +532,20 @@ class LibraryWindow(QDialog):
         return menu
 
     def add_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
-            self, "Add Folder to Library", self._settings.last_directory
+        """Ask for a folder (a sheet on this window, so it keeps the focus) and add it."""
+        file_dialogs.choose_folder(
+            self, "Add Folder to Library", self._settings.last_directory, self._add_sources
         )
-        if folder:
-            self._add_sources([Path(folder)])
 
     def add_files(self) -> None:
         patterns = " ".join(f"*{ext}" for ext in sorted(AUDIO_EXTENSIONS))
-        files, _ = QFileDialog.getOpenFileNames(
+        file_dialogs.choose_files(
             self,
             "Add Files to Library",
             self._settings.last_directory,
             f"Audio files ({patterns})",
+            self._add_sources,
         )
-        self._add_sources([Path(f) for f in files])
 
     def _add_sources(self, paths: list[Path]) -> None:
         if not paths:
@@ -553,7 +637,13 @@ class LibraryWindow(QDialog):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addWidget(self.search)
-        left_layout.addWidget(self.sidebar)
+        browse = QSplitter(Qt.Orientation.Vertical)
+        browse.setChildrenCollapsible(False)
+        browse.addWidget(self.sidebar)
+        browse.addWidget(self.artwork)
+        browse.setStretchFactor(0, 1)
+        browse.setSizes([300, 220])
+        left_layout.addWidget(browse)
         splitter = QSplitter()
         splitter.addWidget(left)
         splitter.addWidget(self.table)
@@ -566,6 +656,74 @@ class LibraryWindow(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(splitter, 1)
         layout.addLayout(bottom)
+
+
+class _Sidebar(QTreeWidget):
+    """The sources and what's in them. Tracks dragged from PyAmp (e.g. the table) can be
+    dropped onto a saved playlist, or onto Playlists itself for a new one; nothing else
+    is dropped here."""
+
+    #: These tracks were dropped for this playlist ("" for a new one). Sent once the
+    #: drop is over, as adding may ask for a name.
+    tracks_dropped = Signal(list, str)
+
+    def __init__(self, drop_target: Callable[[QTreeWidgetItem], str | None]) -> None:
+        super().__init__()
+        self._drop_target = drop_target
+        self._hovered: QTreeWidgetItem | None = None
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if dragged_tracks(event.mimeData()):
+            event.acceptProposedAction()  # each move then says whether it can land there
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        item = self.itemAt(event.position().toPoint())
+        target = self._target(item, event)
+        self._hover(item if target is not None else None)
+        if target is None:
+            event.ignore()
+        else:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        self._hover(None)
+        event.accept()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        target = self._target(self.itemAt(event.position().toPoint()), event)
+        self._hover(None)
+        if target is None:
+            event.ignore()
+            return
+        tracks = dragged_tracks(event.mimeData())
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        QTimer.singleShot(0, lambda: self.tracks_dropped.emit(tracks, target))
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        item = self._hovered
+        if item is None or item.treeWidget() is not self:  # gone meanwhile
+            return
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(self.palette().highlight().color(), 2))
+        painter.drawRoundedRect(self.visualItemRect(item).adjusted(1, 1, -1, -1), 3, 3)
+
+    def _target(self, item: QTreeWidgetItem | None, event: QDropEvent) -> str | None:
+        if item is None or not dragged_tracks(event.mimeData()):
+            return None
+        return self._drop_target(item)
+
+    def _hover(self, item: QTreeWidgetItem | None) -> None:
+        if item is not self._hovered:
+            self._hovered = item
+            self.viewport().update()
 
 
 def _children(item: QTreeWidgetItem) -> list[QTreeWidgetItem]:
@@ -624,18 +782,7 @@ def _track_table(model: LibraryModel) -> QTableView:
 
 def _extra_style(skin: Skin) -> str:
     return f"""
-    QTreeWidget, QLineEdit {{
-        background: {skin.panel}; color: {skin.playlist_text};
-        border: 1px solid {skin.border};
-        selection-background-color: {skin.selection}; selection-color: {skin.playlist_text};
+    QLabel#artwork {{
+        background: {skin.panel}; color: {skin.text_dim}; border: 1px solid {skin.border};
     }}
-    QHeaderView::section {{
-        background: {skin.window}; color: {skin.text_dim};
-        border: 0; border-bottom: 1px solid {skin.border}; padding: 2px 4px;
-    }}
-    QPushButton {{
-        background: {skin.window}; color: {skin.text};
-        border: 1px solid {skin.border}; padding: 2px 10px;
-    }}
-    QPushButton:hover {{ color: {skin.accent}; }}
     """

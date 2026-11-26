@@ -29,6 +29,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from pyamp.core.models import Track
+from pyamp.library.artwork import file_artwork
 from pyamp.library.catalog import Catalog
 from pyamp.library.saved_playlists import SavedPlaylists, entry_track
 from pyamp.library.sources import Node, NodeAction, matches
@@ -96,3 +97,8 @@ class PlaylistsSource:
             NodeAction("Re&name…", lambda: self._rename(name)),
             NodeAction("&Delete…", lambda: self._delete(name)),
         ]
+
+    def artwork(self, track: Track) -> bytes | None:
+        """A file's picture; streams have none here (a playlist doesn't say where their
+        server keeps it)."""
+        return file_artwork(track.location) if isinstance(track.location, Path) else None

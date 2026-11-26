@@ -24,50 +24,18 @@ No Qt here: :class:`pyamp.ui.playlist_session.PlaylistSession` decides when to s
 
 from __future__ import annotations
 
-import sys
-import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 import platformdirs
 
-from pyamp import APP_NAME
+from pyamp import APP_NAME, files
 from pyamp.core.models import Location, StreamUrl, Track
 from pyamp.library.playlist_formats import M3UFormat, PlaylistEntry
 
 SUFFIX = ".m3u8"
 MAX_NAME_LENGTH = 100
 _FORBIDDEN = set('/\\:*?"<>|')
-
-
-#: How long to keep retrying a file operation that Windows refuses because the file is
-#: in use elsewhere (e.g. read by the background loader, or being replaced by a save):
-#: either takes milliseconds.
-LOCK_RETRY_S = 1.0
-_LOCK_RETRY_STEP_S = 0.05
-
-
-def retry_while_locked[T](
-    operation: Callable[[], T],
-    *,
-    platform: str | None = None,
-    sleep: Callable[[float], None] = time.sleep,
-) -> T:
-    """Run a file operation, retrying briefly while Windows reports the file in use.
-
-    Windows won't delete or replace a file another thread has open, nor open one that's
-    being replaced; macOS and Linux will. ``platform`` defaults to this one.
-    """
-    on_windows = (platform or sys.platform) == "win32"
-    attempts = int(LOCK_RETRY_S / _LOCK_RETRY_STEP_S) if on_windows else 1
-    for attempt in range(attempts):
-        try:
-            return operation()
-        except PermissionError:
-            if attempt == attempts - 1:
-                raise
-            sleep(_LOCK_RETRY_STEP_S)
-    raise AssertionError("unreachable")
 
 
 class PlaylistNameError(ValueError):
@@ -130,12 +98,7 @@ class SavedPlaylists:
         return name
 
     def save(self, name: str, tracks: Sequence[Track]) -> None:
-        target = self.path(name)
-        self.directory.mkdir(parents=True, exist_ok=True)
-        # Write-then-rename, so a crash never leaves a half-written playlist.
-        tmp = target.with_name(f".{target.name}.tmp")
-        self._format.write(tmp, tracks)
-        retry_while_locked(lambda: tmp.replace(target))
+        files.write_with(self.path(name), lambda tmp: self._format.write(tmp, tracks))
 
     def read_paths(self, name: str) -> list[Location]:
         return [entry.location for entry in self.entries(name)]
@@ -147,7 +110,7 @@ class SavedPlaylists:
             raise FileNotFoundError(f"no saved playlist {name!r}")
         # Retried: on Windows a save replacing the file (an auto-save, on its own thread)
         # makes opening it fail for a moment.
-        return retry_while_locked(lambda: self._format.read(found))
+        return files.retry_while_locked(lambda: self._format.read(found))
 
     def rename(self, old: str, new: str) -> str:
         source = self._find(old)
@@ -157,13 +120,13 @@ class SavedPlaylists:
         clash = self._find(new)
         if clash is not None and clash != source:
             raise PlaylistNameError(f'There is already a playlist called "{clash.stem}".')
-        retry_while_locked(lambda: source.rename(self.directory / f"{new}{SUFFIX}"))
+        files.retry_while_locked(lambda: source.rename(self.directory / f"{new}{SUFFIX}"))
         return new
 
     def delete(self, name: str) -> None:
         found = self._find(name)
         if found is not None:
-            retry_while_locked(found.unlink)
+            files.retry_while_locked(found.unlink)
 
     def _find(self, name: str) -> Path | None:
         wanted = name.strip().casefold()

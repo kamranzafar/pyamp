@@ -27,7 +27,7 @@ from pathlib import Path
 
 import platformdirs
 
-from pyamp import APP_NAME
+from pyamp import APP_NAME, files
 
 log = logging.getLogger(__name__)
 
@@ -76,14 +76,11 @@ class DlnaSettings:
 
     def _write(self, **changes: list[str]) -> None:
         payload = {"hidden": self.hidden(), "added": self.added(), **changes}
-        self.directory.mkdir(parents=True, exist_ok=True)
-        tmp = self.file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp.replace(self.file)
+        files.write_text(self.file, json.dumps(payload, indent=2))
 
     def _read(self) -> dict[str, object]:
         try:
-            raw = json.loads(self.file.read_text(encoding="utf-8"))
+            raw = json.loads(files.read_text(self.file))
         except FileNotFoundError:
             return {}
         except (OSError, ValueError) as exc:

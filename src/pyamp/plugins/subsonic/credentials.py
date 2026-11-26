@@ -30,7 +30,7 @@ import keyring
 import platformdirs
 from keyring.backends.fail import Keyring as FailKeyring
 
-from pyamp import APP_NAME
+from pyamp import APP_NAME, files
 
 log = logging.getLogger(__name__)
 
@@ -111,15 +111,12 @@ class AccountStore:
         return entries
 
     def _write(self, entries: list[tuple[Account, bool]]) -> None:
-        self.directory.mkdir(parents=True, exist_ok=True)
         servers = [{**asdict(a), "remember_password": remember} for a, remember in entries]
-        tmp = self.file.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"servers": servers}, indent=2), encoding="utf-8")
-        tmp.replace(self.file)
+        files.write_text(self.file, json.dumps({"servers": servers}, indent=2))
 
     def _read(self) -> dict[str, object]:
         try:
-            raw = json.loads(self.file.read_text(encoding="utf-8"))
+            raw = json.loads(files.read_text(self.file))
         except FileNotFoundError:
             return {}
         except (OSError, ValueError) as exc:

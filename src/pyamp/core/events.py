@@ -162,6 +162,11 @@ class SavedPlaylistEdited:
 
 
 @dataclass(frozen=True, slots=True)
+class SmartPlaylistsChanged:
+    """A smart playlist was made, changed or deleted."""
+
+
+@dataclass(frozen=True, slots=True)
 class AudioInfoChanged:
     """What's playing: bitrate in kbps and sample rate in Hz (0 where unknown).
 

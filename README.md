@@ -126,6 +126,8 @@ starts, and when you click **Rescan**. Only files that changed are read again.
 - **Playlists**, in the sidebar, lists your saved playlists. Pick one to see its tracks
   (with the library's tags; no music files are read); right-click it to open it in the
   player, rename it or delete it. Changes made in the player show here once saved.
+- **Smart Playlists**, in the sidebar, are rules that pick tracks from the library
+  for you (see [Smart playlists](#smart-playlists)).
 - Under the sidebar is the artwork of the track you've picked (or of the first one
   listed): the picture in the file's tags, else a `cover`, `folder`, `front` or `album`
   image (`.jpg`, `.png` or `.webp`) in its folder; a server's cover for its songs. Drag
@@ -144,6 +146,34 @@ each [DLNA/UPnP server](#dlnaupnp-servers) on your network, and sources added by
 plugins. They're browsed, searched and played the same way, and a
 slow or unreachable server never holds up the window. Picking a server's name
 searches the whole server.
+
+### Smart playlists
+
+A smart playlist is a set of rules, not a list of tracks: it shows whatever in the
+library matches them right now, so it keeps up with new music after each scan.
+Right-click **Smart Playlists** in the library sidebar and choose **New Smart
+Playlist…**, then add rules such as:
+
+- **Title, Artist, Album, Album artist or Genre** contains, doesn't contain, is, is not
+  or starts with some text (ignoring case). "Genre is" with nothing typed finds tracks
+  with no genre.
+- **Year or Length** (in seconds) is, is not, is at least, is at most or is between.
+  Tracks whose year or length isn't known are left out of ranges.
+- **File type** is or is not, e.g. `flac`.
+- **Folder** is in or is not in one of the library's folders.
+- **Date added** is in, or is not in, the last so many days. A file's date added is its
+  modified date when PyAmp first found it, and stays the same if the file changes.
+
+Choose whether a track must match **all** the rules or **any** of them, how to sort
+them (album order, random, title, artist, year, most recently added, longest or
+shortest first), and, if you like, a limit, e.g. 50 tracks. **Random** with a limit
+picks a new set each time you open the playlist. As you edit, the dialog shows how
+many tracks match. With no rules at all, the whole library matches.
+
+Right-click a smart playlist to edit, duplicate or delete it; play it and add its tracks
+to playlists like any other part of the library. Smart playlists only look in the
+library on this computer (not servers), and change nothing in your music files: they
+are kept in `smart_playlists.json` in PyAmp's data folder.
 
 ### Audio backends
 

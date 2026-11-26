@@ -75,7 +75,7 @@ def start(
 
 
 def servers(app: Application) -> list[str]:  # noqa: F811
-    return [source.name for source in list(app.sources)[2:]]  # after This Computer, Playlists
+    return [source.name for source in list(app.sources)[3:]]  # after the built-in sources
 
 
 def menu_texts(menu: QMenu) -> list[str]:
@@ -89,7 +89,7 @@ def test_finds_servers_on_the_network_as_it_starts(
 ) -> None:
     plugin = start(app, settings, lambda: ssdp.discover(timeout=0.3, target=server.ssdp_target))
     assert servers(app) == ["DLNA — Living Room NAS"]
-    assert list(app.sources)[2:] == plugin.sources
+    assert list(app.sources)[3:] == plugin.sources
     library = next(a.menu() for a in app.window.menuBar().actions() if a.text() == "&Library")
     assert isinstance(library, QMenu)
     assert menu_texts(library)[-3:] == [
@@ -108,8 +108,8 @@ def test_browse_a_server_and_play_its_songs(
     start(app, settings, lambda: [server.location])
     window = app.window.show_library()
     settle(window)
-    assert labels(window, 2) == ["Music (1)", "Videos", "All Songs"]
-    pick(window, 2, "1", "11", "al1")
+    assert labels(window, 3) == ["Music (1)", "Videos", "All Songs"]
+    pick(window, 3, "1", "11", "al1")
     assert titles(window) == ["Teardrop", "Angel"]
     window.play_from(0)
     backend = app.player._backend
@@ -150,7 +150,7 @@ def test_hide_a_server_and_show_it_again(
     plugin = start(app, settings, lambda: [server.location, other.location])
     window = app.window.show_library()
     settle(window)
-    menu = window.sidebar_menu(window.sidebar_item(2))  # right-click on its name
+    menu = window.sidebar_menu(window.sidebar_item(3))  # right-click on its name
     assert menu is not None
     assert menu_texts(menu) == ["Re&fresh", "&Hide Server"]
     menu.actions()[1].trigger()
@@ -238,7 +238,7 @@ def test_add_a_server_by_its_address_and_remove_it(
     assert settings.added() == [server.location]
     window = app.window.show_library()
     settle(window)
-    menu = window.sidebar_menu(window.sidebar_item(2))
+    menu = window.sidebar_menu(window.sidebar_item(3))
     assert menu is not None
     assert menu_texts(menu) == ["Re&fresh", "&Remove Server"]
     plugin.refresh()  # found again, by its address

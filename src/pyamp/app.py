@@ -54,6 +54,7 @@ from pyamp.core.events import (
     LibraryChanged,
     SavedPlaylistEdited,
     SavedPlaylistsChanged,
+    SmartPlaylistsChanged,
 )
 from pyamp.core.models import RepeatMode, ReplayGainMode
 from pyamp.core.player import Player
@@ -67,6 +68,8 @@ from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.library.playlists_source import PlaylistsSource
 from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.library.scanner import LibraryScanner
+from pyamp.library.smart_playlists import SmartPlaylists
+from pyamp.library.smart_source import SmartPlaylistsSource
 from pyamp.library.sources import MediaSources
 from pyamp.plugins import PluginContext, PluginManager
 from pyamp.ui.background_loader import BackgroundTrackLoader
@@ -75,6 +78,7 @@ from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.main_window import MainWindow, UiServices
 from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import DEFAULT_SKIN
+from pyamp.ui.smart_playlist_commands import SmartPlaylistCommands
 
 log = logging.getLogger(__name__)
 
@@ -145,6 +149,7 @@ class Application:
         store: SettingsStore | None = None,
         saved_playlists: SavedPlaylists | None = None,
         catalog: Catalog | None = None,
+        smart_playlists: SmartPlaylists | None = None,
     ) -> None:
         self._store = store or SettingsStore()
         self.settings = self._store.load()
@@ -226,6 +231,25 @@ class Application:
         # player's edits to the open one are saved).
         for event in (SavedPlaylistsChanged, SavedPlaylistEdited):
             self.bus.subscribe(event, lambda _: self.sources.changed(self.playlists_source))
+        # Smart playlists, after the saved ones: shown again when one is made, changed or
+        # deleted, and when a scan changes what their rules match.
+        self.smart_commands = SmartPlaylistCommands(
+            smart := smart_playlists or SmartPlaylists(),
+            self.catalog,
+            self.bus,
+            parent=lambda: QApplication.activeWindow() or self.window,
+        )
+        self.smart_source = SmartPlaylistsSource(
+            smart,
+            self.catalog,
+            new_playlist=self.smart_commands.new,
+            edit_playlist=self.smart_commands.edit,
+            duplicate_playlist=self.smart_commands.duplicate,
+            delete_playlist=self.smart_commands.delete,
+        )
+        self.sources.add(self.smart_source)
+        for smart_event in (SmartPlaylistsChanged, LibraryChanged):
+            self.bus.subscribe(smart_event, lambda _: self.sources.changed(self.smart_source))
         # Restore preferences *after* the UI exists, so widgets receive the events.
         self._apply_settings(self.settings)
         if not args.no_plugins:

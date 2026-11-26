@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 
 from pyamp.core.models import ReplayGain, StreamUrl, Track
+from pyamp.library import catalog as catalog_module
 from pyamp.library.catalog import (
     SCHEMA_VERSION,
     Catalog,
@@ -342,3 +343,40 @@ def test_tracks_can_be_looked_up_by_path(catalog: Catalog, monkeypatch: pytest.M
     found = catalog.tracks_at(wanted)
     assert found == {Path("/m/4.mp3"): tracks[4], Path("/m/0.mp3"): tracks[0]}
     assert catalog.tracks_at([]) == {}
+
+
+# -- When files were added ---------------------------------------------------------- #
+
+
+def _added(catalog: Catalog) -> dict[str, int]:
+    rows = catalog._db.execute("SELECT path, added_ns FROM tracks").fetchall()
+    return dict(rows)
+
+
+def test_a_file_is_added_at_its_modified_time_and_keeps_it(catalog: Catalog) -> None:
+    song = track("/music/a.mp3", "Old Title")
+    catalog.put([(song, FileStamp(mtime_ns=10, size=1))])
+    catalog.put([(track("/music/a.mp3", "New Title"), FileStamp(mtime_ns=99, size=1))])
+    assert _added(catalog) == {"/music/a.mp3": 10}
+    assert catalog.stamps() == {Path("/music/a.mp3"): FileStamp(99, 1)}
+    assert [t.title for t in catalog.tracks()] == ["New Title"]
+
+
+def test_an_older_library_is_upgraded_keeping_its_tracks(tmp_path: Path) -> None:
+    path = tmp_path / "library.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.executescript(f"BEGIN; {catalog_module._MIGRATIONS[0]} PRAGMA user_version = 1; COMMIT;")
+        db.execute(
+            "INSERT INTO tracks VALUES"
+            " ('/m/a.mp3', 42, 1, 'A', '', '', '', '', 0, 0, 0, 0,"
+            " NULL, NULL, NULL, NULL, '', '', '', 'a')"
+        )
+    db.close()
+    upgraded = Catalog(path)
+    try:
+        assert [t.title for t in upgraded.tracks()] == ["A"]
+        assert _added(upgraded) == {"/m/a.mp3": 42}  # its modified time: the best guess
+        (version,) = upgraded._db.execute("PRAGMA user_version").fetchone()
+        assert version == SCHEMA_VERSION == 2
+    finally:
+        upgraded.close()

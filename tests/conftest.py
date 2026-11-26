@@ -147,6 +147,15 @@ def isolated_library(
     monkeypatch.setattr("pyamp.library.catalog.default_path", lambda: path)
 
 
+@pytest.fixture(autouse=True)
+def isolated_smart_playlists(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No test may touch the user's real smart playlists."""
+    path = tmp_path_factory.mktemp("smart") / "smart_playlists.json"
+    monkeypatch.setattr("pyamp.library.smart_playlists.default_file", lambda: path)
+
+
 @pytest.fixture
 def bus() -> EventBus:
     return EventBus()

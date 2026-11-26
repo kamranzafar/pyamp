@@ -144,7 +144,11 @@ def test_adds_its_menu_and_waits_to_be_set_up(
     # After PyAmp's own library items; the server is browsed in the library window.
     assert [a.text() for a in menu.actions()][-1] == "Add Subsonic &Server…"
     assert "Subsonic" not in " ".join(a.text() for a in menu.actions()[:-1])
-    assert list(app.sources) == [app.local_source, app.playlists_source]  # no server yet
+    assert list(app.sources) == [
+        app.local_source,
+        app.playlists_source,
+        app.smart_source,
+    ]  # no server yet
 
 
 def test_connects_and_remembers_the_password_in_the_keychain(
@@ -326,14 +330,19 @@ def test_the_server_is_a_source_in_the_library(
     remember(accounts, keychain, server)
     plugin = start(app, accounts)
     (source,) = plugin.sources
-    assert list(app.sources) == [app.local_source, app.playlists_source, source]
+    assert list(app.sources) == [app.local_source, app.playlists_source, app.smart_source, source]
     assert source.name == f"Subsonic — {server.url.removeprefix('http://')}"
     answer_dialog(monkeypatch, server.url, PASSWORD)
     assert plugin.add_server()  # adding it again replaces it, in its place
-    assert list(app.sources) == [app.local_source, app.playlists_source, *plugin.sources]
+    assert list(app.sources) == [
+        app.local_source,
+        app.playlists_source,
+        app.smart_source,
+        *plugin.sources,
+    ]
     assert len(plugin.sources) == 1
     plugin.deactivate()
-    assert list(app.sources) == [app.local_source, app.playlists_source]
+    assert list(app.sources) == [app.local_source, app.playlists_source, app.smart_source]
 
 
 def test_servers_are_added_alongside_each_other(
@@ -349,7 +358,13 @@ def test_servers_are_added_alongside_each_other(
     answer_dialog(monkeypatch, second_server.url, PASSWORD)
     assert plugin.add_server()
     first, second = plugin.sources
-    assert list(app.sources) == [app.local_source, app.playlists_source, first, second]
+    assert list(app.sources) == [
+        app.local_source,
+        app.playlists_source,
+        app.smart_source,
+        first,
+        second,
+    ]
     assert [client(plugin, n).server for n in (0, 1)] == [server.url, second_server.url]
     assert accounts.accounts() == [
         Account(server.url, USERNAME),
@@ -398,7 +413,7 @@ def test_a_server_is_edited_in_its_place(
     assert accounts.accounts() == [moved, other]
     assert keychain.passwords == {(KEYRING_SERVICE, moved.key): PASSWORD}  # the old one gone
     assert client(plugin).server == second_server.url
-    assert list(app.sources)[2:] == plugin.sources  # still first of the servers
+    assert list(app.sources)[3:] == plugin.sources  # still first of the servers
     assert plugin.sources[0].name == f"Subsonic — {second_server.url.removeprefix('http://')}"
 
 
@@ -415,7 +430,7 @@ def test_a_server_is_removed_from_its_menu_in_the_library(
     song = client(plugin).album_tracks("al1")[0]  # from the server to remove
     window = app.window.show_library()
     settle(window)
-    menu = window.sidebar_menu(window.sidebar_item(2))  # right-click on the server's name
+    menu = window.sidebar_menu(window.sidebar_item(3))  # right-click on the server's name
     assert menu is not None
     assert [a.text() for a in menu.actions()] == [
         "&Edit Server…",
@@ -427,8 +442,8 @@ def test_a_server_is_removed_from_its_menu_in_the_library(
     assert accounts.accounts() == [Account(second_server.url, USERNAME)]
     assert (KEYRING_SERVICE, first.key) not in keychain.passwords
     assert [s.client.server for s in plugin.sources if s.client] == [second_server.url]
-    assert list(app.sources)[2:] == plugin.sources
-    assert window.sidebar.topLevelItemCount() == 3
+    assert list(app.sources)[3:] == plugin.sources
+    assert window.sidebar.topLevelItemCount() == 4
     app.playlist.add([song])
     app.player.play_index(len(app.playlist) - 1)
     backend = app.player._backend
@@ -449,7 +464,7 @@ def test_forget_a_servers_password(
     plugin = start(app, accounts)
     window = app.window.show_library()
     settle(window)
-    menu = window.sidebar_menu(window.sidebar_item(2))
+    menu = window.sidebar_menu(window.sidebar_item(3))
     assert menu is not None
     forget = next(a for a in menu.actions() if a.text() == "&Forget Password")
     forget.trigger()
@@ -460,7 +475,7 @@ def test_forget_a_servers_password(
     assert accounts.accounts() == [account, other]  # the server stays, in its place
     signed_out, signed_in = plugin.sources
     assert signed_out.client is None  # and is signed out
-    assert list(app.sources)[2:] == [signed_out, signed_in]
+    assert list(app.sources)[3:] == [signed_out, signed_in]
     assert [a.text for a in signed_out.actions(None)] == ["Sign &In…", "&Remove Server"]
     reads = keychain.reads
     answer_dialog(monkeypatch, server.url, PASSWORD, remember=False)
@@ -494,9 +509,9 @@ def test_a_server_without_its_password_is_shown_to_sign_in_to(
     plugin = start(app, accounts)
     window = app.window.show_library()
     settle(window)
-    pick(window, 2)
+    pick(window, 3)
     assert window.status.text() == SIGN_IN
-    menu = window.sidebar_menu(window.sidebar_item(2))
+    menu = window.sidebar_menu(window.sidebar_item(3))
     assert menu is not None
     sign_in, remove = menu.actions()
     assert (sign_in.text(), remove.text()) == ("Sign &In…", "&Remove Server")
@@ -504,7 +519,7 @@ def test_a_server_without_its_password_is_shown_to_sign_in_to(
     sign_in.trigger()
     settle(window)
     assert client(plugin).server == server.url
-    assert labels(window, 2) == ["Artists", "Playlists"]
+    assert labels(window, 3) == ["Artists", "Playlists"]
     assert keychain.passwords == {}  # still not remembered, as chosen
 
 
@@ -526,7 +541,7 @@ def test_servers_on_one_host_are_told_apart_by_username(
     settle(window)
     plugin.remove_server(Account("https://music.example", "bob"))
     settle(window)
-    shown = [window.sidebar.topLevelItem(n).text(0) for n in (2, 3)]  # type: ignore[union-attr]
+    shown = [window.sidebar.topLevelItem(n).text(0) for n in (3, 4)]  # type: ignore[union-attr]
     assert shown == ["Subsonic — music.example", "Subsonic — other.example"]
     assert keychain.reads == 0  # none remembered: the keychain is never asked
 
@@ -541,12 +556,12 @@ def test_browse_an_album_in_the_library_and_play_it(
     start(app, accounts)
     window = app.window.show_library()
     settle(window)
-    assert labels(window, 2) == ["Artists", "Playlists"]
-    assert labels(window, 2, (ARTISTS, "")) == ["Massive Attack (1 album)"]
-    assert labels(window, 2, (ARTISTS, ""), (ARTIST, "ar1")) == [
+    assert labels(window, 3) == ["Artists", "Playlists"]
+    assert labels(window, 3, (ARTISTS, "")) == ["Massive Attack (1 album)"]
+    assert labels(window, 3, (ARTISTS, ""), (ARTIST, "ar1")) == [
         "Mezzanine (Massive Attack · 1998)"
     ]
-    pick(window, 2, (ARTISTS, ""), (ARTIST, "ar1"), (ALBUM, "al1"))
+    pick(window, 3, (ARTISTS, ""), (ARTIST, "ar1"), (ALBUM, "al1"))
     assert titles(window) == ["Teardrop", "Angel"]  # album order: by track number
     assert window.model.data(window.model.index(0, 6)) == "5:30"
 
@@ -570,14 +585,14 @@ def test_search_the_server_and_its_playlists(
     start(app, accounts)
     window = app.window.show_library()
     settle(window)
-    pick(window, 2)
+    pick(window, 3)
     assert titles(window) == []  # nothing to list until you search
     window.search.setText("tear")
     window.search.returnPressed.emit()
     settle(window)
     assert titles(window) == ["Teardrop"]
     window.search.setText("")
-    pick(window, 2, (PLAYLISTS, ""), (PLAYLIST, "p1"))
+    pick(window, 3, (PLAYLISTS, ""), (PLAYLIST, "p1"))
     assert titles(window) == ["Angel"]
 
 
@@ -592,7 +607,7 @@ def test_server_errors_are_shown_in_the_library(
     client(plugin)._password = "changed on the server"
     window = app.window.show_library()
     settle(window)
-    item(window, 2, (ARTISTS, "")).setExpanded(True)
+    item(window, 3, (ARTISTS, "")).setExpanded(True)
     settle(window)
     assert window.status.text() == "Wrong username or password"
 
@@ -624,9 +639,9 @@ def test_clicking_an_artist_shows_its_albums_and_songs(
     start(app, accounts)
     window = app.window.show_library()
     settle(window)
-    artists = item(window, 2, (ARTISTS, ""))
+    artists = item(window, 3, (ARTISTS, ""))
     click(window, artists)
-    artist = item(window, 2, (ARTISTS, ""), (ARTIST, "ar1"))
+    artist = item(window, 3, (ARTISTS, ""), (ARTIST, "ar1"))
     click(window, artist)
     assert artist.isExpanded()
     assert artist.child(0) is not None

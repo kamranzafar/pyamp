@@ -36,7 +36,9 @@ from pyamp.audio import libmpv_loader, registry
 from pyamp.audio.registry import BackendUnavailableError
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.equalizer import Equalizer
+from pyamp.core.events import LibraryChanged
 from pyamp.core.models import RepeatMode, ReplayGainMode, StreamUrl, Track
+from pyamp.library.catalog import FileStamp
 from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.ui.library_window import LibraryWindow
 from tests.conftest import FakeBackend, FakeGaplessBackend
@@ -412,7 +414,11 @@ def test_the_library_lists_the_saved_playlists(
     application.start([])
     wait_until(lambda: not application.playlists.loading)
     library = application.window.show_library()
-    assert [s.name for s in application.sources] == ["This Computer", "Playlists"]
+    assert [s.name for s in application.sources] == [
+        "This Computer",
+        "Playlists",
+        "Smart Playlists",
+    ]
     playlists = library.sidebar_item(1)
     assert playlists is not None
     wait_until(
@@ -450,6 +456,42 @@ def test_the_library_follows_edits_to_the_open_playlist(
         lambda: (default := playlists.child(0)) is not None and default.text(0) == "Default (1)"
     )
     wait_until(lambda: [t.title for t in library.model.tracks()] == ["b"])  # still picked
+
+
+def test_smart_playlists_are_made_in_the_library_and_follow_scans(
+    store: SettingsStore, cleanup: list[Application], tmp_path: Path
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    stamp = FileStamp(1, 2)
+    application.catalog.put([(Track(tmp_path / "a.mp3", "Teardrop", genre="Trip Hop"), stamp)])
+    application.start([])
+    library = application.window.show_library()
+    smart = library.sidebar_item(2)
+    assert smart is not None and smart.text(0) == "Smart Playlists"
+
+    menu = library.sidebar_menu(smart)  # right-click on Smart Playlists
+    assert menu is not None
+    (new,) = menu.actions()
+    new.trigger()
+    dialog = application.smart_commands.dialog
+    assert dialog is not None
+    dialog.name.setText("Trip Hop")
+    dialog.rows[0].text.setText("hop")
+    dialog.ok_button.click()
+    wait_until(lambda: smart.childCount() == 1 and smart.child(0).text(0) == "Trip Hop (1)")  # type: ignore[union-attr]
+
+    playlist = smart.child(0)
+    assert playlist is not None
+    library.sidebar.setCurrentItem(playlist)
+    wait_until(lambda: [t.title for t in library.model.tracks()] == ["Teardrop"])
+    assert library._drop_target(playlist) is None  # tracks can't be dropped on one
+
+    roads = Track(tmp_path / "b.mp3", "Roads", genre="trip hop")
+    application.catalog.put([(roads, stamp)])
+    application.bus.publish(LibraryChanged())  # as a scan does
+    wait_until(lambda: (item := smart.child(0)) is not None and item.text(0) == "Trip Hop (2)")
+    wait_until(lambda: {t.title for t in library.model.tracks()} == {"Teardrop", "Roads"})
 
 
 def drag_onto(library: LibraryWindow, item: QTreeWidgetItem | None, data: QMimeData) -> bool:

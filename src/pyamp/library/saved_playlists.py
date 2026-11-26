@@ -41,7 +41,8 @@ _FORBIDDEN = set('/\\:*?"<>|')
 
 
 #: How long to keep retrying a file operation that Windows refuses because the file is
-#: open elsewhere (e.g. the background loader reading it): reads take milliseconds.
+#: in use elsewhere (e.g. read by the background loader, or being replaced by a save):
+#: either takes milliseconds.
 LOCK_RETRY_S = 1.0
 _LOCK_RETRY_STEP_S = 0.05
 
@@ -49,14 +50,16 @@ _LOCK_RETRY_STEP_S = 0.05
 def retry_while_locked[T](
     operation: Callable[[], T],
     *,
-    platform: str = sys.platform,
+    platform: str | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> T:
-    """Run a delete/rename/replace, retrying briefly while Windows reports the file in use.
+    """Run a file operation, retrying briefly while Windows reports the file in use.
 
-    Windows won't delete or replace a file another thread has open; macOS and Linux will.
+    Windows won't delete or replace a file another thread has open, nor open one that's
+    being replaced; macOS and Linux will. ``platform`` defaults to this one.
     """
-    attempts = 1 if platform != "win32" else int(LOCK_RETRY_S / _LOCK_RETRY_STEP_S)
+    on_windows = (platform or sys.platform) == "win32"
+    attempts = int(LOCK_RETRY_S / _LOCK_RETRY_STEP_S) if on_windows else 1
     for attempt in range(attempts):
         try:
             return operation()
@@ -142,7 +145,9 @@ class SavedPlaylists:
         found = self._find(name)
         if found is None:
             raise FileNotFoundError(f"no saved playlist {name!r}")
-        return self._format.read(found)
+        # Retried: on Windows a save replacing the file (an auto-save, on its own thread)
+        # makes opening it fail for a moment.
+        return retry_while_locked(lambda: self._format.read(found))
 
     def rename(self, old: str, new: str) -> str:
         source = self._find(old)

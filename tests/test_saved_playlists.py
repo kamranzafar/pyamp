@@ -19,11 +19,13 @@
 # Additional terms apply under section 7 of the GNU GPL; see ADDITIONAL-TERMS.md.
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
 from pyamp.core.models import Track
+from pyamp.library.playlist_formats import PlaylistEntry
 from pyamp.library.saved_playlists import (
     LOCK_RETRY_S,
     PlaylistNameError,
@@ -163,6 +165,26 @@ def test_gives_up_after_about_a_second() -> None:
     with pytest.raises(PermissionError):
         retry_while_locked(always_busy, platform="win32", sleep=sleeps.append)
     assert sum(sleeps) == pytest.approx(LOCK_RETRY_S, abs=0.1)
+
+
+def test_reading_a_playlist_retries_while_a_save_replaces_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved = SavedPlaylists(tmp_path)
+    saved.save("Mix", [Track(tmp_path / "a.mp3", "a")])
+    real = saved._format.read
+    attempts: list[int] = []
+
+    def busy_once(path: Path) -> list[PlaylistEntry]:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise PermissionError(13, "Permission denied")  # what Windows says meanwhile
+        return real(path)
+
+    monkeypatch.setattr(saved._format, "read", busy_once)
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert saved.read_paths("Mix") == [tmp_path / "a.mp3"]
+    assert len(attempts) == 2
 
 
 def test_no_retries_elsewhere() -> None:

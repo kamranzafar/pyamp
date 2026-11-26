@@ -140,7 +140,8 @@ PyAmp's data folder.
 
 The library window also shows music from elsewhere, each in its own part of the
 sidebar under **This Computer**: each [Subsonic server](#subsonic-servers) you add,
-for one, and sources added by plugins. They're browsed, searched and played the same way, and a
+each [DLNA/UPnP server](#dlnaupnp-servers) on your network, and sources added by
+plugins. They're browsed, searched and played the same way, and a
 slow or unreachable server never holds up the window. Picking a server's name
 searches the whole server.
 
@@ -276,6 +277,30 @@ password again.
 Saved playlists keep the server's songs without your login (PyAmp adds it as each one
 plays), so they're safe to share or back up.
 
+### DLNA/UPnP servers
+
+PyAmp finds the media servers on your network by itself: a NAS, MiniDLNA, Jellyfin,
+Plex, Universal Media Server and anything else that shares music over DLNA/UPnP. Each
+appears in the [library window](#library) below This Computer and is browsed by its
+own folders, as the server arranges them (e.g. Music → Artists → …). Pick a folder to
+list its songs; pick the server itself to search it, if the server supports searching.
+There's no login: songs play from the addresses the server gives. Album art shows if
+the server offers it (MiniDLNA does for folders with a cover image).
+
+PyAmp looks for servers as it starts and on **Library → Refresh DLNA Servers**. A
+server that's asleep or switched off stays listed until the next search. Right-click a
+server's name to **Refresh** it or **Hide Server** (the TV that shares photos, say);
+**Library → Show Hidden DLNA Servers** brings hidden ones back. A server the search
+can't reach (on another subnet, or on a network that blocks it) can be added with
+**Library → Add DLNA Server by Address…**: give its name or IP address (enough for
+MiniDLNA, Plex and Universal Media Server), or the address of its device description
+(e.g. `http://192.168.1.10:8200/rootDesc.xml`).
+
+On macOS, the first search makes the system ask whether PyAmp may find devices on your
+local network; it needs that to find servers. Saved playlists keep a server's song
+addresses, so if the server gets a new IP address, songs saved before won't play from
+the old one.
+
 ### Media keys and system controls
 
 PyAmp works with your keyboard's media keys, headphone buttons and the system's
@@ -352,7 +377,7 @@ flowchart TB
     core["<b>core/</b><br/>Player, Playlist, event bus"]
     audio["<b>audio/</b><br/>mpv and Qt backends,<br/>visualiser analysis"]
     library["<b>library/</b><br/>sources, catalog, playlists"]
-    plugins["<b>plugins/</b><br/>Subsonic, media keys"]
+    plugins["<b>plugins/</b><br/>Subsonic, DLNA, media keys"]
 
     ui --> core
     ui --> library
@@ -362,7 +387,7 @@ flowchart TB
 
     audio --> engines[["libmpv / QtMultimedia"]]
     library --> data[("music files,<br/>library.sqlite3")]
-    plugins --> remote[("Subsonic server,<br/>OS media controls")]
+    plugins --> remote[("Subsonic and DLNA servers,<br/>OS media controls")]
 ```
 
 `core` is the centre: the other packages use it, and it depends on none of them (it
@@ -441,7 +466,7 @@ That is why the whole player can be tested with a `FakeBackend` (see
 |---|---|---|
 | **Observer** | `core/events.py` | Player/playlist publish events; UI, DSP and plugins subscribe. No back-references. |
 | **Facade** | `core/player.py` | One simple API over playlist + backend for UI, shortcuts and plugins. |
-| **Adapter** | `audio/qt_backend.py`, `audio/mpv_backend.py`, `ui/playlist_model.py`, `media_session/macos.py`, `media_session/mpris.py`, `library/local_source.py`, `plugins/subsonic/source.py` | Wrap third-party APIs (QtMultimedia, Qt model/view, a Subsonic server) behind our own interfaces. |
+| **Adapter** | `audio/qt_backend.py`, `audio/mpv_backend.py`, `ui/playlist_model.py`, `media_session/macos.py`, `media_session/mpris.py`, `library/local_source.py`, `plugins/subsonic/source.py`, `plugins/dlna/source.py` | Wrap third-party APIs (QtMultimedia, Qt model/view, Subsonic and DLNA servers) behind our own interfaces. |
 | **Strategy** | `core/play_order.py`, `library/playlist_formats.py` | Swap play order or file format without touching callers. |
 | **Factory / Registry** | `audio/registry.py`, `PlaylistFormatRegistry`, `library/sources.py` (`MediaSources`) | Choose implementations by name/extension; lazy imports keep optional deps optional. |
 | **Command** | `ui/actions.py` | One `QAction` drives the button, menu item and shortcut. |
@@ -540,8 +565,9 @@ for a node's right-click menu, and `actions(None)` those for the source's own na
 (the Subsonic plugin's Edit Server… and Remove Server); add one source per server, and
 `ctx.sources.replace(old, new)` swaps one in its place.
 
-See `src/pyamp/plugins/now_playing.py` for a small example, and `plugins/subsonic/` for
-one with a source and a dialog.
+See `src/pyamp/plugins/now_playing.py` for a small example, `plugins/subsonic/` for
+one with a source and a dialog, and `plugins/dlna/` for one that finds its servers on
+the network.
 
 ## Roadmap
 
@@ -551,8 +577,6 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
   don't warn.
 - **Smaller downloads**: bundle only the Qt modules and plugins PyAmp uses, so the
   apps shrink from about 170 MB.
-- **DLNA/UPnP media servers** (plugin): find media servers on the local network (NAS,
-  MiniDLNA, Plex/Jellyfin DLNA), browse them and play from them.
 
 Not planned, to keep PyAmp lightweight:
 

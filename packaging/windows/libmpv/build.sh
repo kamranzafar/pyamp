@@ -171,7 +171,7 @@ meson setup "$SRC/mpv/_build" "$SRC/mpv" --cross-file "$CROSS" --prefix "$PREFIX
   -Ddefault_library=shared -Dprefer_static=true \
   -Dc_link_args="['-static', '-static-libgcc']" \
   -Dlibmpv=true -Dcplayer=false -Dgpl=true -Dtests=false -Dbuild-date=false \
-  -Dauto_features=disabled -Dlua=disabled -Dwasapi=enabled -Dwin32-threads=enabled \
+  -Dauto_features=disabled -Dgl=disabled -Dlua=disabled -Dwasapi=enabled -Dwin32-threads=enabled \
   -Dzlib=enabled
 meson compile -C "$SRC/mpv/_build"
 dll=$(find "$SRC/mpv/_build" -maxdepth 1 -name 'libmpv-2.dll' | head -1)

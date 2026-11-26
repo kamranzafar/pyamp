@@ -22,9 +22,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSizePolicy, QToolButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QToolButton, QWidget
 
 from pyamp.core.events import EventBus, SavedPlaylistsChanged
+from pyamp.ui.dialog_parts import ComboBox
 
 
 class PlaylistSelector(QWidget):
@@ -33,7 +34,7 @@ class PlaylistSelector(QWidget):
 
     def __init__(self, bus: EventBus, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.combo = QComboBox()
+        self.combo = ComboBox()
         self.combo.setToolTip("Saved playlists")
         self.combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.new_button = QToolButton()

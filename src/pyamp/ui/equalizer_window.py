@@ -24,7 +24,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QFrame,
     QGridLayout,
@@ -38,7 +37,7 @@ from PySide6.QtWidgets import (
 from pyamp.core.equalizer import BANDS_HZ, GAIN_RANGE_DB, PRESETS, Equalizer
 from pyamp.core.events import EqualizerChanged, EventBus
 from pyamp.core.player import Player
-from pyamp.ui.dialog_parts import plain_button
+from pyamp.ui.dialog_parts import ComboBox, plain_button
 from pyamp.ui.skin import Skin
 
 #: Slider positions per dB (sliders are integer, gains move in 0.5 dB steps).
@@ -67,7 +66,7 @@ class EqualizerWindow(QDialog):
         self.setStyleSheet(_extra_style(skin))  # the rest is the application's
 
         self.enabled = QCheckBox("On")
-        self.presets = QComboBox()
+        self.presets = ComboBox()
         self.presets.addItems([*PRESETS, CUSTOM])
         self.flat = plain_button("Flat")
         self.note = QLabel(UNSUPPORTED_NOTE)

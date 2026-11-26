@@ -32,7 +32,6 @@ from collections.abc import Callable, Sequence
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -59,6 +58,7 @@ from pyamp.library.smart_playlists import (
 )
 from pyamp.ui.background_calls import BackgroundCalls
 from pyamp.ui.dialog_parts import (
+    ComboBox,
     heading,
     hint,
     inset,
@@ -85,13 +85,13 @@ class RuleRow(QWidget):
 
     def __init__(self, rule: Rule, folders: Sequence[str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.field = QComboBox()
+        self.field = ComboBox()
         for rule_field in RuleField:
             self.field.addItem(rule_field.label, rule_field)
-        self.operator = QComboBox()
+        self.operator = ComboBox()
         self.text = QLineEdit()
         self.text.setPlaceholderText("text to match")
-        self.choice = QComboBox()  # file types or folders, or typed
+        self.choice = ComboBox()  # file types or folders, or typed
         self.choice.setEditable(True)
         self._folders = list(folders)
         self.number = QSpinBox()
@@ -229,7 +229,7 @@ class SmartPlaylistDialog(QDialog):
         self.name.setFont(name_font)
         self.name.setMinimumHeight(32)
         self.name.setPlaceholderText("Name, e.g. 90s Rock")
-        self.match = QComboBox()
+        self.match = ComboBox()
         self.match.addItem("all", True)
         self.match.addItem("any", False)
         self.match.setCurrentIndex(0 if playlist.match_all else 1)
@@ -238,7 +238,7 @@ class SmartPlaylistDialog(QDialog):
         self._rules.setSpacing(6)
         self.no_rules = hint("No rules: every track in the library matches.")
         self.add_rule_button = link_button("+  &Add Rule")
-        self.sort = QComboBox()
+        self.sort = ComboBox()
         for order in SortOrder:
             self.sort.addItem(order.label, order)
         self.sort.setCurrentIndex(self.sort.findData(playlist.sort))

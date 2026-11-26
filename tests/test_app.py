@@ -40,7 +40,7 @@ from pyamp.core.events import LibraryChanged
 from pyamp.core.models import RepeatMode, ReplayGainMode, StreamUrl, Track
 from pyamp.library.catalog import FileStamp
 from pyamp.library.saved_playlists import SavedPlaylists
-from pyamp.ui.library_window import LibraryWindow
+from pyamp.ui.library_window import LOADING, LibraryWindow
 from tests.conftest import FakeBackend, FakeGaplessBackend
 from tests.test_background_loader import wait_until
 
@@ -530,6 +530,9 @@ def test_tracks_are_dragged_onto_a_playlist_in_the_library(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The table is filled by hand below: nothing may refill it meanwhile, neither the
+    # library's scan after start nor its own first load (late on a busy machine).
+    monkeypatch.setattr(app_module, "LIBRARY_SCAN_DELAY_MS", 3_600_000)
     application = build(store)
     cleanup.append(application)
     application.start([])
@@ -540,6 +543,7 @@ def test_tracks_are_dragged_onto_a_playlist_in_the_library(
     wait_until(
         lambda: (default := playlists.child(0)) is not None and default.text(0) == "Default (0)"
     )
+    wait_until(lambda: library.status.text() != LOADING)
     stream = Track(StreamUrl("https://music.example/rest/stream?id=s1"), "Teardrop",
                    artist="Massive Attack", duration_ms=330_000)  # fmt: skip
     local = Track(tmp_path / "angel.mp3", "Angel", artist="Massive Attack")

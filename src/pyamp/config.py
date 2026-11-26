@@ -31,7 +31,7 @@ from typing import Any
 
 import platformdirs
 
-from pyamp import APP_NAME
+from pyamp import APP_NAME, files
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class SettingsStore:
 
     def load(self) -> Settings:
         try:
-            raw: Any = json.loads(self.settings_file.read_text(encoding="utf-8"))
+            raw: Any = json.loads(files.read_text(self.settings_file))
         except FileNotFoundError:
             return Settings()
         except (OSError, json.JSONDecodeError) as exc:
@@ -92,9 +92,4 @@ class SettingsStore:
         return Settings(**{k: v for k, v in raw.items() if k in known})
 
     def save(self, settings: Settings) -> None:
-        self.directory.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(dataclasses.asdict(settings), indent=2)
-        # Write-then-rename so a crash never leaves a half-written settings file.
-        tmp = self.settings_file.with_suffix(".tmp")
-        tmp.write_text(payload, encoding="utf-8")
-        tmp.replace(self.settings_file)
+        files.write_text(self.settings_file, json.dumps(dataclasses.asdict(settings), indent=2))

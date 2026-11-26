@@ -122,6 +122,7 @@ def test_gapless_advance_to_queued_track(
 ) -> None:
     first = write_wav(tmp_path / "first.wav", 0.4)
     second = write_wav(tmp_path / "second.wav", 0.4)
+    backend.pause()  # nothing plays until "second" is queued (see the test below)
     backend.load(first)
     backend.queue_next(second)
     backend.play()
@@ -139,6 +140,9 @@ def test_gapless_advance_to_queued_track(
 def test_queue_can_be_replaced_and_cleared(
     backend: MpvAudioBackend, recorder: Recorder, tmp_path: Path
 ) -> None:
+    # Paused, so nothing plays until the queue is set: mpv starts a file as it loads,
+    # and on a busy machine "a" could end, and "b" start, before "c" replaces it.
+    backend.pause()
     backend.load(write_wav(tmp_path / "a.wav", 0.4))
     backend.queue_next(write_wav(tmp_path / "b.wav", 0.3))
     third = write_wav(tmp_path / "c.wav", 0.3)
@@ -148,6 +152,7 @@ def test_queue_can_be_replaced_and_cleared(
     assert recorder.values("advanced") == [third]
 
     recorder.events.clear()
+    backend.pause()
     backend.load(write_wav(tmp_path / "d.wav", 0.3))
     backend.queue_next(write_wav(tmp_path / "e.wav", 0.3))
     backend.queue_next(None)

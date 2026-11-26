@@ -110,8 +110,8 @@ meson_build harfbuzz -Dfreetype=enabled -Dglib=disabled -Dgobject=disabled -Dcai
 step libass
 fetch libass
 meson_build libass -Dfontconfig=disabled -Ddirectwrite=enabled -Dasm=disabled \
-  -Dlibunibreak=disabled -Drequire-system-font-provider=false -Dtest=false -Dcompare=false \
-  -Dprofile=false -Dfuzz=false -Dcheckasm=false
+  -Dlibunibreak=disabled -Drequire-system-font-provider=false -Dtest=disabled -Dcompare=disabled \
+  -Dprofile=disabled -Dfuzz=disabled -Dcheckasm=disabled
 
 # -- libplacebo (mpv requires it; no GPU APIs) ------------------------------------- #
 step libplacebo
@@ -127,6 +127,10 @@ actual=$(git -C "$SRC/libplacebo" rev-parse HEAD)
 meson_build libplacebo -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
   -Dglslang=disabled -Dshaderc=disabled -Dlcms=disabled -Ddovi=disabled -Dlibdovi=disabled \
   -Dunwind=disabled -Dxxhash=disabled -Ddemos=false -Dtests=false -Dbench=false -Dfuzz=false
+# Part of it is C++; a static libplacebo's .pc doesn't say so, and mpv links as C.
+sed -i -E 's/^(Libs\.private:.*)$/\1 -lstdc++/' "$PREFIX/lib/pkgconfig/libplacebo.pc"
+grep -q '^Libs.private:.*-lstdc++' "$PREFIX/lib/pkgconfig/libplacebo.pc" ||
+  echo 'Libs.private: -lstdc++' >>"$PREFIX/lib/pkgconfig/libplacebo.pc"
 
 # -- FFmpeg, audio only ------------------------------------------------------------ #
 step ffmpeg
@@ -144,6 +148,7 @@ filters=$(sed -nE 's/^extern const [A-Za-z]+ ff_(af|asrc|asink)_([a-z0-9_]+);.*/
 }
 ./configure --prefix="$PREFIX" --cross-prefix="$HOST-" --cc="$CC" --cxx="$CXX" \
   --arch=x86_64 --target-os=mingw32 --pkg-config=pkg-config --pkg-config-flags=--static \
+  --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib" \
   --enable-static --disable-shared --disable-programs --disable-doc --disable-debug \
   --disable-autodetect --enable-w32threads --enable-zlib --enable-schannel \
   --disable-avdevice --disable-everything \

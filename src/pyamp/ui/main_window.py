@@ -135,7 +135,6 @@ class MainWindow(QMainWindow):
         self._about_dialog: AboutDialog | None = None
         self._plugin_menus: dict[str, QMenu] = {}
         self.setWindowTitle(APP_NAME)
-        self.setStyleSheet(skin.stylesheet())
         self.setAcceptDrops(True)
         self.resize(WINDOW_WIDTH, 520)
         self.setMinimumWidth(WINDOW_WIDTH)
@@ -470,7 +469,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Removed {removed} {noun}", STATUS_TIMEOUT_MS)
 
     def show_jump_dialog(self) -> JumpDialog:
-        dialog = JumpDialog(list(self._s.playlist), self._skin, parent=self)
+        dialog = JumpDialog(list(self._s.playlist), parent=self)
         dialog.jump_requested.connect(self._s.player.play_index)
         dialog.open()
         self._jump_dialog = dialog

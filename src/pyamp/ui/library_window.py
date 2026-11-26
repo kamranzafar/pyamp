@@ -57,7 +57,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
-    QPushButton,
     QSplitter,
     QTableView,
     QTreeWidget,
@@ -74,6 +73,7 @@ from pyamp.library.playlists_source import PlaylistsSource
 from pyamp.library.scanner import ScanSummary
 from pyamp.library.sources import MediaSource, MediaSources, Node, SourceError
 from pyamp.ui.background_calls import BackgroundCalls
+from pyamp.ui.dialog_parts import plain_button
 from pyamp.ui.library_model import COLUMNS, LibraryModel
 from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.skin import Skin
@@ -147,7 +147,7 @@ class LibraryWindow(QDialog):
         self._artwork_cache: OrderedDict[tuple[int, object], bytes | None] = OrderedDict()
         self.setWindowTitle("Library")
         self.setObjectName("central")
-        self.setStyleSheet(skin.stylesheet() + _extra_style(skin))
+        self.setStyleSheet(_extra_style(skin))  # the rest is the application's
         self.resize(900, 560)
 
         self.search = QLineEdit()
@@ -162,9 +162,9 @@ class LibraryWindow(QDialog):
         self.table = _track_table(self.model)
         self.artwork = ArtworkView()
         self.status = QLabel()
-        self.add_folder_button = QPushButton("Add Folder…")
-        self.add_files_button = QPushButton("Add Files…")
-        self.rescan_button = QPushButton("Rescan")
+        self.add_folder_button = plain_button("Add Folder…")
+        self.add_files_button = plain_button("Add Files…")
+        self.rescan_button = plain_button("Rescan")
         self._search_delay = QTimer(self)
         self._search_delay.setSingleShot(True)
         self._search_delay.setInterval(SEARCH_DELAY_MS)
@@ -783,20 +783,6 @@ def _track_table(model: LibraryModel) -> QTableView:
 
 def _extra_style(skin: Skin) -> str:
     return f"""
-    QTreeWidget, QLineEdit {{
-        background: {skin.panel}; color: {skin.playlist_text};
-        border: 1px solid {skin.border};
-        selection-background-color: {skin.selection}; selection-color: {skin.playlist_text};
-    }}
-    QHeaderView::section {{
-        background: {skin.window}; color: {skin.text_dim};
-        border: 0; border-bottom: 1px solid {skin.border}; padding: 2px 4px;
-    }}
-    QPushButton {{
-        background: {skin.window}; color: {skin.text};
-        border: 1px solid {skin.border}; padding: 2px 10px;
-    }}
-    QPushButton:hover {{ color: {skin.accent}; }}
     QLabel#artwork {{
         background: {skin.panel}; color: {skin.text_dim}; border: 1px solid {skin.border};
     }}

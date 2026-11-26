@@ -331,6 +331,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     qt_app.setApplicationName(APP_NAME)
     qt_app.setWindowIcon(app_icon())  # window, Dock (when run from source) and taskbar
     qt_app.setApplicationVersion(__version__)
+    # One look for every window and dialog, message boxes and plugins' included. Set
+    # before any window exists, so nothing has to be restyled.
+    qt_app.setStyleSheet(DEFAULT_SKIN.stylesheet())
 
     app = Application(args)
     qt_app.aboutToQuit.connect(app.shutdown)

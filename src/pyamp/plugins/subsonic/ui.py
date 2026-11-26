@@ -29,8 +29,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
-    QFormLayout,
-    QLabel,
+    QHBoxLayout,
     QLineEdit,
     QVBoxLayout,
     QWidget,
@@ -38,6 +37,7 @@ from PySide6.QtWidgets import (
 
 from pyamp.plugins.subsonic.client import SubsonicClient, describe, normalise_server
 from pyamp.ui.background_calls import BackgroundCalls
+from pyamp.ui.dialog_parts import form_layout, heading, separator, set_status, status_label
 
 
 class ServerDialog(QDialog):
@@ -54,6 +54,7 @@ class ServerDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Subsonic Server")
+        self.setMinimumWidth(460)
         self.client: SubsonicClient | None = None
         self._calls = BackgroundCalls(self)
 
@@ -67,10 +68,9 @@ class ServerDialog(QDialog):
         self.remember.setEnabled(has_keychain)
         if not has_keychain:
             self.remember.setToolTip("No keychain is available; you'll be asked each session")
-        self.status = QLabel()
-        self.status.setWordWrap(True)
+        self.status = status_label()
 
-        form = QFormLayout()
+        form = form_layout()
         form.addRow("Server:", self.server)
         form.addRow("Username:", self.username)
         form.addRow("Password:", self.password)
@@ -82,11 +82,19 @@ class ServerDialog(QDialog):
         self.buttons.accepted.connect(self._connect)
         self.buttons.rejected.connect(self.reject)
 
+        footer = QHBoxLayout()
+        footer.addWidget(self.status, 1)
+        footer.addWidget(self.buttons)
+
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 14)
+        layout.setSpacing(8)
+        layout.addWidget(heading("Subsonic Server"))
         layout.addLayout(form)
         layout.addWidget(self.remember)
-        layout.addWidget(self.status)
-        layout.addWidget(self.buttons)
+        layout.addSpacing(6)
+        layout.addWidget(separator())
+        layout.addLayout(footer)
         (self.password if server and username else self.server).setFocus()
 
     def _connect(self) -> None:
@@ -97,16 +105,16 @@ class ServerDialog(QDialog):
                 self.password.text(),
             )
         except ValueError as exc:
-            self.status.setText(str(exc))
+            set_status(self.status, str(exc), "problem")
             return
         self.connect_button.setEnabled(False)
-        self.status.setText("Connecting…")
+        set_status(self.status, "Connecting…", "busy")
         self._calls.run(client.ping, lambda _, error: self._connected(client, error))
 
     def _connected(self, client: SubsonicClient, error: BaseException | None) -> None:
         self.connect_button.setEnabled(True)
         if error is not None:
-            self.status.setText(describe(error))
+            set_status(self.status, describe(error), "problem")
             return
         self.client = client
         self.accept()

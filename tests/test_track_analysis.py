@@ -530,6 +530,29 @@ def test_the_first_live_piece_is_looked_for_soon_then_less_often(
     assert service._stream_check.interval() == 1500  # then fewer, longer pieces
 
 
+def test_a_stations_bars_are_looked_for_as_soon_as_it_plays(
+    live: tuple[AnalysedSpectrum, PieceAnalyser, Clock],
+    bus: EventBus,
+    saver: FakeSaver,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """mpv plays a station once it has buffered: its first position says so, and the
+    first piece is saved then, not at the next check (up to STREAM_CHECK_MS later)."""
+    _service, analyser, _clock = live
+    monkeypatch.setattr(track_analysis, "STREAM_CHECK_MS", 60_000)  # no check comes
+    bus.publish(TrackChanged(RADIO, 0))
+    bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
+    saver.range = (0.0, 3.0)
+    bus.publish(PositionChanged(0, 0))  # not playing yet
+    assert saver.pieces == []
+    bus.publish(PositionChanged(100, 0))  # the sound starts
+    wait_until(lambda: len(analyser.pieces) == 1, timeout=2.0)
+    bus.publish(PositionChanged(200, 0))  # later positions leave it to the checks
+    saver.range = (0.0, 4.5)
+    bus.publish(PositionChanged(300, 0))
+    assert saver.pieces == [(0.0, 3.0)]
+
+
 def test_live_pieces_start_near_playback(
     live: tuple[AnalysedSpectrum, PieceAnalyser, Clock], bus: EventBus, saver: FakeSaver
 ) -> None:

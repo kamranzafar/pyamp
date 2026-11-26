@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
@@ -159,6 +160,32 @@ def test_edits_are_saved_after_a_pause(
     wait_until(lambda: len(saved.read_paths("Default")) == 2)  # ...but shortly after
     playlist.move([1], 0)
     wait_until(lambda: saved_names(saved, "Default") == [new[1].name, new[0].name])
+
+
+def test_opening_a_playlist_doesnt_save_it_again(
+    session: PlaylistSession,
+    playlist: Playlist,
+    saved: SavedPlaylists,
+    bus: EventBus,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Emptying the list to open a playlist isn't an edit: an auto-save of it would
+    write back only what loaded, dropping files that aren't there (an unplugged drive)."""
+    monkeypatch.setattr(playlist_session, "AUTOSAVE_MS", 300)  # loads well before this
+    present = make_files(tmp_path / "music", 1)
+    away = tmp_path / "unplugged" / "song.mp3"
+    write_playlist(saved, "Default", [*present, away])
+    heard: list[SavedPlaylistEdited] = []
+    bus.subscribe(SavedPlaylistEdited, heard.append)
+    session.start()
+    wait_until(lambda: loaded(session) and len(playlist) == 1)
+    deadline = time.monotonic() + 0.6  # past when an auto-save would have run
+    wait_until(lambda: time.monotonic() > deadline)
+    session.wait_for_saves()
+    QCoreApplication.processEvents()
+    assert saved.read_paths("Default") == [*present, away]
+    assert heard == []
 
 
 def test_saved_edits_are_announced_on_the_main_thread(

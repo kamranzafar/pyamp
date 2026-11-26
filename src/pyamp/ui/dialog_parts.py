@@ -29,9 +29,33 @@ from __future__ import annotations
 from typing import Literal
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFormLayout, QFrame, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFormLayout,
+    QFrame,
+    QLabel,
+    QPushButton,
+    QWidget,
+)
 
 type StatusState = Literal["count", "busy", "problem", ""]
+
+
+#: Room in a combo box's popup for the check mark beside the current item, and padding.
+_POPUP_ROOM = 56
+
+
+class ComboBox(QComboBox):
+    """A combo box whose popup is wide enough for its items. On macOS the popup can be
+    narrower than the box, so the check mark crowds the item text out."""
+
+    def showPopup(self) -> None:  # noqa: N802 (Qt's name)
+        metrics = self.view().fontMetrics()
+        widest = max(
+            (metrics.horizontalAdvance(self.itemText(i)) for i in range(self.count())), default=0
+        )
+        self.view().setMinimumWidth(widest + _POPUP_ROOM)
+        super().showPopup()
 
 
 def heading(text: str) -> QLabel:

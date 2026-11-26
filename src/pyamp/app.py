@@ -228,6 +228,8 @@ class Application:
         self.playlists_source = PlaylistsSource(
             saved,
             self.catalog,
+            new_playlist=self.window.new_saved_playlist,
+            import_playlist=lambda: self.window.import_playlist(self.window.show_library()),
             open_playlist=self.window.switch_playlist,
             rename_playlist=self.window.rename_saved_playlist,
             delete_playlist=self.window.delete_saved_playlist,

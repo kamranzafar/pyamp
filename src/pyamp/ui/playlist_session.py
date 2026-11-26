@@ -246,8 +246,11 @@ class PlaylistSession(QObject):
     def _open(self, name: str) -> None:
         self._loader.cancel_all()
         self._active = next(n for n in self._saved.names() if n.casefold() == name.casefold())
-        self._playlist.replace([])
+        # Loading first, so emptying the list isn't taken for an edit: an auto-save then
+        # would write back only what loaded, dropping files that aren't there now.
+        # (The loaded tracks arrive later, on this thread, after the list is emptied.)
         self._loading = self._loader.submit([self._saved.path(self._active)])
+        self._playlist.replace([])
         self._remember()
 
     def _remember(self) -> None:

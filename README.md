@@ -401,6 +401,12 @@ since a windowed program can't print. Licences of bundled components are listed 
 
 ## Architecture
 
+PyAmp is a small desktop app built in layers around a core that knows nothing about
+the screen. The aim is that each part can be understood, tested and replaced on its
+own.
+
+The diagram shows which package uses which (an arrow points at what is used):
+
 ```mermaid
 flowchart TB
     ui["<b>ui/</b><br/>windows: player, library, equaliser"]
@@ -420,71 +426,38 @@ flowchart TB
     plugins --> remote[("Subsonic and DLNA servers,<br/>OS media controls")]
 ```
 
-`core` is the centre: the other packages use it, and it depends on none of them (it
-only knows the `AudioBackend` interface). `app.py` builds every object and wires them
-together.
-
-```
-src/pyamp/
-├── app.py              Composition root: builds the object graph, owns session lifecycle
-├── config.py           Settings dataclass + JSON persistence (atomic writes)
-├── core/               Domain logic. NO Qt imports allowed here.
-│   ├── models.py       Track, PlaybackState, RepeatMode (immutable value objects)
-│   ├── events.py       EventBus + event types
-│   ├── play_order.py   Sequential / Shuffle strategies
-│   ├── playlist.py     Playlist model with a "current" cursor
-│   ├── equalizer.py    10-band equaliser model and presets
-│   └── player.py       Player facade: transport, volume, modes
-├── audio/              Sound output
-│   ├── backend.py      AudioBackend ABC + BackendListener protocol
-│   ├── registry.py     Backend factory with lazy imports
-│   ├── qt_backend.py   QtMultimedia adapter (+ PCM tap for the visualiser)
-│   ├── mpv_backend.py  libmpv adapter with gapless playback
-│   └── track_analysis.py  Visualiser levels for backends without PCM (mpv)
-├── dsp/spectrum.py     FFT analyser (pure) + SpectrumService (bus adapter)
-├── library/            Getting tracks in
-│   ├── metadata.py     Tag reading via mutagen
-│   ├── playlist_formats.py  M3U / PLS read & write
-│   ├── saved_playlists.py   Named playlists stored as .m3u8 files
-│   ├── catalog.py      Media library index (SQLite): added folders/files and their tags
-│   ├── scanner.py      Brings the index up to date, re-reading only changed files
-│   ├── sources.py      MediaSource: what the library window browses (local or a server)
-│   ├── local_source.py The local library as a source
-│   ├── playlists_source.py  The saved playlists as a source
-│   ├── remote.py       Downloads remote playlists (a station's .pls)
-│   └── loader.py       Files/folders/playlists/streams → Tracks
-├── media_session/      OS media controls (used by the media-session plugin)
-│   ├── session.py      Player ⇄ NowPlaying snapshots and OS commands (pure)
-│   ├── macos.py        MediaPlayer framework: Now Playing + remote commands
-│   ├── windows.py      System Media Transport Controls (pywinrt)
-│   └── mpris.py        MPRIS over D-Bus (jeepney), served on the Qt main thread
-├── plugins/            Entry-point based plugin system, now-playing log, media session
-│   └── subsonic/       Subsonic client and library source, keychain account store, server dialog
-└── ui/                 PySide6 front-end
-    ├── skin.py         All colours in one place (seam for .wsz skins)
-    ├── actions.py      Playback commands as QActions
-    ├── equalizer_window.py  The equaliser window
-    ├── background_loader.py  Non-blocking track loading (worker thread)
-    ├── playlist_session.py   Which saved playlist is open; auto-save
-    ├── library_scan.py       Library scans on a low-priority worker thread
-    ├── background_calls.py   Slow calls (sources, servers) on worker threads
-    ├── library_window.py     The library window: browse, search, play
-    ├── library_model.py      Library tracks → sortable, draggable table model
-    ├── jump_dialog.py        Jump to Track (J)
-    ├── about_dialog.py       Help → About: version, licence, notices
-    ├── menu_bar.py           Menu bar / system tray icon and its menu
-    ├── playlist_model.py  Playlist → QAbstractTableModel adapter
-    ├── main_window.py
-    └── widgets/        LCD panel, marquee, spectrum, sliders, playlist view
-```
+- **`core/` is the player itself**: tracks, the playlist and its play order, the
+  equaliser, and the `Player` that drives an audio backend. It has no Qt in it and
+  depends only on the `AudioBackend` interface, so it's tested with a fake backend
+  and could sit under a different front-end unchanged.
+- **Parts talk through events, not to each other.** The player and playlist publish
+  immutable events (track changed, position, volume, playlist edited…) on a
+  synchronous event bus. Windows, the visualiser and plugins subscribe to what they
+  need, and nothing holds a reference back to its listeners.
+- **`audio/` plays the sound**: libmpv (gapless) or QtMultimedia, behind one
+  interface and chosen by name at start-up. `dsp/` turns the audio into the
+  visualiser's levels.
+- **`library/` gets music in**: reading tags, the library index (one SQLite file),
+  saved and smart playlists, and playlist formats. Everything the library window
+  browses (this computer, playlists, smart playlists, a Subsonic or DLNA server) is a
+  `MediaSource`, so the window treats them all alike and a plugin can add more.
+- **`ui/` is the PySide6 front-end**: the player, library and equaliser windows and
+  their dialogs. One skin gives every window and dialog its colours and look, and
+  shared dialog parts keep them consistent.
+- **`plugins/` add features from outside the core**, found through Python entry
+  points: the Subsonic and DLNA servers and the OS media controls (`media_session/`).
+  A plugin gets a small context (the event bus, the player, the playlist, the
+  library's sources and a way to reach the window), not the app's internals.
+- **`app.py` builds everything.** It's the only place that knows the concrete
+  classes; every other object is handed its collaborators when it's created.
+- **Slow work never blocks the window.** Loading files, scanning the library, saving
+  playlists and talking to servers run on worker threads, and their results come back
+  to the main thread before anything is shown or published. Audio is decoded on the
+  backends' own native threads.
+- **PyAmp only reads your music.** Its own state is a few files in its config and data
+  folders: settings, the library index, saved playlists (`.m3u8`) and smart playlists.
 
 ### Dependency rule
-
-```
-ui ──► core ◄── audio
- │      ▲  ▲
- └──► library   dsp, plugins
-```
 
 `core` depends on nothing in the app except the `AudioBackend` interface.
 That is why the whole player can be tested with a `FakeBackend` (see

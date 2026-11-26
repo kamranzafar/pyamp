@@ -614,6 +614,10 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
   don't warn.
 - **Smaller macOS download**: an audio-only libmpv for macOS too, built the way the
   Windows one is (the macOS app bundles a general-purpose one with video codecs).
+- **Output device**: a **Playback → Output Device** menu to play through a chosen
+  device (a DAC, one pair of speakers) while the rest of the system keeps its default;
+  remembered, and back to the system default if that device goes away. Bluetooth and
+  AirPlay speakers already work by choosing them as the system's output.
 
 Not planned, to keep PyAmp lightweight:
 

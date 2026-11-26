@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
+    QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -85,6 +86,9 @@ from pyamp.ui.widgets.sliders import SeekSlider, VolumeSlider
 
 WINDOW_WIDTH = 460
 STATUS_TIMEOUT_MS = 5000
+#: Indents the playlist summary in the status bar to where Qt draws messages (a few
+#: pixels in), so neither sits against the window's edge and both line up.
+STATUS_INDENT = 4
 #: The saved playlist the library plays into, so it never changes the user's others.
 LIBRARY_PLAYLIST = "Library"
 LIBRARY_MENU = "&Library"  # plugins with a library (Subsonic) add to it too
@@ -184,6 +188,11 @@ class MainWindow(QMainWindow):
 
         self._build_layout()
         self._build_menus()
+        # The playlist's size and length, always shown; messages (e.g. errors) show over
+        # it for a few seconds, then it's back.
+        self.summary = QLabel()
+        self.statusBar().addWidget(self.summary, 1)
+        self.summary.setContentsMargins(STATUS_INDENT, 0, 0, 0)
 
         services.bus.subscribe(TrackChanged, self._on_track_changed)
         services.bus.subscribe(StreamTitleChanged, self._on_stream_title)
@@ -690,9 +699,14 @@ class MainWindow(QMainWindow):
         playlist = self._s.playlist
         total = format_duration(playlist.total_duration_ms)
         loading = " · loading…" if self._s.loader.busy else ""
-        self.statusBar().showMessage(f"{len(playlist)} tracks · {total}{loading}")
+        self.summary.setText(f"{len(playlist)} tracks · {total}{loading}")
 
     # -- Qt overrides ------------------------------------------------------- #
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.StatusTip:
+            return True  # hovering a button or menu item keeps the status bar as it is
+        return super().event(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls() or dragged_tracks(event.mimeData()):

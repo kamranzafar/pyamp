@@ -27,7 +27,8 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QMimeData, QModelIndex, Qt, QUrl
-from PySide6.QtWidgets import QInputDialog, QMessageBox
+from PySide6.QtGui import QStatusTipEvent
+from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox, QToolButton
 
 from pyamp.app import Application
 from pyamp.audio import registry
@@ -143,6 +144,21 @@ def test_sort_and_dedupe_menu_actions(app: Application, tmp_path: Path) -> None:
     app.window._dedupe_action.trigger()
     assert titles(app) == ["c", "b", "a"]
     assert "Removed 1 duplicate" in app.window.statusBar().currentMessage()
+
+
+def test_the_status_bar_keeps_showing_the_playlist(app: Application, tmp_path: Path) -> None:
+    add_songs(app, tmp_path / "m", "a", "b")
+    window = app.window
+    assert window.summary.text() == "2 tracks · 0:00"
+    # Hovering a button or menu item doesn't put its label in the status bar.
+    button = window.findChildren(QToolButton)[0]
+    before = window.statusBar().currentMessage()
+    QApplication.sendEvent(button, QStatusTipEvent("Previous"))
+    QApplication.sendEvent(button, QStatusTipEvent(""))  # and leaving it
+    assert window.statusBar().currentMessage() == before
+    window.statusBar().showMessage("Exported mix.m3u8", 50)  # a message shows for a while
+    wait_until(lambda: window.statusBar().currentMessage() == "")
+    assert window.summary.text() == "2 tracks · 0:00"  # and the playlist is still there
 
 
 def test_context_menu_offers_editing_actions(app: Application, tmp_path: Path) -> None:

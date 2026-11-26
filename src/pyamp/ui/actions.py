@@ -72,7 +72,6 @@ class PlayerActions:
 def _action(parent: QObject, glyph: str, tooltip: str, shortcut: str) -> QAction:
     action = QAction(glyph, parent)
     action.setToolTip(f"{tooltip} ({shortcut})")
-    action.setStatusTip(tooltip)
     action.setShortcut(QKeySequence(shortcut))
     action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
     return action
@@ -131,7 +130,6 @@ def _replay_gain_actions(parent: QObject, player: Player) -> dict[ReplayGainMode
         action = QAction(label, group)
         action.setCheckable(True)
         action.setChecked(mode is player.replay_gain)
-        action.setStatusTip(f"ReplayGain: {mode.value}")
         action.triggered.connect(lambda _checked=False, m=mode: player.set_replay_gain(m))
         actions[mode] = action
     return actions

@@ -41,13 +41,15 @@ class PlaylistsSource:
     """Every saved playlist; picking one lists its tracks in playlist order."""
 
     name = "Playlists"
-    hint = "Pick a playlist"
+    hint = "Pick a playlist, or right-click Playlists to make one"
 
     def __init__(
         self,
         saved: SavedPlaylists,
         catalog: Catalog,
         *,
+        new_playlist: Callable[[], object],
+        import_playlist: Callable[[], object],
         open_playlist: PlaylistCommand,
         rename_playlist: PlaylistCommand,
         delete_playlist: PlaylistCommand,
@@ -55,6 +57,8 @@ class PlaylistsSource:
         self._saved = saved
         self._catalog = catalog
         # Main-thread commands from the window (they may ask the user first).
+        self._new = new_playlist
+        self._import = import_playlist
         self._open = open_playlist
         self._rename = rename_playlist
         self._delete = delete_playlist
@@ -90,7 +94,10 @@ class PlaylistsSource:
 
     def actions(self, node: Node | None) -> list[NodeAction]:
         if node is None:
-            return []
+            return [
+                NodeAction("&New Playlist…", self._new),
+                NodeAction("&Import Playlist…", self._import),
+            ]
         name = str(node.key)
         return [
             NodeAction("&Open in Player", lambda: self._open(name)),

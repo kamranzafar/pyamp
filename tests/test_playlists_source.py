@@ -71,6 +71,8 @@ def source(
     return PlaylistsSource(
         saved,
         catalog,
+        new_playlist=lambda: commands.append(("new", "")),
+        import_playlist=lambda: commands.append(("import", "")),
         open_playlist=lambda name: commands.append(("open", name)),
         rename_playlist=lambda name: commands.append(("rename", name)),
         delete_playlist=lambda name: commands.append(("delete", name)),
@@ -125,7 +127,16 @@ def test_playlist_commands(source: PlaylistsSource, commands: list[tuple[str, st
     for action in actions:
         action.run()
     assert commands == [("open", "Mix"), ("rename", "Mix"), ("delete", "Mix")]
-    assert source.actions(None) == []  # nothing for the whole list
+
+
+def test_new_and_import_on_the_whole_list(
+    source: PlaylistsSource, commands: list[tuple[str, str]]
+) -> None:
+    actions = source.actions(None)
+    assert [a.text for a in actions] == ["&New Playlist…", "&Import Playlist…"]
+    for action in actions:
+        action.run()
+    assert commands == [("new", ""), ("import", "")]
 
 
 def test_artwork_for_files_only(source: PlaylistsSource, tmp_path: Path) -> None:

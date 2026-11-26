@@ -125,7 +125,10 @@ starts, and when you click **Rescan**. Only files that changed are read again.
   from a server keep their tags).
 - **Playlists**, in the sidebar, lists your saved playlists. Pick one to see its tracks
   (with the library's tags; no music files are read); right-click it to open it in the
-  player, rename it or delete it. Changes made in the player show here once saved.
+  player, rename it or delete it. Right-click **Playlists** itself for **New
+  Playlist…** (an empty one, ready to drop tracks onto) or **Import Playlist…** (a
+  playlist file, opened in the player). Changes made in the player show here once
+  saved.
 - **Smart Playlists**, in the sidebar, are rules that pick tracks from the library
   for you (see [Smart playlists](#smart-playlists)).
 - Under the sidebar is the artwork of the track you've picked (or of the first one

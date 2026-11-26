@@ -536,21 +536,33 @@ class MainWindow(QMainWindow):
         self._s.playlists.open_tracks(LIBRARY_PLAYLIST, tracks)
         self._s.player.play_index(start)
 
+    def new_saved_playlist(self) -> None:
+        """Make an empty saved playlist without opening it (a menu command: takes no
+        arguments)."""
+        self.create_saved_playlist()
+
+    def create_saved_playlist(self, suggested: str = "") -> str | None:
+        """Ask for a name and make an empty saved playlist, without opening it; returns
+        its name, or None if cancelled or the name can't be used (the user is told)."""
+        text, ok = QInputDialog.getText(
+            self._front(), "New Playlist", "Name:", text=suggested or "New playlist"
+        )
+        if not ok:
+            return None
+        try:
+            return self._s.playlists.create(text)
+        except PlaylistNameError as exc:
+            QMessageBox.warning(self._front(), "New Playlist", str(exc))
+            return None
+
     def add_to_playlist(
         self, tracks: Sequence[Track], name: str | None, suggested: str = ""
     ) -> str | None:
         """Add ``tracks`` to the saved playlist ``name``, or to a new one (None: ask for its
         name, suggesting ``suggested``). Returns what happened, for the user."""
         if name is None:
-            text, ok = QInputDialog.getText(
-                self._front(), "New Playlist", "Name:", text=suggested or "New playlist"
-            )
-            if not ok:
-                return None
-            try:
-                name = self._s.playlists.create(text)
-            except PlaylistNameError as exc:
-                QMessageBox.warning(self._front(), "New Playlist", str(exc))
+            name = self.create_saved_playlist(suggested)
+            if name is None:
                 return None
         added = self._s.playlists.add_to(name, tracks)
         noun = "track" if added == 1 else "tracks"
@@ -633,9 +645,13 @@ class MainWindow(QMainWindow):
         )
 
     def _import_playlist(self) -> None:
-        """Import a playlist file as a new saved playlist (named after the file)."""
+        self.import_playlist(self)
+
+    def import_playlist(self, parent: QWidget) -> None:
+        """Import a playlist file as a new saved playlist (named after the file), and open
+        it; the file dialog is a sheet on ``parent``, the window that asks."""
         file_dialogs.choose_file(
-            self,
+            parent,
             "Import Playlist",
             self._s.settings.last_directory,
             self._s.playlist_formats.file_dialog_filter(),

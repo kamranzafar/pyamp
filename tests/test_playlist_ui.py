@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QMimeData, QModelIndex, Qt, QUrl
-from PySide6.QtGui import QStatusTipEvent
+from PySide6.QtGui import QAction, QStatusTipEvent
 from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox, QToolButton
 
 from pyamp.app import Application
@@ -337,3 +337,39 @@ def test_add_station_opens_its_dialog_from_the_library(app: Application) -> None
     dialog = app.radio_commands.dialog
     assert dialog is not None and dialog.isVisible()
     assert (dialog.name.text(), dialog.url.text()) == ("", "")
+
+
+def playlists_menu_action(app: Application, text: str) -> QAction:
+    """An item of the library's menu for a right-click on Playlists."""
+    playlists = app.window.show_library().sidebar_item(1)
+    assert playlists is not None and playlists.text(0) == "Playlists"
+    menu = app.window.show_library().sidebar_menu(playlists)
+    assert menu is not None
+    return next(a for a in menu.actions() if a.text() == text)
+
+
+def test_new_playlist_from_the_library(app: Application, monkeypatch: pytest.MonkeyPatch) -> None:
+    active = app.playlists.active
+    monkeypatch.setattr(QInputDialog, "getText", lambda *_, **kw: ("Road Trip", True))
+    playlists_menu_action(app, "&New Playlist…").trigger()  # Qt passes "checked" along
+    assert "Road Trip" in app.playlists.names
+    assert app.playlists.active == active  # made, not opened: drop tracks on it next
+
+    warnings: list[str] = []
+    monkeypatch.setattr(QInputDialog, "getText", lambda *_, **kw: ("bad/name", True))
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
+    playlists_menu_action(app, "&New Playlist…").trigger()
+    assert warnings and "can't" in warnings[0]
+
+
+def test_import_playlist_from_the_library(
+    app: Application, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    songs = add_songs(app, tmp_path / "m", "a", "b")
+    mix = tmp_path / "mix.m3u8"
+    mix.write_text("\n".join(str(t.location) for t in songs), encoding="utf-8")
+    asked = answer_dialog(monkeypatch, "choose_file", [mix])
+    playlists_menu_action(app, "&Import Playlist…").trigger()
+    assert asked == [(app.window.show_library(), "Import Playlist")]  # a sheet on the library
+    assert app.playlists.active == "mix"
+    wait_until(lambda: titles(app) == ["a", "b"])

@@ -525,6 +525,7 @@ class MainWindow(QMainWindow):
                 playlist_names=lambda: self._s.playlists.names,
                 parent=self,
             )
+            self._library_window.save_to_radio = self.save_to_radio
         self._library_window.show()
         self._library_window.raise_()
         self._library_window.activateWindow()

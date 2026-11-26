@@ -127,10 +127,17 @@ class MediaSources:
     def __len__(self) -> int:
         return len(self._sources)
 
-    def add(self, source: MediaSource) -> None:
-        if source not in self._sources:
+    def add(self, source: MediaSource, *, after: str | None = None) -> None:
+        """Add ``source`` at the end, or just after the last source named ``after`` (e.g.
+        a radio directory next to the user's own stations) if there is one."""
+        if source in self._sources:
+            return
+        names = [s.name for s in self._sources]
+        if after is not None and after in names:
+            self._sources.insert(len(names) - names[::-1].index(after), source)
+        else:
             self._sources.append(source)
-            self._bus.publish(MediaSourcesChanged())
+        self._bus.publish(MediaSourcesChanged())
 
     def replace(self, old: MediaSource, new: MediaSource) -> None:
         """Put ``new`` where ``old`` is (e.g. a server whose address was changed), or add

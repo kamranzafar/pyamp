@@ -38,6 +38,7 @@ now-playing-log = "pyamp.plugins.now_playing:NowPlayingLogPlugin"
 media-session = "pyamp.plugins.media_session:MediaSessionPlugin"
 subsonic = "pyamp.plugins.subsonic:SubsonicPlugin"
 dlna = "pyamp.plugins.dlna:DlnaPlugin"
+radio-browser = "pyamp.plugins.radio_browser:RadioBrowserPlugin"
 
 [build-system]
 requires = ["uv_build>=0.13.9,<0.14.0"]

@@ -184,7 +184,7 @@ $HOST-strip -s "$dll" -o "$OUT/libmpv-2.dll"
 # -- Checks: no MinGW runtime DLLs to ship alongside, and the features PyAmp needs ---- #
 imports=$($HOST-objdump -p "$OUT/libmpv-2.dll" | sed -nE 's/^[[:space:]]*DLL Name: (.*)/\1/p' | sort -u)
 echo "Imports: $(echo "$imports" | paste -sd" " -)"
-if echo "$imports" | grep -qiE '^lib|^zlib|^av|^sw'; then
+if echo "$imports" | grep -qiE '^(lib|zlib|av(codec|device|filter|format|util)-|sw(resample|scale)-|postproc-)'; then
   echo "error: libmpv-2.dll needs DLLs that aren't part of Windows" >&2
   exit 1
 fi

@@ -45,8 +45,12 @@ from pyamp.config import Settings
 from pyamp.core.events import EventBus, LibraryChanged
 from pyamp.core.models import StreamUrl, Track
 from pyamp.library.catalog import Catalog, FileStamp, Group, GroupKind
+from pyamp.library.loader import TrackLoader
 from pyamp.library.local_source import LocalSource
 from pyamp.library.metadata import MutagenMetadataReader
+from pyamp.library.playlist_formats import PlaylistFormatRegistry
+from pyamp.library.radio_source import RadioSource
+from pyamp.library.radio_stations import RadioStations
 from pyamp.library.scanner import LibraryScanner, ScanSummary
 from pyamp.library.sources import MediaSources, Node, NodeAction, SourceError, matches
 from pyamp.ui.library_scan import BackgroundLibraryScanner
@@ -727,3 +731,47 @@ def test_closing_the_window_lets_go_of_the_tracks(
     window.show()
     settle(window)
     assert len(titles(window)) == 4  # back, and up to date
+
+
+SAVE_TO_RADIO = "Save to &Radio…"
+
+
+def menu_texts(window: LibraryWindow, row: int) -> list[str]:
+    return [action.text() for action in window.table_menu(row).actions()]
+
+
+def test_a_station_found_in_a_source_can_be_saved_to_radio(
+    window: LibraryWindow, sources: MediaSources, tmp_path: Path
+) -> None:
+    saved: list[tuple[str, str]] = []
+    window.save_to_radio = lambda url, name: saved.append((url, name))
+    server = FakeServer("Directory")
+    song = Track.for_stream(StreamUrl("https://server.example/song"), "Song", 200_000)
+    server.albums["a1"] = [stream("Jazz FM"), song]
+    sources.add(server)
+    settle(window)
+    pick(window, 1, "albums", "a1")
+    station, other = titles(window).index("Jazz FM"), titles(window).index("Song")
+    (save,) = [a for a in window.table_menu(station).actions() if a.text() == SAVE_TO_RADIO]
+    save.trigger()
+    assert saved == [("https://server.example/Jazz FM", "Jazz FM")]
+    assert SAVE_TO_RADIO not in menu_texts(window, other)  # a song, not a station
+    assert SAVE_TO_RADIO not in menu_texts(window, -1)  # no track
+    window.save_to_radio = None
+    assert SAVE_TO_RADIO not in menu_texts(window, station)  # nowhere to save it
+
+    window.save_to_radio = lambda url, name: saved.append((url, name))
+    stations = RadioStations(tmp_path / "radio.json")
+    stations.save("Mine", "https://radio.example/mine")
+    own = RadioSource(
+        stations,
+        TrackLoader(MutagenMetadataReader(), PlaylistFormatRegistry.default()),
+        add_station=lambda: None,
+        edit_station=lambda _: None,
+        delete_station=lambda _: None,
+    )
+    sources.add(own)
+    settle(window)
+    pick(window, 2)
+    assert titles(window) == ["Mine"]
+    assert SAVE_TO_RADIO not in menu_texts(window, 0)  # already one of the user's own

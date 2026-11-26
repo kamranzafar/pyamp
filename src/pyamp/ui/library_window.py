@@ -69,6 +69,7 @@ from pyamp.core.events import EventBus, MediaSourcesChanged
 from pyamp.core.models import Track, format_duration
 from pyamp.library.metadata import AUDIO_EXTENSIONS
 from pyamp.library.playlists_source import PlaylistsSource
+from pyamp.library.radio_source import RadioSource
 from pyamp.library.scanner import ScanSummary
 from pyamp.library.sources import MediaSource, MediaSources, Node, SourceError
 from pyamp.ui import file_dialogs
@@ -106,6 +107,10 @@ type _Path = tuple[int, tuple[Hashable, ...]]
 
 
 class LibraryWindow(QDialog):
+    #: Asks to keep a station as one of the user's own (e.g. one found in a radio
+    #: directory): ``(url, name)``. Set by the main window.
+    save_to_radio: Callable[[str, str], object] | None = None
+
     def __init__(
         self,
         library: BackgroundLibraryScanner,
@@ -569,7 +574,24 @@ class LibraryWindow(QDialog):
         play.triggered.connect(lambda: self.play_from(row))
         add = self._playlist_menu(menu, self.add_selected)
         add.setEnabled(self.table.selectionModel().hasSelection())
+        station = self._station(row)
+        save = self.save_to_radio
+        if station is not None and save is not None:
+            menu.addAction("Save to &Radio…").triggered.connect(
+                lambda: save(str(station.location), station.title)
+            )
         return menu
+
+    def _station(self, row: int) -> Track | None:
+        """The track in ``row`` if it's a radio station that isn't already one of the
+        user's own (a live stream: no length), else None."""
+        picked = self.selected()
+        if not 0 <= row < self.model.rowCount() or picked is None:
+            return None
+        track = self.model.track(row)
+        if not track.is_stream or track.duration_ms or isinstance(picked[0], RadioSource):
+            return None
+        return track
 
     def sidebar_menu(self, item: QTreeWidgetItem | None) -> QMenu | None:
         """The menu for a right-click in the sidebar: Add to Playlist, if the item has tracks,

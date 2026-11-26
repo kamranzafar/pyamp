@@ -47,6 +47,15 @@ echo "Building PyAmp $VERSION for macOS $ARCH"
     --distpath "$WORK/dist" --workpath "$WORK/build" packaging/macos/pyamp.spec
 )
 APP="$WORK/dist/PyAmp.app"
+# Drop the libraries' local symbols (about 13 MB; mostly libmpv's harfbuzz and PySide6's
+# bindings). Exported symbols stay, so linking and Python imports are unaffected.
+# Contents/MacOS/PyAmp is left alone: PyInstaller appends the Python archive to it.
+find "$APP/Contents/Frameworks" -type f -print0 |
+  while IFS= read -r -d '' file; do
+    if file -b "$file" | grep -q '^Mach-O'; then
+      strip -x "$file" 2>/dev/null || echo "warning: could not strip $file" >&2
+    fi
+  done
 # Ad-hoc signature: not notarised, but Apple Silicon won't run unsigned code at all.
 codesign --force --deep --sign - "$APP"
 
@@ -58,9 +67,10 @@ cp -R "$APP" "$WORK/dmg/"
 ln -s /Applications "$WORK/dmg/Applications" # drag-to-install
 DMG="$OUT/PyAmp-$VERSION-macos-$ARCH.dmg"
 rm -f "$DMG"
+# ULMO (LZMA, macOS 10.15+) makes the image about a quarter smaller than UDZO (zlib).
 # hdiutil fails now and then on CI runners ("Resource busy"), so retry a few times.
 for attempt in 1 2 3 4; do
-  if hdiutil create -volname "PyAmp $VERSION" -srcfolder "$WORK/dmg" -format UDZO "$DMG"; then
+  if hdiutil create -volname "PyAmp $VERSION" -srcfolder "$WORK/dmg" -format ULMO "$DMG"; then
     break
   fi
   if [ "$attempt" -eq 4 ]; then

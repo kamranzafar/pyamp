@@ -15,12 +15,34 @@ Used by the macOS and Windows specs, on the Analysis's ``binaries`` and ``datas`
   CPU, audio only, mpv's video off).
 
 Qt's network and TLS pieces stay: Qt Multimedia depends on them (``https://`` streams).
+
+:data:`UNUSED_MODULES` are Python packages PyInstaller would bundle that PyAmp never
+imports, for the specs' ``excludes``.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+
+#: Python packages the app never imports. numpy.random (~2.7 MB) is loaded lazily and
+#: unused (the visualiser only needs numpy.fft); setuptools arrives through dependencies'
+#: optional imports; f2py and pydoc_data are developer tools and help() texts.
+UNUSED_MODULES = (
+    "jeepney",  # Linux-only (MPRIS)
+    "tkinter",
+    "pytest",
+    "setuptools",
+    "pkg_resources",
+    "distutils",
+    "pydoc_data",
+    "numpy.random",
+    "numpy.f2py",
+    # Qt bindings nothing imports (the Qt libraries themselves stay where Qt needs them).
+    "PySide6.QtConcurrent",
+    "PySide6.QtDBus",
+    "PySide6.QtMultimediaWidgets",
+)
 
 #: Qt modules (macOS frameworks, Windows Qt6*.dll) only the virtual keyboard needs.
 _MODULES = (

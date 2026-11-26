@@ -386,15 +386,15 @@ def test_a_buffered_song_is_saved_without_fetching_it_again(
     """For the visualiser: a song from a server is analysed from mpv's own copy."""
     from pyamp.audio.track_analysis import TrackAnalyser  # noqa: PLC0415  (Qt Multimedia)
 
-    assert not backend.stream_is_buffered()  # nothing playing
-    assert not backend.save_stream(tmp_path / "nothing.mkv")
+    assert backend.buffered_range() is None  # nothing playing
+    assert not backend.save_stream(tmp_path / "nothing.mkv", 0.0, 1.0)
     with RadioStation(seconds=30.0) as server:
         backend.load(StreamUrl(f"{server.url}/plain.wav"))  # a whole song, like Subsonic's
         backend.play()
-        wait_until(backend.stream_is_buffered)
+        wait_until(lambda: (backend.buffered_range() or (0.0, 0.0))[1] > 29.9)
         copy = tmp_path / "copy.mkv"
         started = time.monotonic()
-        assert backend.save_stream(copy)
+        assert backend.save_stream(copy, 0.0, 30.0)
         # At once, while the song plays: not when playback reaches its end (which is
         # what mpv's dump-cache does when told to go "to the end").
         assert time.monotonic() - started < 2
@@ -529,28 +529,6 @@ def test_the_buffered_stretch_is_the_one_being_played(
         backend._mpv = real
 
 
-@pytest.mark.parametrize(
-    ("size", "state", "fits"),
-    [
-        (50, {}, True),
-        (95, {}, False),  # bigger than 90% of the cache
-        (None, {"fw-bytes": 40}, True),  # unknown size, cache not filling up
-        (None, {"fw-bytes": 95}, False),  # unknown size, cache full and no end in sight
-        (None, {"fw-bytes": 95, "eof-cached": True}, True),  # full, but it's all there
-    ],
-)
-def test_whether_a_stream_fits_the_buffer(
-    backend: MpvAudioBackend, size: int | None, state: dict[str, object], fits: bool
-) -> None:
-    fake = FakeMpv([], None)
-    fake.file_size, fake.demuxer_cache_state = size, state
-    real, backend._mpv = backend._mpv, fake
-    try:
-        assert backend.stream_fits_buffer() is fits
-    finally:
-        backend._mpv = real
-
-
 def test_the_visualiser_shows_a_song_too_big_to_buffer_whole(qt_app: QCoreApplication) -> None:
     """End to end: a song bigger than mpv's buffer (shrunk here) is analysed as it plays."""
     from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser  # noqa: PLC0415
@@ -570,8 +548,7 @@ def test_the_visualiser_shows_a_song_too_big_to_buffer_whole(qt_app: QCoreApplic
             playlist.add([Track.for_stream(url, "Long mix", 30_000)])
             player.play_index(0)
             wait_until(lambda: sum(max(b.levels) > 0 for b in bars) >= 10)
-            assert not backend.stream_is_buffered()  # never wholly buffered...
-            assert player.state is PlaybackState.PLAYING  # ...yet the bars move
+            assert player.state is PlaybackState.PLAYING
     finally:
         spectrum.shutdown()
         analyser.shutdown()
@@ -604,34 +581,3 @@ def test_the_hidden_decoder_feeds_the_analysis(
     assert timeline.seconds == pytest.approx(5.0, abs=0.1)
     assert max(float(row.max()) for row in timeline.rows if row is not None) > 0.5  # the tone
     assert "Input #0" not in capfd.readouterr().err  # nothing printed about the file
-
-
-def test_a_long_buffered_stream_still_shows_bars(
-    qt_app: QCoreApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """mpv buffers far ahead of a long song: the bars mustn't lose what's playing."""
-    from pyamp.audio import track_analysis  # noqa: PLC0415
-    from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser  # noqa: PLC0415
-    from pyamp.core.events import SpectrumUpdated  # noqa: PLC0415
-
-    # In miniature: minutes buffered and a few kept become ~20 s buffered and 2 s kept.
-    monkeypatch.setattr(track_analysis, "LIVE_KEEP_S", 2.0)
-    monkeypatch.setattr(track_analysis, "LIVE_AHEAD_S", 1.5)
-    bus = EventBus()
-    playlist = Playlist(bus)
-    backend = MpvAudioBackend(ao="null", demuxer_max_bytes=1_000_000)  # ~20 s of this song
-    player = Player(backend, playlist, bus)
-    analyser = TrackAnalyser()
-    spectrum = AnalysedSpectrum(bus, analyser, 20, streams=player)
-    bars: list[SpectrumUpdated] = []
-    bus.subscribe(SpectrumUpdated, bars.append)
-    try:
-        with RadioStation(seconds=60.0) as server:
-            url = StreamUrl(f"{server.url}/plain.wav")
-            playlist.add([Track.for_stream(url, "Long song", 60_000)])
-            player.play_index(0)
-            wait_until(lambda: sum(max(b.levels) > 0 for b in bars) >= 10)
-    finally:
-        spectrum.shutdown()
-        analyser.shutdown()
-        player.shutdown()

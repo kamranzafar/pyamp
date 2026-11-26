@@ -30,19 +30,23 @@ versions: <https://github.com/media-kit/libmpv-darwin-build/tree/v0.7.3>.
 
 ## Audio engine (Windows: `_internal\libmpv\libmpv-2.dll`)
 
-Prebuilt by [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake),
-build **20261111** (`mpv-dev-x86_64-20261111-git-bcde6b93cc`), unmodified. It is one DLL
-with mpv and FFmpeg (built with GPL components) and their libraries linked in. Build
-recipe, the exact components and their versions:
-<https://github.com/shinchiro/mpv-winbuild-cmake/tree/master/packages>. PyAmp keeps a
-copy of the archive at
-<https://github.com/kamranzafar/pyamp/releases/tag/libmpv-windows-20261111>.
+PyAmp's own audio-only build: one DLL with mpv, FFmpeg and their libraries linked in,
+cross-compiled by `packaging/windows/libmpv/build.sh` from the sources pinned in
+`packaging/windows/libmpv/sources.lock`. The build, its exact sources and the commit
+that built it are at
+<https://github.com/kamranzafar/pyamp/releases/tag/libmpv-windows-audio-20261126>.
 
 | Component | Licence | Source |
 |---|---|---|
-| mpv (libmpv) | GPL-2.0-or-later | <https://github.com/mpv-player/mpv> |
-| FFmpeg (GPL build) | GPL | <https://ffmpeg.org/download.html> |
-| Other linked libraries (libass, FreeType, HarfBuzz, FriBidi, dav1d, libvpx, Opus, Vorbis, …) | Their own (see the build recipe) | Listed in the build recipe above |
+| mpv 0.42.0 (libmpv) | GPL-2.0-or-later | <https://github.com/mpv-player/mpv> |
+| FFmpeg 9.1 | LGPL-2.1-or-later | <https://ffmpeg.org/download.html> |
+| libplacebo 7.387.0 | LGPL-2.1-or-later | <https://code.videolan.org/videolan/libplacebo> |
+| libass 0.17.5 | ISC | <https://github.com/libass/libass> |
+| FreeType 2.15.0 | FreeType License (FTL) | <https://freetype.org> |
+| HarfBuzz 15.2.0 | MIT ("Old MIT") | <https://github.com/harfbuzz/harfbuzz> |
+| GNU FriBidi 1.0.18 | LGPL-2.1-or-later | <https://github.com/fribidi/fribidi> |
+| zlib 1.4 | Zlib | <https://zlib.net> |
+| GCC runtime (libgcc, libstdc++), mingw-w64 runtime and winpthreads | GPL-3.0-or-later with the GCC Runtime Library Exception; mingw-w64's own (ZPL-2.1, MIT) | <https://gcc.gnu.org>, <https://www.mingw-w64.org> |
 
 The combination is distributed under the GPL, compatible with PyAmp's GPL-3.0-or-later.
 

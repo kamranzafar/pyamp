@@ -401,6 +401,14 @@ the zip and the installer (`pyamp.iss`). On Windows the app folder has two progr
 since a windowed program can't print. Licences of bundled components are listed in
 `packaging/THIRD_PARTY_NOTICES.md`, which ships with the app.
 
+The Windows libmpv is PyAmp's own audio-only build (18.7 MB instead of the 122 MB of a
+general-purpose one): `packaging/windows/libmpv/build.sh` cross-compiles it on Linux
+from the sources pinned in `sources.lock`, and the `libmpv (Windows, audio only)`
+workflow builds it, packages the app with it and self-tests it on Windows
+(`build.ps1 -Libmpv <dll>`). To update it, change the pins, let the workflow pass,
+publish its DLL with its sources as a `libmpv-windows-audio-<date>` pre-release and pin
+that in `packaging/windows/libmpv.lock`.
+
 ### Making a release
 
 1. Set the new version in `pyproject.toml` and `src/pyamp/__init__.py`, and merge it.

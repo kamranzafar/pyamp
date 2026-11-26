@@ -27,7 +27,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 
 from pyamp.config import Settings
-from pyamp.core.events import EventBus, SavedPlaylistsChanged
+from pyamp.core.events import EventBus, SavedPlaylistEdited, SavedPlaylistsChanged
 from pyamp.core.models import Track
 from pyamp.core.playlist import Playlist
 from pyamp.library.loader import TrackLoader
@@ -159,6 +159,34 @@ def test_edits_are_saved_after_a_pause(
     wait_until(lambda: len(saved.read_paths("Default")) == 2)  # ...but shortly after
     playlist.move([1], 0)
     wait_until(lambda: saved_names(saved, "Default") == [new[1].name, new[0].name])
+
+
+def test_saved_edits_are_announced_on_the_main_thread(
+    session: PlaylistSession,
+    playlist: Playlist,
+    bus: EventBus,
+    saved: SavedPlaylists,
+    tmp_path: Path,
+) -> None:
+    session.start()
+    wait_until(lambda: loaded(session))
+    heard: list[tuple[str, int, bool]] = []  # name, tracks saved by then, on the main thread
+    main = threading.current_thread()
+    bus.subscribe(
+        SavedPlaylistEdited,
+        lambda e: heard.append(
+            (e.name, len(saved.read_paths(e.name)), threading.current_thread() is main)
+        ),
+    )
+    playlist.add([Track.from_path(f) for f in make_files(tmp_path / "add", 2)])
+    wait_until(lambda: bool(heard))
+    assert heard == [("Default", 2, True)]  # once written
+    playlist.remove([0])
+    session.save_now()  # e.g. switching playlists: pending edits are written at once
+    assert heard[-1] == ("Default", 1, True)
+    session.save_now()  # nothing new
+    session.new("Other")
+    assert len(heard) == 2
 
 
 def test_nothing_is_saved_while_loading(
@@ -338,6 +366,8 @@ def test_adding_to_playlists_skips_what_they_have(
     a, b, c = (Track.from_path(p) for p in make_files(tmp_path / "m", 3))
     events: list[SavedPlaylistsChanged] = []
     bus.subscribe(SavedPlaylistsChanged, events.append)
+    edited: list[SavedPlaylistEdited] = []
+    bus.subscribe(SavedPlaylistEdited, edited.append)
 
     assert session.add_to("default", [a, b, a]) == 2  # the open one, in place; repeats once
     assert list(playlist) == [a, b]
@@ -350,6 +380,7 @@ def test_adding_to_playlists_skips_what_they_have(
     assert saved.read_paths("Mix") == [a.location, c.location]
     assert session.add_to(name, [c]) == 0
     assert events[-1] == SavedPlaylistsChanged(("Default", "Mix"), "Default")
+    assert [e.name for e in edited] == ["Default", "Mix", "Mix"]  # not when nothing's added
 
 
 def test_other_playlists_can_be_renamed_and_deleted(

@@ -425,6 +425,33 @@ def test_the_library_lists_the_saved_playlists(
     wait_until(lambda: playlists.childCount() == 1 and playlists.child(0).text(0) == "Default (1)")  # type: ignore[union-attr]
 
 
+def test_the_library_follows_edits_to_the_open_playlist(
+    store: SettingsStore, cleanup: list[Application], tmp_path: Path
+) -> None:
+    application = build(store)
+    cleanup.append(application)
+    application.start([])
+    wait_until(lambda: not application.playlists.loading)
+    a, b = (Track(tmp_path / f"{name}.mp3", name) for name in "ab")
+    application.window.add_tracks([a, b])
+    library = application.window.show_library()
+    playlists = library.sidebar_item(1)
+    assert playlists is not None
+    wait_until(
+        lambda: (default := playlists.child(0)) is not None and default.text(0) == "Default (2)"
+    )
+    default = playlists.child(0)
+    assert default is not None
+    library.sidebar.setCurrentItem(default)
+    wait_until(lambda: [t.title for t in library.model.tracks()] == ["a", "b"])
+
+    application.playlist.remove([0])  # in the player
+    wait_until(
+        lambda: (default := playlists.child(0)) is not None and default.text(0) == "Default (1)"
+    )
+    wait_until(lambda: [t.title for t in library.model.tracks()] == ["b"])  # still picked
+
+
 def drag_onto(library: LibraryWindow, item: QTreeWidgetItem | None, data: QMimeData) -> bool:
     """Drag ``data`` over ``item`` in the library's sidebar and drop it, as a mouse would
     (the drop is added once Qt is done with it); whether the sidebar took it."""

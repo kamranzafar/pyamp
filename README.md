@@ -125,7 +125,7 @@ starts, and when you click **Rescan**. Only files that changed are read again.
   from a server keep their tags).
 - **Playlists**, in the sidebar, lists your saved playlists. Pick one to see its tracks
   (with the library's tags; no music files are read); right-click it to open it in the
-  player, rename it or delete it.
+  player, rename it or delete it. Changes made in the player show here once saved.
 - Right-click a folder under **Folders** to remove it from the library. The files stay
   where they are: PyAmp only reads your music files, and never retags, renames or
   moves them.

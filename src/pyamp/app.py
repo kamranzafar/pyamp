@@ -49,7 +49,12 @@ from pyamp.audio.registry import (
 from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.equalizer import Equalizer
-from pyamp.core.events import EventBus, LibraryChanged, SavedPlaylistsChanged
+from pyamp.core.events import (
+    EventBus,
+    LibraryChanged,
+    SavedPlaylistEdited,
+    SavedPlaylistsChanged,
+)
 from pyamp.core.models import RepeatMode, ReplayGainMode
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
@@ -217,9 +222,10 @@ class Application:
             delete_playlist=self.window.delete_saved_playlist,
         )
         self.sources.add(self.playlists_source)
-        self.bus.subscribe(
-            SavedPlaylistsChanged, lambda _: self.sources.changed(self.playlists_source)
-        )
+        # Shown again when playlists come and go, or one's tracks change (e.g. the
+        # player's edits to the open one are saved).
+        for event in (SavedPlaylistsChanged, SavedPlaylistEdited):
+            self.bus.subscribe(event, lambda _: self.sources.changed(self.playlists_source))
         # Restore preferences *after* the UI exists, so widgets receive the events.
         self._apply_settings(self.settings)
         if not args.no_plugins:

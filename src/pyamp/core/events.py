@@ -154,6 +154,14 @@ class SavedPlaylistsChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class SavedPlaylistEdited:
+    """The saved playlist ``name`` has been written with different tracks (e.g. the
+    open playlist's edits were saved)."""
+
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
 class AudioInfoChanged:
     """What's playing: bitrate in kbps and sample rate in Hz (0 where unknown).
 

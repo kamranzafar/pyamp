@@ -27,6 +27,9 @@ complete file.
 Auto-saves are written on a background thread from a snapshot of the tracks (a large
 playlist takes a noticeable moment to write). There is one writer thread, so files are
 written in order, and every other save, rename or delete waits for it first.
+
+Once edits are written, :class:`SavedPlaylistEdited` is published (on the main thread),
+so what shows the saved playlists (e.g. the library window) can show them again.
 """
 
 from __future__ import annotations
@@ -36,10 +39,15 @@ import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThreadPool, QTimer
+from PySide6.QtCore import QObject, QThreadPool, QTimer, Signal, Slot
 
 from pyamp.config import Settings
-from pyamp.core.events import EventBus, PlaylistChanged, SavedPlaylistsChanged
+from pyamp.core.events import (
+    EventBus,
+    PlaylistChanged,
+    SavedPlaylistEdited,
+    SavedPlaylistsChanged,
+)
 from pyamp.core.models import Location, Track
 from pyamp.core.playlist import Playlist
 from pyamp.library.saved_playlists import SavedPlaylists, entry_track
@@ -52,6 +60,10 @@ DEFAULT_NAME = "Default"
 
 
 class PlaylistSession(QObject):
+    #: A playlist's edits were written (sent from the writer thread too; received on
+    #: the main thread, which publishes them).
+    _edited = Signal(str)
+
     def __init__(
         self,
         playlist: Playlist,
@@ -79,6 +91,8 @@ class PlaylistSession(QObject):
         self._autosave.timeout.connect(self._save_in_background)
         self._writer = QThreadPool(self)
         self._writer.setMaxThreadCount(1)  # one at a time, in order
+        # A method of this (main thread) object, so the writer thread's are queued here.
+        self._edited.connect(self._publish_edited)
         bus.subscribe(PlaylistChanged, self._on_playlist_changed)
         loader.job_finished.connect(self._on_job_finished)
 
@@ -109,11 +123,12 @@ class PlaylistSession(QObject):
 
     def save_now(self) -> None:
         """Write the open playlist to its file now (skipped while it's still loading)."""
+        edited = self._autosave.isActive()  # edits not written yet
         self._autosave.stop()
         self.wait_for_saves()
         if self._active is None or self.loading:
             return
-        self._write(self._active, list(self._playlist))
+        self._write(self._active, list(self._playlist), edited=edited)
 
     def wait_for_saves(self) -> None:
         """Block until background saves have been written."""
@@ -123,14 +138,18 @@ class PlaylistSession(QObject):
         if self._active is None or self.loading:
             return
         name, tracks = self._active, list(self._playlist)  # tracks are immutable
-        self._writer.start(lambda: self._write(name, tracks))
+        self._writer.start(lambda: self._write(name, tracks, edited=True))
 
-    def _write(self, name: str, tracks: Sequence[Track]) -> None:
-        """Runs on the main or the writer thread: touches only the file."""
+    def _write(self, name: str, tracks: Sequence[Track], *, edited: bool = False) -> None:
+        """Runs on the main or the writer thread: touches only the file (and says so if
+        it holds ``edited`` tracks)."""
         try:
             self._saved.save(name, tracks)
         except OSError:
             log.exception("Could not save playlist %r", name)
+            return
+        if edited:
+            self._edited.emit(name)
 
     def shutdown(self) -> None:
         if self.loading:
@@ -184,8 +203,7 @@ class PlaylistSession(QObject):
             new = _not_in(tracks, {entry.location for entry in entries})
             if new:
                 self._saved.save(name, [*map(entry_track, entries), *new])
-        if new:
-            self._announce()
+                self._edited.emit(name)
         return len(new)
 
     def rename(self, new_name: str, old: str | None = None) -> str:
@@ -253,6 +271,10 @@ class PlaylistSession(QObject):
                 log.info("Moved the previous session's playlist into %r", name)
             except OSError:
                 log.exception("Could not migrate %s", self._legacy)
+
+    @Slot(str)
+    def _publish_edited(self, name: str) -> None:
+        self._bus.publish(SavedPlaylistEdited(name))
 
     def _on_playlist_changed(self, _: PlaylistChanged) -> None:
         if self._active is not None and not self.loading:

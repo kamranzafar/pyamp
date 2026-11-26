@@ -51,7 +51,6 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
-    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -72,6 +71,7 @@ from pyamp.library.metadata import AUDIO_EXTENSIONS
 from pyamp.library.playlists_source import PlaylistsSource
 from pyamp.library.scanner import ScanSummary
 from pyamp.library.sources import MediaSource, MediaSources, Node, SourceError
+from pyamp.ui import file_dialogs
 from pyamp.ui.background_calls import BackgroundCalls
 from pyamp.ui.dialog_parts import plain_button
 from pyamp.ui.library_model import COLUMNS, LibraryModel
@@ -532,21 +532,20 @@ class LibraryWindow(QDialog):
         return menu
 
     def add_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
-            self, "Add Folder to Library", self._settings.last_directory
+        """Ask for a folder (a sheet on this window, so it keeps the focus) and add it."""
+        file_dialogs.choose_folder(
+            self, "Add Folder to Library", self._settings.last_directory, self._add_sources
         )
-        if folder:
-            self._add_sources([Path(folder)])
 
     def add_files(self) -> None:
         patterns = " ".join(f"*{ext}" for ext in sorted(AUDIO_EXTENSIONS))
-        files, _ = QFileDialog.getOpenFileNames(
+        file_dialogs.choose_files(
             self,
             "Add Files to Library",
             self._settings.last_directory,
             f"Audio files ({patterns})",
+            self._add_sources,
         )
-        self._add_sources([Path(f) for f in files])
 
     def _add_sources(self, paths: list[Path]) -> None:
         if not paths:

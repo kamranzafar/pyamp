@@ -39,7 +39,6 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QFileDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -67,6 +66,7 @@ from pyamp.library.metadata import AUDIO_EXTENSIONS
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
 from pyamp.library.saved_playlists import PlaylistNameError
 from pyamp.library.sources import MediaSources
+from pyamp.ui import file_dialogs
 from pyamp.ui.about_dialog import AboutDialog
 from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
@@ -603,46 +603,56 @@ class MainWindow(QMainWindow):
             return
         self.add_paths([location])
 
+    # The file dialogs are sheets on this window (see file_dialogs), so it keeps the focus.
+
     def _add_files(self) -> None:
         patterns = " ".join(f"*{ext}" for ext in sorted(AUDIO_EXTENSIONS))
-        files, _ = QFileDialog.getOpenFileNames(
-            self, "Add Files", self._s.settings.last_directory, f"Audio files ({patterns})"
+        file_dialogs.choose_files(
+            self,
+            "Add Files",
+            self._s.settings.last_directory,
+            f"Audio files ({patterns})",
+            self._add_from_dialog,
         )
-        self._add_from_dialog([Path(f) for f in files])
 
     def _add_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
-            self, "Add Folder", self._s.settings.last_directory
+        file_dialogs.choose_folder(
+            self, "Add Folder", self._s.settings.last_directory, self._add_from_dialog
         )
-        self._add_from_dialog([Path(folder)] if folder else [])
 
     def _import_playlist(self) -> None:
         """Import a playlist file as a new saved playlist (named after the file)."""
-        file, _ = QFileDialog.getOpenFileName(
+        file_dialogs.choose_file(
             self,
             "Import Playlist",
             self._s.settings.last_directory,
             self._s.playlist_formats.file_dialog_filter(),
+            self._import_picked,
         )
-        if file:
-            path = Path(file)
+
+    def _import_picked(self, files: list[Path]) -> None:
+        if files:
+            path = files[0]
             self._autoplay_jobs.clear()
             self._try(lambda: self._s.playlists.new(path.stem), "Import Playlist")
             self._add_from_dialog([path])
 
     def _export_playlist(self) -> None:
-        file, _ = QFileDialog.getSaveFileName(
+        suggested = (
+            Path(self._s.settings.last_directory) / f"{self._s.playlists.active or 'playlist'}.m3u8"
+        )
+        file_dialogs.choose_save_file(
             self,
             "Export Playlist",
-            str(
-                Path(self._s.settings.last_directory)
-                / f"{self._s.playlists.active or 'playlist'}.m3u8"
-            ),
+            str(suggested),
             self._s.playlist_formats.file_dialog_filter(),
+            self._export_to,
         )
-        if not file:
+
+    def _export_to(self, files: list[Path]) -> None:
+        if not files:
             return
-        path = Path(file)
+        path = files[0]
         if not path.suffix:
             path = path.with_suffix(".m3u8")
         try:

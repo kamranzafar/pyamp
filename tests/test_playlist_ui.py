@@ -38,8 +38,9 @@ from pyamp.library.saved_playlists import SavedPlaylists
 from pyamp.ui.jump_dialog import matches, search_text
 from pyamp.ui.playlist_model import ROWS_MIME
 from pyamp.ui.track_drag import TrackDrag
-from tests.conftest import FakeBackend
+from tests.conftest import FakeBackend, answer_dialog
 from tests.test_background_loader import make_files, wait_until
+from tests.test_metadata import write_wav
 
 
 @pytest.fixture
@@ -251,3 +252,48 @@ def test_jump_dialog_plays_the_chosen_track(app: Application, tmp_path: Path) ->
     dialog._jump()
     assert app.playlist.current_index == 2
     assert not dialog.isVisible()
+
+
+def test_add_files_and_folders(
+    app: Application, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    song = write_wav(tmp_path / "one.wav")
+    folder = tmp_path / "more"
+    folder.mkdir()
+    write_wav(folder / "two.wav")
+    asked = answer_dialog(monkeypatch, "choose_files", [song])
+    app.window._add_files()
+    assert asked == [(app.window, "Add Files")]  # on the window: a sheet on macOS
+    wait_until(lambda: titles(app) == ["one"])
+    answer_dialog(monkeypatch, "choose_folder", [folder])
+    app.window._add_folder()
+    wait_until(lambda: titles(app) == ["one", "two"])
+    assert app.settings.last_directory == str(folder)
+    answer_dialog(monkeypatch, "choose_files", [])
+    app.window._add_files()  # cancelled
+    answer_dialog(monkeypatch, "choose_folder", [])
+    app.window._add_folder()
+    assert titles(app) == ["one", "two"]
+
+
+def test_import_and_export_a_playlist(
+    app: Application, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    add_songs(app, tmp_path / "m", "a", "b")
+    exported = tmp_path / "mix"  # no suffix: .m3u8 is added
+    asked = answer_dialog(monkeypatch, "choose_save_file", [exported])
+    app.window._export_playlist()
+    assert asked == [(app.window, "Export Playlist")]
+    assert (tmp_path / "mix.m3u8").is_file()
+    assert app.window.statusBar().currentMessage() == "Exported mix.m3u8"
+
+    answer_dialog(monkeypatch, "choose_file", [tmp_path / "mix.m3u8"])
+    app.window._import_playlist()
+    assert app.playlists.active == "mix"
+    wait_until(lambda: titles(app) == ["a", "b"])
+
+    answer_dialog(monkeypatch, "choose_save_file", [])
+    app.window._export_playlist()  # cancelled
+    answer_dialog(monkeypatch, "choose_file", [])
+    app.window._import_playlist()
+    assert app.playlists.active == "mix"

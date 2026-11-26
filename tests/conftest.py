@@ -37,6 +37,7 @@ from pyamp.core.events import EventBus
 from pyamp.core.models import Location, PlaybackState, ReplayGainMode, Track
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
+from pyamp.ui import file_dialogs
 
 # Widget tests must never open real windows (and must work on CI without a display).
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -225,3 +226,20 @@ class BackendRecorder:
 
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
         self._record("audio")
+
+
+def answer_dialog(
+    monkeypatch: pytest.MonkeyPatch, chooser: str, picked: list[Path]
+) -> list[tuple[object, str]]:
+    """Stand in for a file dialog: it picks ``picked`` ([] cancels). Returns the
+    (window, title) of each dialog asked for."""
+    asked: list[tuple[object, str]] = []
+
+    def choose(parent: object, title: str, *args: object) -> None:
+        asked.append((parent, title))
+        done = args[-1]
+        assert callable(done)
+        done(picked)
+
+    monkeypatch.setattr(file_dialogs, chooser, choose)
+    return asked

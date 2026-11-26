@@ -39,7 +39,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QAction, QImage, QImageWriter
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QFileDialog, QMenu, QTreeWidgetItem
+from PySide6.QtWidgets import QMenu, QTreeWidgetItem
 
 from pyamp.config import Settings
 from pyamp.core.events import EventBus, LibraryChanged
@@ -52,6 +52,7 @@ from pyamp.library.sources import MediaSources, Node, NodeAction, SourceError, m
 from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.library_window import LOADING, LibraryWindow
 from pyamp.ui.skin import DEFAULT_SKIN
+from tests.conftest import answer_dialog
 from tests.test_background_loader import wait_until
 from tests.test_metadata import write_wav
 
@@ -450,7 +451,7 @@ def test_adding_a_folder_scans_it(
     folder = tmp_path / "new"
     folder.mkdir()
     write_wav(folder / "song.wav")
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_: str(folder))
+    answer_dialog(monkeypatch, "choose_folder", [folder])
     window.add_folder()
     assert "Scanning…" in window.status.text()
     library.progress.emit(1234)
@@ -468,13 +469,14 @@ def test_adding_files(
     window: LibraryWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     song = write_wav(tmp_path / "one.wav")
-    monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *_: ([str(song)], ""))
+    asked = answer_dialog(monkeypatch, "choose_files", [song])
     window.add_files()
     wait_until(lambda: titles(window) == ["one"])
     assert window._settings.last_directory == str(tmp_path)
-    monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *_: ([], ""))
+    assert asked == [(window, "Add Files to Library")]  # on this window: a sheet on macOS
+    answer_dialog(monkeypatch, "choose_files", [])
     window.add_files()  # cancelled
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_: "")
+    answer_dialog(monkeypatch, "choose_folder", [])
     window.add_folder()  # cancelled
     assert titles(window) == ["one"]
 

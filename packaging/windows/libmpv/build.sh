@@ -38,6 +38,7 @@ cpp = '$HOST-g++-posix'
 ar = '$HOST-ar'
 strip = '$HOST-strip'
 windres = '$HOST-windres'
+dlltool = '$HOST-dlltool'
 pkg-config = 'pkg-config'
 
 [host_machine]

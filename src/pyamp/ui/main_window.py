@@ -231,7 +231,7 @@ class MainWindow(QMainWindow):
             row.addWidget(button)
         eject = QToolButton()
         eject.setText("⏏")
-        eject.setToolTip("Add files (Ctrl+O)")
+        eject.setToolTip("Add files to the playlist (Ctrl+O)")
         eject.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         eject.clicked.connect(self._add_files)
         row.addWidget(eject)
@@ -244,10 +244,12 @@ class MainWindow(QMainWindow):
 
         file_menu = menu_bar.addMenu("&File")
         self._add_menu_action(
-            file_menu, "Add &Files…", self._add_files, QKeySequence.StandardKey.Open
+            file_menu, "Add &Files to Playlist…", self._add_files, QKeySequence.StandardKey.Open
         )
-        self._add_menu_action(file_menu, "Add F&older…", self._add_folder, "Ctrl+Shift+O")
-        self._add_menu_action(file_menu, "Add &URL…", self.add_url, "Ctrl+U")
+        self._add_menu_action(
+            file_menu, "Add F&older to Playlist…", self._add_folder, "Ctrl+Shift+O"
+        )
+        self._add_menu_action(file_menu, "Add &URL to Playlist…", self.add_url, "Ctrl+U")
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "&Import Playlist…", self._import_playlist, "Ctrl+L")
         self._add_menu_action(
@@ -593,13 +595,15 @@ class MainWindow(QMainWindow):
     def add_url(self) -> None:
         """Add a stream: internet radio (or a station's .pls/.m3u), or an audio file URL."""
         text, ok = QInputDialog.getText(
-            self, "Add URL", "Stream or playlist URL (http:// or https://):"
+            self, "Add URL to Playlist", "Stream or playlist URL (http:// or https://):"
         )
         if not ok or not text.strip():
             return
         location = parse_location(text)
         if not isinstance(location, StreamUrl):
-            QMessageBox.warning(self, "Add URL", "Enter an http:// or https:// address.")
+            QMessageBox.warning(
+                self, "Add URL to Playlist", "Enter an http:// or https:// address."
+            )
             return
         self.add_paths([location])
 
@@ -609,7 +613,7 @@ class MainWindow(QMainWindow):
         patterns = " ".join(f"*{ext}" for ext in sorted(AUDIO_EXTENSIONS))
         file_dialogs.choose_files(
             self,
-            "Add Files",
+            "Add Files to Playlist",
             self._s.settings.last_directory,
             f"Audio files ({patterns})",
             self._add_from_dialog,
@@ -617,7 +621,7 @@ class MainWindow(QMainWindow):
 
     def _add_folder(self) -> None:
         file_dialogs.choose_folder(
-            self, "Add Folder", self._s.settings.last_directory, self._add_from_dialog
+            self, "Add Folder to Playlist", self._s.settings.last_directory, self._add_from_dialog
         )
 
     def _import_playlist(self) -> None:

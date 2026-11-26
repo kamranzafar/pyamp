@@ -263,7 +263,7 @@ def test_add_files_and_folders(
     write_wav(folder / "two.wav")
     asked = answer_dialog(monkeypatch, "choose_files", [song])
     app.window._add_files()
-    assert asked == [(app.window, "Add Files")]  # on the window: a sheet on macOS
+    assert asked == [(app.window, "Add Files to Playlist")]  # on the window: a sheet on macOS
     wait_until(lambda: titles(app) == ["one"])
     answer_dialog(monkeypatch, "choose_folder", [folder])
     app.window._add_folder()

@@ -146,8 +146,9 @@ PyAmp's data folder.
 
 The library window also shows music from elsewhere, each in its own part of the
 sidebar under **This Computer**: each [Subsonic server](#subsonic-servers) you add,
-each [DLNA/UPnP server](#dlnaupnp-servers) on your network, and sources added by
-plugins. They're browsed, searched and played the same way, and a
+each [DLNA/UPnP server](#dlnaupnp-servers) on your network, the
+[Radio Directory](#streams-and-internet-radio) of internet radio stations, and sources
+added by plugins. They're browsed, searched and played the same way, and a
 slow or unreachable server never holds up the window. Picking a server's name
 searches the whole server.
 

@@ -55,6 +55,7 @@ The combination is distributed under the GPL, compatible with PyAmp's GPL-3.0-or
 | Component | Licence | Source |
 |---|---|---|
 | Python | PSF-2.0 | <https://www.python.org> |
+| Libraries that come with Python: OpenSSL, SQLite, libffi, mpdecimal, XZ Utils (liblzma), bzip2, zlib, Expat | Apache-2.0, public domain, MIT, BSD-2-Clause, 0BSD, bzip2 licence, Zlib, MIT | <https://docs.python.org/3/license.html> |
 | Qt 6 / PySide6 (incl. Qt Multimedia's FFmpeg, LGPL build) | LGPL-3.0 | <https://code.qt.io> |
 | python-mpv | GPL-2.0-or-later / LGPL-2.1-or-later | <https://github.com/jaseg/python-mpv> |
 | mutagen | GPL-2.0-or-later | <https://github.com/quodlibet/mutagen> |
@@ -63,3 +64,4 @@ The combination is distributed under the GPL, compatible with PyAmp's GPL-3.0-or
 | PyObjC (macOS) | MIT | <https://github.com/ronaldoussoren/pyobjc> |
 | keyring (with jaraco.classes, jaraco.context, jaraco.functools, more-itertools) | MIT | <https://github.com/jaraco/keyring> |
 | pywin32-ctypes (Windows) | BSD-3-Clause | <https://github.com/enthought/pywin32-ctypes> |
+| PyWinRT: winrt-runtime, winrt-Windows.Media and friends (Windows) | MIT | <https://github.com/pywinrt/pywinrt> |

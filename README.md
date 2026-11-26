@@ -5,6 +5,7 @@
 <p align="center">
   <a href="https://github.com/kamranzafar/pyamp/actions/workflows/ci.yml"><img src="https://github.com/kamranzafar/pyamp/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://github.com/kamranzafar/pyamp/actions/workflows/package-macos.yml"><img src="https://github.com/kamranzafar/pyamp/actions/workflows/package-macos.yml/badge.svg?branch=main" alt="macOS app build"></a>
+  <a href="https://github.com/kamranzafar/pyamp/actions/workflows/package-windows.yml"><img src="https://github.com/kamranzafar/pyamp/actions/workflows/package-windows.yml/badge.svg?branch=main" alt="Windows app build"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
   <br>
   <img src="https://img.shields.io/badge/python-3.13%2B-3776ab?logo=python&amp;logoColor=white" alt="Python 3.13+">
@@ -182,7 +183,7 @@ are kept in `smart_playlists.json` in PyAmp's data folder.
 
 | Backend | Default | Gapless | Equaliser | Visualiser | Needs |
 |---|---|---|---|---|---|
-| `mpv` (libmpv) | yes | **yes** | **yes** | yes (analysed) | `brew install mpv` or `apt install libmpv2` |
+| `mpv` (libmpv) | yes | **yes** | **yes** | yes (analysed) | bundled in the macOS and Windows apps; from source, `brew install mpv` or `apt install libmpv2` |
 | `qt` (QtMultimedia) | fallback | no | no | yes | nothing extra |
 
 Choose one in **Playback → Audio Backend**; the one playing now is marked "(in use)".
@@ -201,14 +202,14 @@ mpv's current position. That costs a short burst of CPU when a track starts (abo
 second's work for a 4-minute MP3) and almost nothing while it plays; the bars also
 show the equaliser's curve.
 
-A song streamed from a server (e.g. Subsonic) is analysed from mpv's own copy once mpv
-has all of it buffered, so nothing is downloaded twice; the bars start when it's
-there. mpv keeps up to 32 MiB of a stream ahead (minutes of audio, for a bad network)
-and 16 MiB behind; a song bigger than that is analysed as it plays instead, like
-radio, and after a seek the bars pick up from the new place. Live radio is analysed a
-piece at a time: every 1.5 seconds mpv's newly buffered stretch (it reads a few
-seconds ahead) is saved and analysed before it's heard. If a station's timing doesn't
-match playback, it gets no bars rather than wrong ones. If libmpv isn't installed,
+Streams, songs from a server (e.g. Subsonic) and live radio alike, are analysed from
+mpv's own buffered copy, so nothing is downloaded twice, a piece at a time: mpv's newly
+buffered stretch (up to 30 seconds of it) is saved and analysed just ahead of
+playback, so the bars start within a second or so of the music. mpv keeps up to 32 MiB
+of a stream ahead (minutes of audio, for a bad network) and 16 MiB behind. A song's
+levels are all kept, so after a seek its bars are there; a station's last two minutes
+are. If a station's timing doesn't match playback, it gets no bars rather than wrong
+ones. If libmpv isn't installed,
 PyAmp warns and plays through `qt`, trying mpv again on the next start.
 
 #### Using a libmpv that isn't installed system-wide
@@ -262,8 +263,8 @@ track boundaries.
 ### Equaliser
 
 **Playback → Equaliser…** (`G`) opens a 10-band graphic equaliser (60 Hz – 16 kHz,
-±12 dB) with a preamp and presets. It needs the `mpv` backend: QtMultimedia gives
-no access to the audio stream, so with `qt` the window is shown but disabled.
+±12 dB) with a preamp and presets. It needs the `mpv` backend: QtMultimedia can't
+change the audio it plays, so with `qt` the window is shown but disabled.
 Changes apply when you release or pause a slider (mpv rebuilds its filter chain
 for each change, which can cause a tiny audible blip), and the settings are
 remembered. Boosting bands can clip loud tracks; lower the preamp if you hear
@@ -283,15 +284,23 @@ playlists, like any other part of the library, and right-click one to edit or de
 it. A station added as a `.pls` or `.m3u` link is kept that way and looked up each
 time it's listed, so it keeps working when the station moves its stream.
 
+To find new stations, use **Radio Directory**, just below Radio in the library sidebar:
+[Radio Browser](https://www.radio-browser.info)'s free, community-run directory of
+stations. Browse its top voted and most played stations, or by country, genre or
+language, or pick Radio Directory itself to search it by name. Play a station, add it
+to a playlist, or right-click it → **Save to Radio…** to keep it with your own. Nothing
+is sent to Radio Browser until you open one of its lists; playing a station found there
+tells it so (just the station's id), which is what its "most played" list counts. This
+is the `radio-browser` plugin.
+
 While a station plays, the LCD, window title, menu bar menu and system media widgets
 show the current song as the station announces it (Icecast/Shoutcast "ICY" titles;
 the `mpv` backend only, Qt Multimedia doesn't pass them on). A stream known only by
 its URL (e.g. added with Add URL) is renamed after the station's own name once it
 plays, in the playlist and everywhere it's shown, so a playlist keeps "Groove Salad"
 rather than "live". Live streams have no
-length, so seeking is off and the playlist shows **LIVE**. On the `mpv` backend the
-visualiser stays still for streams (it analyses files, not live streams); the Qt
-backend's visualiser works for both.
+length, so seeking is off and the playlist shows **LIVE**. The visualiser works for
+streams on both backends (see [Audio backends](#audio-backends)).
 
 ### Subsonic servers
 
@@ -434,7 +443,7 @@ flowchart TB
     core["<b>core/</b><br/>Player, Playlist, event bus"]
     audio["<b>audio/</b><br/>mpv and Qt backends,<br/>visualiser analysis"]
     library["<b>library/</b><br/>sources, catalog, playlists"]
-    plugins["<b>plugins/</b><br/>Subsonic, DLNA, media keys"]
+    plugins["<b>plugins/</b><br/>Subsonic, DLNA, radio directory,<br/>media keys"]
 
     ui --> core
     ui --> library
@@ -444,7 +453,7 @@ flowchart TB
 
     audio --> engines[["libmpv / QtMultimedia"]]
     library --> data[("music files,<br/>library.sqlite3")]
-    plugins --> remote[("Subsonic and DLNA servers,<br/>OS media controls")]
+    plugins --> remote[("Subsonic and DLNA servers, Radio Browser,<br/>OS media controls")]
 ```
 
 - **`core/` is the player itself**: tracks, the playlist and its play order, the
@@ -461,13 +470,14 @@ flowchart TB
 - **`library/` gets music in**: reading tags, the library index (one SQLite file),
   saved and smart playlists, radio stations, and playlist formats. Everything the
   library window browses (this computer, playlists, smart playlists, radio stations, a
-  Subsonic or DLNA server) is a
+  Subsonic or DLNA server, the radio directory) is a
   `MediaSource`, so the window treats them all alike and a plugin can add more.
 - **`ui/` is the PySide6 front-end**: the player, library and equaliser windows and
   their dialogs. One skin gives every window and dialog its colours and look, and
   shared dialog parts keep them consistent.
 - **`plugins/` add features from outside the core**, found through Python entry
-  points: the Subsonic and DLNA servers and the OS media controls (`media_session/`).
+  points: the Subsonic and DLNA servers, the Radio Browser directory and the OS media
+  controls (`media_session/`).
   A plugin gets a small context (the event bus, the player, the playlist, the
   library's sources and a way to reach the window), not the app's internals.
 - **`app.py` builds everything.** It's the only place that knows the concrete
@@ -601,8 +611,8 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
 
 - **Code signing** for the Windows and macOS builds, so SmartScreen and Gatekeeper
   don't warn.
-- **Smaller downloads**: bundle only the Qt modules and plugins PyAmp uses, so the
-  apps shrink from about 170 MB.
+- **Smaller macOS download**: an audio-only libmpv for macOS too, built the way the
+  Windows one is (the macOS app bundles a general-purpose one with video codecs).
 
 Not planned, to keep PyAmp lightweight:
 

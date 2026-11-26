@@ -27,11 +27,11 @@ of band levels per 1/30 s (a :class:`LevelTimeline`). :class:`AnalysedSpectrum` 
 publishes the row for the current playback position, 30 times a second, as ordinary
 ``SpectrumUpdated`` events. (Qt's decoder did this before, at 4-6 times the CPU.)
 
-A song streamed from a server (e.g. Subsonic) is analysed from the backend's own copy:
-once the backend has all of it buffered, it saves that to a temporary file, so the song
-is never fetched twice. A live stream (radio) never ends, so the backend saves what it
-has newly buffered, a piece at a time, just ahead of playback; each piece's levels go in
-at its own place, and only the last couple of minutes are kept.
+A stream (a song from a server, e.g. Subsonic, or live radio) is analysed from the
+backend's own copy, so it's never fetched twice: the backend saves what it has newly
+buffered, a piece at a time (up to :data:`PIECE_MAX_S`), just ahead of playback, and each
+piece's levels go in at its own place. A song's levels are all kept; a live stream never
+ends, so only its last couple of minutes are.
 """
 
 from __future__ import annotations

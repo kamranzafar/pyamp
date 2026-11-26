@@ -39,11 +39,14 @@ from urllib.parse import urlencode, urlsplit
 
 from pyamp import APP_NAME, __version__
 from pyamp.core.models import Location, StreamUrl, Track
+from pyamp.library.artwork import MAX_ARTWORK_BYTES
 
 #: Token logins need API 1.13; 1.16.1 is what current servers speak.
 API_VERSION = "1.16.1"
 TIMEOUT_S = 15.0
 MAX_BYTES = 20_000_000  # a large library's artist list is a few MB at most
+#: Covers are asked for this many pixels across (the server scales them down).
+COVER_SIZE = 600
 
 type Json = dict[str, Any]
 
@@ -141,7 +144,21 @@ class SubsonicClient:
             track_number=_int(song.get("track")),
             disc_number=_int(song.get("discNumber")),
             duration_ms=_int(song.get("duration")) * 1000,
+            artwork=str(song.get("coverArt") or ""),
         )
+
+    def cover_art(self, cover_id: str, size: int = COVER_SIZE) -> bytes:
+        """The picture with the id ``cover_id`` (a song's ``coverArt``), as image bytes."""
+        with urllib.request.urlopen(
+            self._request("getCoverArt", id=cover_id, size=size), timeout=self._timeout
+        ) as response:
+            image = response.headers.get_content_type().startswith("image/")
+            data: bytes = response.read(MAX_ARTWORK_BYTES + 1)
+        if not image:  # an error, said in JSON or XML
+            raise SubsonicError("The server has no picture for that")
+        if len(data) > MAX_ARTWORK_BYTES:
+            raise SubsonicError("The picture was too large")
+        return data
 
     def authorise(self, location: Location) -> Location:
         """``location`` with a fresh login added, if it's a URL on this server's API."""
@@ -162,12 +179,15 @@ class SubsonicClient:
         token = hashlib.md5((self._password + salt).encode(), usedforsecurity=False)
         return {"u": self.username, "t": token.hexdigest(), "s": salt}
 
-    def _call(self, method: str, **params: object) -> Json:
+    def _request(self, method: str, **params: object) -> urllib.request.Request:
         query = urlencode({**params, "v": API_VERSION, "c": APP_NAME, "f": "json", **self._login()})
-        request = urllib.request.Request(
+        return urllib.request.Request(
             f"{self.server}/rest/{method}?{query}",
             headers={"User-Agent": f"{APP_NAME}/{__version__}"},
         )
+
+    def _call(self, method: str, **params: object) -> Json:
+        request = self._request(method, **params)
         with urllib.request.urlopen(request, timeout=self._timeout) as response:
             data = response.read(MAX_BYTES + 1)
         if len(data) > MAX_BYTES:

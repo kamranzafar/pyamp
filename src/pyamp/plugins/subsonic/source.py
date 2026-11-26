@@ -24,11 +24,14 @@ No Qt here; the library window calls it on a worker thread.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 
 from pyamp.core.models import Track
 from pyamp.library.sources import Node, NodeAction, SourceError, matches
 from pyamp.plugins.subsonic.client import Item, SubsonicClient, SubsonicError, describe
+
+log = logging.getLogger(__name__)
 
 ARTISTS, ARTIST, ALBUM, PLAYLISTS, PLAYLIST = "artists", "artist", "album", "playlists", "playlist"
 
@@ -93,6 +96,15 @@ class SubsonicSource:
 
     def actions(self, node: Node | None) -> list[NodeAction]:
         return list(self._commands) if node is None else []
+
+    def artwork(self, track: Track) -> bytes | None:
+        if self.client is None or not track.artwork:
+            return None
+        try:
+            return self.client.cover_art(track.artwork)
+        except (SubsonicError, OSError, ValueError) as exc:
+            log.debug("No cover for %s: %s", track.title, describe(exc))
+            return None
 
     def _signed_in(self) -> SubsonicClient:
         if self.client is None:

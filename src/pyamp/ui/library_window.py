@@ -22,11 +22,15 @@
 The local library comes first, then sources from plugins (a Subsonic server, ...). All
 calls to sources run on worker threads (:class:`BackgroundCalls`), so a slow server
 never freezes the window; only the latest request for tracks fills the table.
+
+Under the sidebar is the picked track's artwork (or the first one listed), which its
+source finds: a file's own picture, or a server's cover.
 """
 
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from collections.abc import Callable, Hashable, Sequence
 from pathlib import Path
 
@@ -74,6 +78,7 @@ from pyamp.ui.library_model import COLUMNS, LibraryModel
 from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.skin import Skin
 from pyamp.ui.track_drag import dragged_tracks
+from pyamp.ui.widgets.artwork_view import ArtworkView
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +87,10 @@ SEARCH_DELAY_MS = 200
 LOADING = "Loading…"
 #: Worker threads per source: enough to list a node while its tracks load.
 CALLS_PER_SOURCE = 2
+#: The artwork waits for the picked track to settle this long (e.g. arrowing down).
+ARTWORK_DELAY_MS = 120
+#: Pictures kept, so moving between an album's songs doesn't ask for its cover again.
+ARTWORK_CACHE = 64
 
 # Sidebar item data: the source an item belongs to, its node (None for the source's own
 # item) and whether what's inside it has been asked for.
@@ -132,6 +141,10 @@ class LibraryWindow(QDialog):
         self._known: set[int] = set()
         #: An item to select again once the sidebar has loaded down to it.
         self._restore: tuple[int, tuple[Hashable, ...]] | None = None
+        #: The source the table's tracks came from (it finds their artwork).
+        self._tracks_source: MediaSource | None = None
+        self._artwork_request = 0
+        self._artwork_cache: OrderedDict[tuple[int, object], bytes | None] = OrderedDict()
         self.setWindowTitle("Library")
         self.setObjectName("central")
         self.setStyleSheet(skin.stylesheet() + _extra_style(skin))
@@ -147,6 +160,7 @@ class LibraryWindow(QDialog):
         self.sidebar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.model = LibraryModel(self)
         self.table = _track_table(self.model)
+        self.artwork = ArtworkView()
         self.status = QLabel()
         self.add_folder_button = QPushButton("Add Folder…")
         self.add_files_button = QPushButton("Add Files…")
@@ -154,6 +168,9 @@ class LibraryWindow(QDialog):
         self._search_delay = QTimer(self)
         self._search_delay.setSingleShot(True)
         self._search_delay.setInterval(SEARCH_DELAY_MS)
+        self._artwork_delay = QTimer(self)
+        self._artwork_delay.setSingleShot(True)
+        self._artwork_delay.setInterval(ARTWORK_DELAY_MS)
         self._layout()
         self._connect(library)
         bus.subscribe(MediaSourcesChanged, self._on_sources_changed)
@@ -168,6 +185,9 @@ class LibraryWindow(QDialog):
         self.sidebar.itemCollapsed.connect(lambda item: self._expanded.discard(_path(item)))
         self.sidebar.customContextMenuRequested.connect(self._show_sidebar_menu)
         self.table.doubleClicked.connect(lambda index: self.play_from(index.row()))
+        self._artwork_delay.timeout.connect(self.show_artwork)
+        self.table.selectionModel().currentRowChanged.connect(self._artwork_delay.start)
+        self.model.modelReset.connect(self._artwork_delay.start)
         self.table.customContextMenuRequested.connect(self._show_table_menu)
         for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             shortcut = QShortcut(QKeySequence(key), self.table)
@@ -185,6 +205,7 @@ class LibraryWindow(QDialog):
         """Show every source again (e.g. one was added), keeping what was open and picked."""
         self._restore = self._restore or _location(self.sidebar.currentItem())
         self._retire_calls()
+        self._artwork_cache.clear()
         self._generation = {i: self._generation.get(i, 0) + 1 for i in range(len(self._sources))}
         self.sidebar.blockSignals(True)
         self.sidebar.clear()
@@ -209,6 +230,7 @@ class LibraryWindow(QDialog):
         item = self._top(position) if position is not None else None
         if position is None or item is None:
             return
+        self._artwork_cache.clear()  # e.g. a rescan found new covers
         current = _location(self.sidebar.currentItem())
         if current is not None and current[0] == position:
             self._restore = current
@@ -388,10 +410,47 @@ class LibraryWindow(QDialog):
                 self._show_error(error)
                 return
             self._error = ""
+            self._tracks_source = source
             self.model.set_tracks(tracks)
             self._update_status()
 
         self._calls_for(source).run(lambda: source.tracks(node, search), done)
+
+    # -- The artwork --------------------------------------------------------------- #
+
+    def artwork_track(self) -> Track | None:
+        """The track whose artwork is shown: the table's current one, else the first."""
+        row = self.table.currentIndex().row()
+        if 0 <= row < self.model.rowCount():
+            return self.model.track(row)
+        return self.model.track(0) if self.model.rowCount() else None
+
+    def show_artwork(self) -> None:
+        """Show :meth:`artwork_track`'s picture, asking its source for it if need be."""
+        self._artwork_delay.stop()
+        self._artwork_request += 1  # and a reply still on its way is dropped
+        request = self._artwork_request
+        track, source = self.artwork_track(), self._tracks_source
+        if track is None or source is None:
+            self.artwork.show_image(None)
+            return
+        key = (id(source), track.artwork or track.location)
+        if key in self._artwork_cache:
+            self._artwork_cache.move_to_end(key)
+            self.artwork.show_image(self._artwork_cache[key])
+            return
+
+        def done(data: bytes | None, error: BaseException | None) -> None:
+            if error is not None:
+                log.debug("No artwork for %s", track.location, exc_info=error)
+            elif source is self._tracks_source:  # not a source since rebuilt
+                self._artwork_cache[key] = data
+                while len(self._artwork_cache) > ARTWORK_CACHE:
+                    self._artwork_cache.popitem(last=False)
+            if request == self._artwork_request:
+                self.artwork.show_image(data if error is None else None)
+
+        self._calls_for(source).run(lambda: source.artwork(track), done)
 
     def _show_error(self, error: BaseException | None) -> None:
         if isinstance(error, SourceError):
@@ -579,7 +638,13 @@ class LibraryWindow(QDialog):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addWidget(self.search)
-        left_layout.addWidget(self.sidebar)
+        browse = QSplitter(Qt.Orientation.Vertical)
+        browse.setChildrenCollapsible(False)
+        browse.addWidget(self.sidebar)
+        browse.addWidget(self.artwork)
+        browse.setStretchFactor(0, 1)
+        browse.setSizes([300, 220])
+        left_layout.addWidget(browse)
         splitter = QSplitter()
         splitter.addWidget(left)
         splitter.addWidget(self.table)
@@ -732,4 +797,7 @@ def _extra_style(skin: Skin) -> str:
         border: 1px solid {skin.border}; padding: 2px 10px;
     }}
     QPushButton:hover {{ color: {skin.accent}; }}
+    QLabel#artwork {{
+        background: {skin.panel}; color: {skin.text_dim}; border: 1px solid {skin.border};
+    }}
     """

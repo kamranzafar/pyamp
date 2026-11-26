@@ -47,14 +47,14 @@ WIN_PLUGINS = "PySide6/plugins"
         f"{MAC_QT}/QtVirtualKeyboard.framework/Versions/A/QtVirtualKeyboard",
         f"{MAC_QT}/QtOpenGL.framework",
         f"{MAC_PLUGINS}/platforminputcontexts/libqtvirtualkeyboardplugin.dylib",
-        f"{MAC_PLUGINS}/imageformats/libqjpeg.dylib",
         f"{MAC_PLUGINS}/imageformats/libqtiff.dylib",
+        f"{MAC_PLUGINS}/imageformats/libqgif.dylib",
         f"{MAC_PLUGINS}/generic/libqtuiotouchplugin.dylib",
         f"{MAC_PLUGINS}/platforms/libqminimal.dylib",
         "PySide6\\Qt6Quick.dll",
         "PySide6\\Qt6QmlModels.dll",
         f"{WIN_PLUGINS}\\platforminputcontexts\\qtvirtualkeyboardplugin.dll".replace("/", "\\"),
-        f"{WIN_PLUGINS}/imageformats/qwebp.dll",
+        f"{WIN_PLUGINS}/imageformats/qico.dll",
         "PySide6\\opengl32sw.dll",
     ],
 )
@@ -83,6 +83,8 @@ def test_leaves_out_what_pyamp_never_uses(dest: str) -> None:
         "PySide6\\Qt6Multimedia.dll",
         f"{WIN_PLUGINS}/platforms/qwindows.dll",
         f"{WIN_PLUGINS}/imageformats/qsvg.dll",
+        f"{MAC_PLUGINS}/imageformats/libqjpeg.dylib",  # album art
+        f"{WIN_PLUGINS}/imageformats/qwebp.dll",
         "PySide6/QtQuick.abi3.so",  # Python bindings nothing imports: harmless, small
         "libmpv/libmpv.2.dylib",
         "numpy/_core/_multiarray_umath.cpython-313-darwin.so",

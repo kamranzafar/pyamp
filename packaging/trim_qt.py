@@ -6,7 +6,8 @@ Used by the macOS and Windows specs, on the Analysis's ``binaries`` and ``datas`
 
 * Qt's on-screen (virtual) keyboard input plugin, and what only it needs: Qt Quick, QML
   and Qt OpenGL (about 14 MB). PyAmp is a Widgets app.
-* Image format plugins other than SVG (PyAmp's icons are SVG; PNG is built into Qt).
+* Image format plugins other than SVG, JPEG and WebP (PyAmp's icons are SVG; album art
+  is JPEG, PNG or WebP, and PNG is built into Qt).
 * The touch-input ("generic") plugin and the "minimal" platform plugin. "offscreen" stays:
   the self-test and CI run the app without a screen.
 * Windows: ``opengl32sw.dll`` (~20 MB), Qt's software OpenGL used only when an app asks
@@ -40,7 +41,7 @@ _UNUSED = re.compile(
             r"/plugins/platforminputcontexts/",
             r"/plugins/generic/",
             r"/plugins/platforms/(lib)?qminimal\.",
-            r"/plugins/imageformats/(lib)?q(gif|icns|ico|jpeg|macheif|macjp2|tga|tiff|wbmp|webp)\.",
+            r"/plugins/imageformats/(lib)?q(gif|icns|ico|macheif|macjp2|tga|tiff|wbmp)\.",
             r"/opengl32sw\.dll$",
         ]
     )

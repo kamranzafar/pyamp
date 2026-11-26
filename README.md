@@ -126,6 +126,10 @@ starts, and when you click **Rescan**. Only files that changed are read again.
 - **Playlists**, in the sidebar, lists your saved playlists. Pick one to see its tracks
   (with the library's tags; no music files are read); right-click it to open it in the
   player, rename it or delete it. Changes made in the player show here once saved.
+- Under the sidebar is the artwork of the track you've picked (or of the first one
+  listed): the picture in the file's tags, else a `cover`, `folder`, `front` or `album`
+  image (`.jpg`, `.png` or `.webp`) in its folder; a server's cover for its songs. Drag
+  the line above it to make it bigger.
 - Right-click a folder under **Folders** to remove it from the library. The files stay
   where they are: PyAmp only reads your music files, and never retags, renames or
   moves them.
@@ -261,7 +265,7 @@ username, if you've added two accounts on one server). Right-click a server's na
 playlist can hold songs from several servers: each plays with its own server's login.
 
 Songs are added with their tags and length, so they show like local files and can be
-seeked. The password is kept in the system keychain (macOS Keychain, Windows Credential
+seeked, and the library shows their album covers. The password is kept in the system keychain (macOS Keychain, Windows Credential
 Manager or Secret Service on Linux), never in a file. Untick **Remember the password**
 (or have no keychain) and PyAmp keeps it only until it quits, doesn't touch the
 keychain, and asks again next session: the server is listed but empty until you
@@ -529,7 +533,9 @@ A plugin that brings music from somewhere else (a server, a service) adds a
 window shows it under This Computer. A source lists nodes to browse (`roots()`,
 `children(node)`) and their tracks (`tracks(node, search)`); it keeps its own index,
 and is called on a worker thread, so it may block on the network. Raise `SourceError`
-with a message for the user when something goes wrong. `actions(node)` gives commands
+with a message for the user when something goes wrong. `artwork(track)` gives a
+track's picture as image bytes, or None (it may use `Track.artwork`, which the source
+fills in with e.g. a cover id, to find it). `actions(node)` gives commands
 for a node's right-click menu, and `actions(None)` those for the source's own name
 (the Subsonic plugin's Edit Server… and Remove Server); add one source per server, and
 `ctx.sources.replace(old, new)` swaps one in its place.

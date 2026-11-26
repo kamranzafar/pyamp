@@ -96,6 +96,12 @@ class MediaSource(Protocol):
         name in the sidebar); often none."""
         ...
 
+    def artwork(self, track: Track) -> bytes | None:
+        """The picture of one of this source's tracks (e.g. its album's cover), as an
+        image file's bytes; None if there's none, or it can't be had (not worth telling
+        the user). Called on a worker thread."""
+        ...
+
 
 def matches(track: Track, search: str) -> bool:
     """Whether every word of ``search`` is in the track's title, artist, album, album

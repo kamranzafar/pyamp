@@ -30,7 +30,7 @@ import pytest
 
 from pyamp.core.models import StreamUrl, Track
 from pyamp.plugins.subsonic.client import Item, SubsonicClient, SubsonicError
-from tests.subsonic_server import PASSWORD, USERNAME, SubsonicServer
+from tests.subsonic_server import COVERS, PASSWORD, USERNAME, SubsonicServer
 
 
 @pytest.fixture
@@ -96,8 +96,23 @@ def test_an_albums_songs_are_streams_with_tags_and_length(client: SubsonicClient
         track_number=1,
         disc_number=1,
         duration_ms=330_000,
+        artwork="al-al1",
     )
     assert (angel.track_number, angel.year, angel.genre) == (2, 0, "")  # untagged: unknown
+    assert angel.artwork == ""  # no cover
+
+
+def test_covers_are_fetched_with_a_login(client: SubsonicClient, server: SubsonicServer) -> None:
+    assert client.cover_art("al-al1") == COVERS["al-al1"]
+    method, query = server.requests[-1]
+    assert (method, query["id"], query["size"], query["u"]) == (
+        "getCoverArt",
+        "al-al1",
+        "600",
+        USERNAME,
+    )
+    with pytest.raises(SubsonicError, match="no picture"):
+        client.cover_art("missing")  # the server says so in JSON
 
 
 def test_search_finds_songs_and_their_albums(client: SubsonicClient) -> None:

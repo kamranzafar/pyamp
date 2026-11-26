@@ -40,10 +40,13 @@ PASSWORD = "s3cret"
 
 SONGS = [
     {"id": "s1", "title": "Teardrop", "artist": "Massive Attack", "album": "Mezzanine",
-     "duration": 330, "track": 1, "discNumber": 1, "year": 1998, "genre": "Trip Hop"},
+     "duration": 330, "track": 1, "discNumber": 1, "year": 1998, "genre": "Trip Hop",
+     "coverArt": "al-al1"},
     {"id": "s2", "title": "Angel", "artist": "Massive Attack", "album": "Mezzanine",
      "duration": 379, "track": 2, "discNumber": 1},
 ]  # fmt: skip
+#: The covers the server has, by id.
+COVERS = {"al-al1": b"\xff\xd8mezzanine-cover"}
 ALBUM = {"id": "al1", "name": "Mezzanine", "artist": "Massive Attack", "year": 1998}
 ARTIST = {"id": "ar1", "name": "Massive Attack", "albumCount": 1}
 
@@ -71,6 +74,11 @@ class SubsonicServer:
                                 "message": "Wrong username or password"}})  # fmt: skip
                 elif method == "stream":
                     self._send(audio, "audio/wav")
+                elif method == "getCoverArt" and query.get("id") in COVERS:
+                    self._send(COVERS[query["id"]], "image/jpeg")
+                elif method == "getCoverArt":
+                    self._json({"status": "failed", "error": {"code": 70,
+                                "message": "Artwork not found"}})  # fmt: skip
                 else:
                     self._json({"status": "ok", **server.reply(method, query)})
 

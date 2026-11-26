@@ -30,7 +30,7 @@ from PyInstaller.utils.win32.versioninfo import (
 import pyamp
 
 sys.path.insert(0, str(Path(SPECPATH).resolve().parent))  # noqa: F821  (packaging/)
-from trim_qt import without_unused_qt  # noqa: E402
+from trim_qt import UNUSED_MODULES, without_unused_qt  # noqa: E402
 
 ROOT = Path(SPECPATH).resolve().parents[1]  # noqa: F821  (SPECPATH is set by PyInstaller)
 LIBMPV = Path(os.environ["PYAMP_BUNDLE_LIBMPV"])
@@ -59,7 +59,7 @@ a = Analysis(  # noqa: F821
         "PySide6.QtMultimedia",
         "mpv",
     ],
-    excludes=["jeepney", "tkinter", "pytest", "MediaPlayer", "objc"],
+    excludes=[*UNUSED_MODULES, "MediaPlayer", "objc"],
     noarchive=False,
 )
 # Leave out the parts of Qt PyAmp never uses (see packaging/trim_qt.py).

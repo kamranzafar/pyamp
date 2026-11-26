@@ -109,3 +109,14 @@ def test_drops_links_to_what_it_leaves_out() -> None:
     core = f"{MAC_QT}/QtCore.framework/Versions/A/QtCore"
     toc = [("QtQuick", quick, "SYMLINK"), ("QtCore", core, "SYMLINK")]
     assert trim_qt.without_unused_qt(toc) == toc[1:]
+
+
+def test_excluded_modules_include_numpy_random() -> None:
+    assert "numpy.random" in trim_qt.UNUSED_MODULES
+
+
+@pytest.mark.parametrize("module", ["numpy", "numpy.fft", "mutagen", "keyring", "PySide6"])
+def test_does_not_exclude_what_pyamp_imports(module: str) -> None:
+    assert not any(
+        module == unused or module.startswith(unused + ".") for unused in trim_qt.UNUSED_MODULES
+    )

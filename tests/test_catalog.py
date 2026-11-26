@@ -357,7 +357,7 @@ def test_a_file_is_added_at_its_modified_time_and_keeps_it(catalog: Catalog) -> 
     song = track("/music/a.mp3", "Old Title")
     catalog.put([(song, FileStamp(mtime_ns=10, size=1))])
     catalog.put([(track("/music/a.mp3", "New Title"), FileStamp(mtime_ns=99, size=1))])
-    assert _added(catalog) == {"/music/a.mp3": 10}
+    assert _added(catalog) == {str(Path("/music/a.mp3")): 10}  # as stored on this system
     assert catalog.stamps() == {Path("/music/a.mp3"): FileStamp(99, 1)}
     assert [t.title for t in catalog.tracks()] == ["New Title"]
 

@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 
 from pyamp.core.models import Track
-from pyamp.library.catalog import Catalog, FileStamp
+from pyamp.library.catalog import Catalog, FileStamp, normalise
 from pyamp.library.saved_playlists import PlaylistNameError
 from pyamp.library.smart_playlists import (
     FORMAT_VERSION,
@@ -256,7 +256,7 @@ def library(tmp_path: Path) -> Iterator[Catalog]:
     catalog.put(
         (
             Track(
-                Path(path),
+                normalise(Path(path)),  # absolute, as the scanner gives (C:\m\... on Windows)
                 title,
                 artist=title.split()[0],
                 genre=genre,

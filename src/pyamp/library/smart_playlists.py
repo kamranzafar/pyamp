@@ -36,7 +36,7 @@ from pathlib import Path
 
 import platformdirs
 
-from pyamp import APP_NAME
+from pyamp import APP_NAME, files
 from pyamp.library.saved_playlists import MAX_NAME_LENGTH, PlaylistNameError
 
 log = logging.getLogger(__name__)
@@ -329,7 +329,7 @@ class SmartPlaylists:
 
     def _read(self) -> list[dict[str, object]]:
         try:
-            raw = json.loads(self.file.read_text(encoding="utf-8"))
+            raw = json.loads(files.read_text(self.file))
         except FileNotFoundError:
             return []
         except (OSError, ValueError) as exc:
@@ -343,10 +343,7 @@ class SmartPlaylists:
 
     def _write(self, entries: list[dict[str, object]]) -> None:
         payload = {"version": FORMAT_VERSION, "playlists": entries}
-        self.file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.file.with_name(f".{self.file.name}.tmp")
-        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.file)  # write-then-rename: never half written
+        files.write_text(self.file, json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 def _name(entry: Mapping[str, object]) -> str:

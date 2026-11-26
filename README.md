@@ -511,7 +511,8 @@ my-scrobbler = "my_package:MyScrobbler"
 
 `ctx.ui()` gives plugins with windows a place in the menu bar
 (`add_menu_action("&Tools", "My Window…", show)` adds a menu before Help; items for
-`"&Library"` join PyAmp's own Library menu) and a parent for their windows, and
+`"&Library"` join PyAmp's own Library menu; `add_menu_separator(menu)` sets a plugin's
+items apart from what's above them) and a parent for their windows, and
 `ctx.player.add_location_resolver()` lets one rewrite what the player loads (the Subsonic
 plugin adds its servers' logins there). A resolver returns locations that aren't its own
 unchanged, so several plugins can each add one; the call returns a function that

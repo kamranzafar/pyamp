@@ -318,6 +318,14 @@ class MainWindow(QMainWindow):
             self._plugin_menus[menu] = target
         self._add_menu_action(target, text, triggered, shortcut)
 
+    def add_menu_separator(self, menu: str) -> None:
+        target = self._plugin_menus.get(menu)
+        if target is None:
+            return  # a menu not made yet: its first item needs nothing above it
+        actions = target.actions()
+        if actions and not actions[-1].isSeparator():
+            target.addSeparator()
+
     def dialog_parent(self) -> QWidget:
         return self
 

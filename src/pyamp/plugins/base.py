@@ -44,6 +44,10 @@ class PluginUi(Protocol):
     ) -> None:
         """Add a menu item, in the menu titled ``menu`` (created before Help if needed)."""
 
+    def add_menu_separator(self, menu: str) -> None:
+        """Separate what's added next to ``menu`` from what's there, e.g. one plugin's
+        items from another's (never two separators in a row, nor one at the top)."""
+
     def dialog_parent(self) -> object:
         """The widget to parent a plugin's windows and dialogs to (the main window)."""
 

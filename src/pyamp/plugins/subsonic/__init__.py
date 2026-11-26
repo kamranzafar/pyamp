@@ -75,6 +75,7 @@ class SubsonicPlugin:
             self._show(account, client)  # without a password: shown, to sign in to
         ui = context.ui()
         if ui is not None:
+            ui.add_menu_separator(MENU)
             ui.add_menu_action(MENU, "Add Subsonic &Server…", self.add_server)
 
     def deactivate(self) -> None:

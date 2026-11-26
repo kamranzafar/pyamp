@@ -194,3 +194,21 @@ def test_plugins_add_to_the_library_menu(app: Application) -> None:  # noqa: F81
     library = next(a.menu() for a in ui.menuBar().actions() if a.text() == "&Library")
     assert isinstance(library, QMenu)
     assert library.actions()[-1].text() == "My Server…"
+
+
+def test_plugins_separate_their_menu_items(app: Application) -> None:  # noqa: F811
+    ui = app.plugins._context.ui()
+    assert isinstance(ui, MainWindow)
+    ui.add_menu_separator("&Tools")  # no such menu yet: nothing to separate from
+    ui.add_menu_action("&Tools", "Browse…", lambda: None)
+    ui.add_menu_separator("&Tools")
+    ui.add_menu_separator("&Tools")  # never two in a row
+    ui.add_menu_action("&Tools", "Server…", lambda: None)
+    tools = next(a.menu() for a in ui.menuBar().actions() if a.text() == "&Tools")
+    assert isinstance(tools, QMenu)
+    assert [a.text() or "—" for a in tools.actions()] == ["Browse…", "—", "Server…"]
+    library = next(a.menu() for a in ui.menuBar().actions() if a.text() == "&Library")
+    assert isinstance(library, QMenu)
+    before = len(library.actions())
+    ui.add_menu_separator("&Library")  # PyAmp's own items already end with one
+    assert len(library.actions()) == before

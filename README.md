@@ -265,8 +265,12 @@ seeked. The password is kept in the system keychain (macOS Keychain, Windows Cre
 Manager or Secret Service on Linux), never in a file. Untick **Remember the password**
 (or have no keychain) and PyAmp keeps it only until it quits, doesn't touch the
 keychain, and asks again next session: the server is listed but empty until you
-right-click it and choose **Sign In…**. The choice is remembered for each server. Saved playlists keep the server's songs without your login (PyAmp
-adds it as each one plays), so they're safe to share or back up.
+right-click it and choose **Sign In…**. The choice is remembered for each server.
+**Forget Password** (right-click a server whose password is saved) deletes it from the
+keychain and signs out; sign in again to use the server, ticking Remember to save the
+password again.
+Saved playlists keep the server's songs without your login (PyAmp adds it as each one
+plays), so they're safe to share or back up.
 
 ### Media keys and system controls
 

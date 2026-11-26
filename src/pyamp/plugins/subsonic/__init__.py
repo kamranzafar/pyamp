@@ -21,7 +21,8 @@
 (Navidrome, Airsonic, Gonic, ...) in PyAmp's library window, each one of its sources.
 
 Add as many servers as you like (Library → Add Subsonic Server…); each is edited, signed
-in to or removed from the right-click menu on its name in the library.
+in to, has its saved password forgotten, or is removed from the right-click menu on its
+name in the library.
 
 Songs are added to playlists as streams with their tags and length. Their URLs carry no
 login, so saved playlists hold no secrets; the plugin adds a fresh login, from the
@@ -96,6 +97,13 @@ class SubsonicPlugin:
         connected."""
         return self._ask(account)
 
+    def forget_password(self, account: Account) -> None:
+        """Take ``account``'s password out of the keychain, stop remembering it, and sign
+        out: the server stays, to sign in to again."""
+        self._accounts.forget_password(account)
+        self._accounts.put(account, remember_password=False)
+        self._show(account, None)
+
     def remove_server(self, account: Account) -> None:
         # The keychain is only touched where a password is kept.
         if self._accounts.remembers_password(account):
@@ -141,9 +149,11 @@ class SubsonicPlugin:
             NodeAction(
                 "Sign &In…" if client is None else "&Edit Server…",
                 lambda: self.edit_server(account),
-            ),
-            NodeAction("&Remove Server", lambda: self.remove_server(account)),
+            )
         ]
+        if client is not None and self._accounts.remembers_password(account):
+            commands.append(NodeAction("&Forget Password", lambda: self.forget_password(account)))
+        commands.append(NodeAction("&Remove Server", lambda: self.remove_server(account)))
         source = SubsonicSource(client, "", commands)
         old: SubsonicSource | None = None
         servers: dict[Account, SubsonicSource] = {}

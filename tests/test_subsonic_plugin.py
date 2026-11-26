@@ -417,8 +417,12 @@ def test_a_server_is_removed_from_its_menu_in_the_library(
     settle(window)
     menu = window.sidebar_menu(window.sidebar_item(2))  # right-click on the server's name
     assert menu is not None
-    assert [a.text() for a in menu.actions()] == ["&Edit Server…", "&Remove Server"]
-    menu.actions()[1].trigger()
+    assert [a.text() for a in menu.actions()] == [
+        "&Edit Server…",
+        "&Forget Password",
+        "&Remove Server",
+    ]
+    menu.actions()[2].trigger()
     settle(window)
     assert accounts.accounts() == [Account(second_server.url, USERNAME)]
     assert (KEYRING_SERVICE, first.key) not in keychain.passwords
@@ -430,6 +434,52 @@ def test_a_server_is_removed_from_its_menu_in_the_library(
     backend = app.player._backend
     assert isinstance(backend, FakeBackend)
     assert backend.loaded[-1] == song.location  # its login isn't added any more
+
+
+def test_forget_a_servers_password(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+    second_server: SubsonicServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account = remember(accounts, keychain, server)
+    other = remember(accounts, keychain, second_server)
+    plugin = start(app, accounts)
+    window = app.window.show_library()
+    settle(window)
+    menu = window.sidebar_menu(window.sidebar_item(2))
+    assert menu is not None
+    forget = next(a for a in menu.actions() if a.text() == "&Forget Password")
+    forget.trigger()
+    settle(window)
+    assert (KEYRING_SERVICE, account.key) not in keychain.passwords  # out of the keychain
+    assert (KEYRING_SERVICE, other.key) in keychain.passwords  # the other server's kept
+    assert not accounts.remembers_password(account)
+    assert accounts.accounts() == [account, other]  # the server stays, in its place
+    signed_out, signed_in = plugin.sources
+    assert signed_out.client is None  # and is signed out
+    assert list(app.sources)[2:] == [signed_out, signed_in]
+    assert [a.text for a in signed_out.actions(None)] == ["Sign &In…", "&Remove Server"]
+    reads = keychain.reads
+    answer_dialog(monkeypatch, server.url, PASSWORD, remember=False)
+    assert plugin.edit_server(account)  # Sign In…, still not remembering it
+    assert keychain.reads == reads and (KEYRING_SERVICE, account.key) not in keychain.passwords
+    assert [a.text for a in plugin.sources[0].actions(None)] == ["&Edit Server…", "&Remove Server"]
+
+
+def test_nothing_to_forget_without_a_saved_password(
+    app: Application,  # noqa: F811
+    accounts: AccountStore,
+    keychain: MemoryKeyring,
+    server: SubsonicServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = start(app, accounts)
+    answer_dialog(monkeypatch, server.url, PASSWORD, remember=False)
+    assert plugin.add_server()
+    assert [a.text for a in plugin.sources[0].actions(None)] == ["&Edit Server…", "&Remove Server"]
 
 
 def test_a_server_without_its_password_is_shown_to_sign_in_to(

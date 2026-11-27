@@ -201,6 +201,11 @@ class AudioBackend(ABC):
         through the system's default output if None, following it when it changes."""
         return None
 
+    def set_audio_frames_wanted(self, wanted: bool) -> None:
+        """Whether anything uses :meth:`BackendListener.on_audio_frame` (e.g. not while the
+        visualiser is hidden or off): a backend may skip preparing the frames meanwhile."""
+        return None
+
     def buffered_range(self) -> tuple[float, float] | None:
         """The stretch of the playing stream that's buffered, in seconds on the same clock as
         the playback position (e.g. the next few seconds of live radio, or all of a song

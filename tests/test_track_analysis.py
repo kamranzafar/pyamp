@@ -50,6 +50,7 @@ from pyamp.core.events import (
     TrackChanged,
 )
 from pyamp.core.models import PlaybackState, StreamUrl, Track
+from pyamp.dsp.waveform import WAVE_POINTS
 from pyamp.library.saved_playlists import SavedPlaylists
 from tests.conftest import FakeBackend
 
@@ -87,7 +88,7 @@ def band_of(hz: float) -> int:
 
 def test_timeline_lookup_by_time() -> None:
     timeline = LevelTimeline(Path("/m/a.mp3"))
-    timeline.rows.extend(np.full(BANDS, i, dtype=np.float32) for i in range(FPS * 2))
+    timeline.put_block(0, np.stack([np.full(BANDS, i, dtype=np.float32) for i in range(FPS * 2)]))
     assert timeline.seconds == 2.0
     row = timeline.row_at(1.5)
     assert row is not None
@@ -126,7 +127,7 @@ class WavDecoder:
                 pcm = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
         except (wave.Error, EOFError, OSError):
             return False
-        (pcm.astype(np.float32) / 32768).tofile(target)
+        target.write_bytes(pcm.astype(np.int16).tobytes())  # native byte order, as mpv
         self.decoded.append(source)
         return True
 
@@ -143,7 +144,7 @@ def test_analysis_finds_the_tones_at_the_right_times(
 ) -> None:
     timeline = analyser.analyse(write_tones(tmp_path / "tones.wav", (100, 1000, 8000)))
     wait_until(timeline.finished.is_set)
-    assert abs(len(timeline.rows) - 3 * FPS) <= 2
+    assert abs(timeline.row_count - 3 * FPS) <= 2
     for seconds, hz in ((0.5, 100), (1.5, 1000), (2.5, 8000)):
         row = timeline.row_at(seconds)
         assert row is not None
@@ -167,12 +168,12 @@ class StallingWavDecoder(WavDecoder):
             first = np.frombuffer(w.readframes(sample_rate), dtype="<i2")
             rest = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
         with target.open("wb") as out:
-            out.write((first.astype(np.float32) / 32768).tobytes())
+            out.write(first.astype(np.int16).tobytes())
             out.flush()
             if rest.size:
                 wait_for(cancelled)
                 if not cancelled():
-                    out.write((rest.astype(np.float32) / 32768).tobytes())
+                    out.write(rest.astype(np.int16).tobytes())
         self.decoded.append(source)
         return True
 
@@ -199,8 +200,8 @@ def test_analysing_another_file_cancels_the_first(
     second = analyser.analyse(write_tones(tmp_path / "b.wav", (440,), seconds=1))
     assert first.cancelled.is_set()
     wait_until(lambda: first.finished.is_set() and second.finished.is_set())
-    assert len(first.rows) < 30 * FPS
-    assert abs(len(second.rows) - FPS) <= 2
+    assert first.row_count < 30 * FPS
+    assert abs(second.row_count - FPS) <= 2
     assert analyser.analyse(tmp_path / "b.wav") is second  # reused, not redone
 
 
@@ -209,7 +210,7 @@ def test_unreadable_file_finishes_empty(analyser: TrackAnalyser, tmp_path: Path)
     broken.write_bytes(b"not audio" * 100)
     timeline = analyser.analyse(broken)
     wait_until(timeline.finished.is_set)
-    assert timeline.rows == []
+    assert timeline.row_count == 0
 
 
 def test_scratch_files_are_cleaned_up(analyser: TrackAnalyser, tmp_path: Path) -> None:
@@ -238,7 +239,7 @@ def test_without_libmpv_there_is_simply_no_analysis(
     timeline = analyser.analyse(write_tones(tmp_path / "x.wav", (440,)))
     wait_until(timeline.finished.is_set)
     analyser.shutdown()
-    assert timeline.rows == []
+    assert timeline.row_count == 0
 
 
 # -- Publishing while playing --------------------------------------------------------------- #
@@ -269,7 +270,9 @@ class Clock:
 def ramp() -> LevelTimeline:
     """Row i has every band at level i/100, for 3 seconds."""
     timeline = LevelTimeline(Path("/m/song.mp3"))
-    timeline.rows.extend(np.full(BANDS, i / 100, dtype=np.float32) for i in range(3 * FPS))
+    timeline.put_block(
+        0, np.stack([np.full(BANDS, i / 100, dtype=np.float32) for i in range(3 * FPS)])
+    )
     return timeline
 
 
@@ -612,13 +615,14 @@ def test_live_levels_keep_only_the_last_minutes() -> None:
     row = np.zeros(BANDS, dtype=np.float32)
     for n in range(10 * FPS):  # ten seconds of radio
         timeline.put(n, row)
-    assert len(timeline.rows) <= 2 * FPS
-    assert timeline.row_at(9.9) is row
+    assert timeline.row_count <= 2 * FPS
+    assert timeline.row_at(9.9) is not None
     assert timeline.row_at(1.0) is None  # long gone
     timeline.put(5, row)  # a late row for a stretch that's gone is ignored
     gap = LevelTimeline()
     gap.put(3, row)
-    assert gap.rows[:3] == [None, None, None] and gap.row_at(3 / FPS) is row
+    assert all(gap.row_at((n + 0.5) / FPS) is None for n in range(3))
+    assert gap.row_at(3.5 / FPS) is not None
 
 
 # -- Songs from a server ------------------------------------------------------------------- #
@@ -758,3 +762,116 @@ def test_app_adds_analysis_only_when_the_backend_has_no_audio(
     finally:
         application.loader.shutdown()
         application.window.close()
+
+
+@pytest.mark.parametrize(("style", "active"), [("off", False), ("bars", True)])
+def test_the_visualiser_left_off_analyses_nothing(
+    qt_app: QCoreApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    style: str,
+    active: bool,
+) -> None:
+    """The window only reports changes; starting with the visualiser off is one too."""
+    monkeypatch.setattr(registry, "_registered", {"no-frames": NoFramesBackend})
+    monkeypatch.setattr(Settings, "backend", "no-frames")
+    store = SettingsStore(tmp_path / "cfg")
+    store.save(Settings(visualiser_style=style, backend="no-frames"))
+    args = argparse.Namespace(
+        paths=[], backend=None, no_plugins=True, log_level="WARNING", libmpv=None
+    )
+    application = Application(args, store, SavedPlaylists(tmp_path / "pl"))
+    try:
+        application.window.show()
+        QCoreApplication.processEvents()
+        analysed = application.analysed_spectrum
+        assert analysed is not None
+        assert analysed._active is active
+        assert application.spectrum._active is active
+        application.window.showMinimized()  # hidden either way
+        wait_until(lambda: not application.window.seen)
+        assert analysed._active is False
+        application.shutdown()
+    finally:
+        application.loader.shutdown()
+        application.window.close()
+
+
+# -- Storage, pacing and tidying --------------------------------------------------------- #
+
+
+def test_rows_are_stored_across_chunks_with_gaps(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(track_analysis, "CHUNK_ROWS", 4)
+    timeline = LevelTimeline(Path("/m/a.mp3"))
+    levels = np.stack([np.full(BANDS, n, dtype=np.float32) for n in range(9)])
+    waves = np.stack([np.full(WAVE_POINTS, n / 10, np.float32) for n in range(9)])
+    timeline.put_block(2, levels, waves)  # rows 2..10: across three chunks
+    timeline.put(14, np.full(BANDS, 99, dtype=np.float32))  # row 14 after a gap, no wave
+    assert timeline.row_count == 15 and timeline.seconds == 15 / FPS
+    for n in (0, 1, 11, 12, 13, 15):
+        assert timeline.row_at((n + 0.5) / FPS) is None, n
+    for n in range(2, 11):
+        row, wave = timeline.row_at((n + 0.5) / FPS), timeline.wave_at((n + 0.5) / FPS)
+        assert row is not None and row[0] == n - 2
+        assert wave is not None and wave[0] == pytest.approx((n - 2) / 10, abs=1e-3)
+    assert timeline.wave_at(14.5 / FPS) is None
+
+
+def test_stale_scratch_folders_are_removed(tmp_path: Path) -> None:
+    import os  # noqa: PLC0415
+
+    mine, gone = os.getpid(), 999_999
+    folders = {
+        name: tmp_path / name
+        for name in (
+            f"pyamp-analysis-{gone}-abc",  # its PyAmp has gone
+            f"pyamp-streams-{gone}-def",
+            f"pyamp-analysis-{mine}-ghi",  # this PyAmp's
+            "pyamp-analysis-oldstyle",  # no process id: by age
+            "pyamp-streams-recent",
+            "someone-elses",
+        )
+    }
+    for path in folders.values():
+        path.mkdir()
+    day_ago = time.time() - track_analysis.STALE_AFTER_S - 60
+    os.utime(folders["pyamp-analysis-oldstyle"], (day_ago, day_ago))
+    track_analysis.remove_stale_scratch(tmp_path, running=lambda pid: pid == mine)
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+        [f"pyamp-analysis-{mine}-ghi", "pyamp-streams-recent", "someone-elses"]
+    )
+
+
+needs_pipes = pytest.mark.skipif(
+    not hasattr(__import__("os"), "mkfifo"), reason="named pipes only on POSIX"
+)
+
+
+@needs_pipes
+def test_after_its_start_a_file_is_analysed_at_a_steady_pace(
+    analyser: TrackAnalyser, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(track_analysis, "UNPACED_S", 0.5)
+    monkeypatch.setattr(track_analysis, "MAX_SPEED", 4.0)
+    started = time.monotonic()
+    timeline = analyser.analyse(write_tones(tmp_path / "paced.wav", (440,), seconds=3))
+    wait_until(timeline.finished.is_set)
+    assert time.monotonic() - started > 0.4  # (3 s - 0.5 s) at 4x: about 0.6 s
+    assert abs(timeline.row_count - 3 * FPS) <= 2
+
+
+@needs_pipes
+def test_a_slow_analysis_is_cancelled_without_hanging(
+    analyser: TrackAnalyser, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The decoder is blocked writing to the pipe while the analysis waits: cancelling
+    must still let it finish (the pipe is drained), not leave it stuck."""
+    monkeypatch.setattr(track_analysis, "UNPACED_S", 0.0)
+    monkeypatch.setattr(track_analysis, "MAX_SPEED", 1.0)
+    first = analyser.analyse(write_tones(tmp_path / "long.wav", (440,), seconds=30))
+    wait_until(lambda: first.row_count > 0)
+    second = analyser.analyse(write_tones(tmp_path / "next.wav", (440,), seconds=1))
+    wait_until(lambda: first.finished.is_set() and second.finished.is_set(), timeout=10)
+    assert first.row_count < 30 * FPS
+    assert second.row_count > 0
+    assert list(analyser._scratch.iterdir()) == []

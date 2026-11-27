@@ -21,14 +21,42 @@
 
 from __future__ import annotations
 
+import io
+import urllib.error
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from email.message import Message
+from typing import Any
 
 from pyamp import APP_NAME, __version__
 
 #: Give up on a remote playlist after this long, or when it's this big (it should be tiny).
 TIMEOUT_S = 10.0
 MAX_BYTES = 1_000_000
+#: How much of an HTTP error's body is kept (e.g. a SOAP fault, a JSON error).
+ERROR_BODY_BYTES = 64 * 1024
+
+
+@contextmanager
+def open_url(request: urllib.request.Request | str, timeout: float) -> Iterator[Any]:
+    """``urllib.request.urlopen``, except that an HTTP error's connection is closed at
+    once: urllib leaves its socket open until the error is garbage-collected. The error
+    raised in its place still has the start of its body to read."""
+    try:
+        response = urllib.request.urlopen(request, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read(ERROR_BODY_BYTES)
+        except OSError:
+            body = b""
+        finally:
+            exc.close()
+        raise urllib.error.HTTPError(
+            exc.url, exc.code, exc.msg, exc.hdrs, io.BytesIO(body)
+        ) from None
+    with response:
+        yield response
 
 
 def fetch_text(url: str, *, timeout: float = TIMEOUT_S, max_bytes: int = MAX_BYTES) -> str:
@@ -36,7 +64,7 @@ def fetch_text(url: str, *, timeout: float = TIMEOUT_S, max_bytes: int = MAX_BYT
     if not url.lower().startswith(("http://", "https://")):
         raise ValueError(f"not an http(s) URL: {url!r}")
     request = urllib.request.Request(url, headers={"User-Agent": f"{APP_NAME}/{__version__}"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with open_url(request, timeout) as response:
         data = response.read(max_bytes + 1)
         headers: Message = response.headers
     if len(data) > max_bytes:

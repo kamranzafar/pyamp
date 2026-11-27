@@ -21,7 +21,9 @@
 from __future__ import annotations
 
 import http.server
+import os
 import threading
+import urllib.error
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -30,7 +32,7 @@ import pytest
 from pyamp.core.models import StreamUrl, Track
 from pyamp.library.loader import TrackLoader
 from pyamp.library.playlist_formats import PlaylistFormatRegistry
-from pyamp.library.remote import fetch_text
+from pyamp.library.remote import fetch_text, open_url
 
 
 class RecordingReader:
@@ -214,6 +216,24 @@ def test_local_playlists_keep_their_stations(
     assert [t.location for t in tracks] == [song, StreamUrl("https://radio.example/live")]
     assert tracks[1].title == "Radio"
     assert reader.read_paths == [song]
+
+
+def open_fds() -> int:
+    return len(os.listdir("/dev/fd"))
+
+
+@pytest.mark.skipif(not os.path.isdir("/dev/fd"), reason="counts open files via /dev/fd")
+def test_an_http_error_closes_its_connection_and_keeps_its_body(server: Server) -> None:
+    """urllib leaves an HTTP error's socket open until it's garbage-collected."""
+    server.files["/warm"] = (b"x", "text/plain")
+    with open_url(f"{server.url}/warm", 5) as response:  # the server's threads are up
+        response.read()
+    before = open_fds()
+    with pytest.raises(urllib.error.HTTPError) as error, open_url(f"{server.url}/gone", 5):
+        pass
+    assert open_fds() == before  # while the error is still around
+    assert error.value.code == 404
+    assert b"404" in error.value.read()  # e.g. a SOAP fault's details
 
 
 def test_fetch_text_limits_size(server: Server) -> None:

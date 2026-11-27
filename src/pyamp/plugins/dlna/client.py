@@ -42,6 +42,7 @@ from xml.sax.saxutils import escape
 from pyamp import APP_NAME, __version__
 from pyamp.core.models import StreamUrl, Track
 from pyamp.library.artwork import MAX_ARTWORK_BYTES
+from pyamp.library.remote import open_url
 
 TIMEOUT_S = 10.0
 MAX_BYTES = 20_000_000
@@ -182,7 +183,7 @@ class ContentDirectory:
         """The picture at ``url`` (a song's album art address), as image bytes."""
         request = urllib.request.Request(_web(url))
         request.add_header("User-Agent", f"{APP_NAME}/{__version__} UPnP/1.0")
-        with urllib.request.urlopen(request, timeout=self._timeout) as response:
+        with open_url(request, self._timeout) as response:
             image = response.headers.get_content_type().startswith("image/")
             data: bytes = response.read(MAX_ARTWORK_BYTES + 1)
         if not image:
@@ -297,7 +298,7 @@ def _mime(protocol_info: str | None) -> str:
 
 def _fetch(request: urllib.request.Request, timeout: float) -> bytes:
     request.add_header("User-Agent", f"{APP_NAME}/{__version__} UPnP/1.0")
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with open_url(request, timeout) as response:
         data: bytes = response.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise DlnaError("The server's reply was too large")

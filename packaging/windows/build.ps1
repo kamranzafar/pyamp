@@ -4,14 +4,17 @@
 # Build PyAmp for Windows (x86_64) with libmpv bundled: the app folder, a portable zip
 # and an installer (Inno Setup).
 #
-#   pwsh packaging/windows/build.ps1 [-Out dist] [-Libmpv path\to\libmpv-2.dll]
+#   pwsh packaging/windows/build.ps1 [-Out dist] [-Libmpv path\to\libmpv-2.dll] [-AppOnly]
+#
+# -AppOnly builds just the app folder (dist\PyAmp), without the zip and the installer
+# (quicker, for trying it out).
 #
 # -Libmpv bundles that DLL instead of the pinned download (e.g. one just built by
 # packaging/libmpv/build.sh, to test it in the app).
 #
 # The pinned libmpv download is cached in build\libmpv-cache\ and checked against the
 # SHA-256 in packaging\windows\libmpv.lock. Needs 7-Zip (7z) and Inno Setup 6 (ISCC).
-param([string]$Out = "dist", [string]$Libmpv = "")
+param([string]$Out = "dist", [string]$Libmpv = "", [switch]$AppOnly)
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 
@@ -71,6 +74,11 @@ try {
     $name = "PyAmp-$version-windows-x86_64"
     if (Test-Path "$Out\PyAmp") { Remove-Item -Recurse -Force "$Out\PyAmp" }
     Copy-Item -Recurse $app "$Out\PyAmp"
+    if ($AppOnly) {
+        $size = (Get-ChildItem -Recurse -File $app | Measure-Object Length -Sum).Sum
+        Write-Host "App: $Out\PyAmp ($([math]::Round($size / 1MB)) MB)"
+        return
+    }
 
     # -- Portable zip --------------------------------------------------------------- #
     $zip = "$Out\$name-portable.zip"

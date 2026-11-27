@@ -139,6 +139,11 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--self-test", action="store_true", help="check this installation works, then exit"
     )
     parser.add_argument(
+        "--list-output-devices",
+        action="store_true",
+        help="list the devices each audio backend can play through, then exit",
+    )
+    parser.add_argument(
         "--version", action=_VersionAction, nargs=0, help="show version and libmpv, then exit"
     )
     return parser.parse_args(argv)
@@ -381,6 +386,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         apply_libmpv_preference(args.libmpv, SettingsStore().load())
         return 0 if run_self_test() else 1
+    if args.list_output_devices:
+        from pyamp.audio.device_report import device_report  # noqa: PLC0415
+        from pyamp.selftest import ensure_qt_app  # noqa: PLC0415
+
+        apply_libmpv_preference(args.libmpv, SettingsStore().load())
+        ensure_qt_app()
+        print(device_report())
+        return 0
     qt_app = QApplication(sys.argv[:1])
     qt_app.setApplicationName(APP_NAME)
     qt_app.setWindowIcon(app_icon())  # window, Dock (when run from source) and taskbar

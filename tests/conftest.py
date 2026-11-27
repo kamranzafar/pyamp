@@ -34,7 +34,7 @@ from PySide6.QtWidgets import QApplication
 from pyamp.audio.backend import AudioBackend
 from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import EventBus
-from pyamp.core.models import Location, PlaybackState, ReplayGainMode, Track
+from pyamp.core.models import Location, OutputDevice, PlaybackState, ReplayGainMode, Track
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 from pyamp.ui import file_dialogs
@@ -48,6 +48,7 @@ class FakeBackend(AudioBackend):
 
     name = "fake"
     provides_audio_frames = True  # tests drive the visualiser with emit_audio()
+    supports_output_devices = True
 
     def __init__(self) -> None:
         super().__init__()
@@ -58,6 +59,8 @@ class FakeBackend(AudioBackend):
         self.gains: list[float] = []
         self.equalizers: list[Equalizer] = []
         self.replay_gain_modes: list[ReplayGainMode] = []
+        self.devices: list[OutputDevice] = []
+        self.device_id: str | None = None  # where the audio goes; None: the system default
 
     def load(self, location: Location) -> None:
         self.loaded.append(location)
@@ -90,7 +93,21 @@ class FakeBackend(AudioBackend):
     def set_replay_gain_mode(self, mode: ReplayGainMode) -> None:
         self.replay_gain_modes.append(mode)
 
+    def output_devices(self) -> list[OutputDevice]:
+        return list(self.devices)
+
+    def set_output_device(self, device_id: str | None) -> None:
+        self.device_id = device_id
+
     # -- simulation helpers --
+    def plug(self, device: OutputDevice) -> None:
+        self.devices.append(device)
+        self._listener.on_output_devices_changed()
+
+    def unplug(self, device: OutputDevice) -> None:
+        self.devices.remove(device)
+        self._listener.on_output_devices_changed()
+
     def finish_track(self) -> None:
         self._listener.on_end_of_track()
 
@@ -238,6 +255,9 @@ class BackendRecorder:
 
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
         self._record("audio")
+
+    def on_output_devices_changed(self) -> None:
+        self._record("devices")
 
 
 def answer_dialog(

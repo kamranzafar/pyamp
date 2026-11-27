@@ -53,7 +53,7 @@ from pyamp.audio.libmpv_loader import (
     missing_filters,
 )
 from pyamp.core.equalizer import BANDS_HZ, Equalizer
-from pyamp.core.models import Location, PlaybackState, ReplayGainMode, parse_location
+from pyamp.core.models import Location, OutputDevice, PlaybackState, ReplayGainMode, parse_location
 
 log = logging.getLogger(__name__)
 
@@ -149,6 +149,16 @@ _REPLAYGAIN = {
 }
 
 
+#: mpv's name for "the system's default output, following it when it changes".
+AUTO_DEVICE = "auto"
+
+
+def device_id_of(mpv_name: str) -> str:
+    """The device's own id, without mpv's audio-output prefix: ``coreaudio/<uid>`` gives
+    CoreAudio's UID, as Qt names it too, so a chosen device survives a change of backend."""
+    return mpv_name.split("/", 1)[1] if "/" in mpv_name else mpv_name
+
+
 class _Bridge(QObject):
     """Created on the main thread; signals emitted on mpv's thread are queued to it."""
 
@@ -161,6 +171,7 @@ class _Bridge(QObject):
     audio_changed = Signal()  # bitrate or sample rate may have changed
     end_of_track = Signal()
     error = Signal(str)
+    devices_changed = Signal()
 
     def __init__(self, backend: MpvAudioBackend) -> None:
         super().__init__()
@@ -174,6 +185,7 @@ class _Bridge(QObject):
         self.audio_changed.connect(self._on_audio_changed)
         self.end_of_track.connect(self._on_end_of_track)
         self.error.connect(self._on_error)
+        self.devices_changed.connect(self._on_devices_changed)
 
     # Look the listener up on every call: it may be replaced after construction.
     @Slot(object)
@@ -214,6 +226,10 @@ class _Bridge(QObject):
     def _on_error(self, message: str) -> None:
         self._backend.listener.on_error(message)
 
+    @Slot()
+    def _on_devices_changed(self) -> None:
+        self._backend.listener.on_output_devices_changed()
+
 
 class MpvAudioBackend(AudioBackend):
     name: ClassVar[str] = "mpv"
@@ -222,6 +238,7 @@ class MpvAudioBackend(AudioBackend):
     # changes exactly at gapless track boundaries.
     applies_replay_gain: ClassVar[bool] = True
     supports_equalizer: ClassVar[bool] = True
+    supports_output_devices: ClassVar[bool] = True
 
     def __init__(self, **options: Any) -> None:
         """``options`` are extra mpv options, e.g. ``ao="null"`` in tests."""
@@ -249,6 +266,7 @@ class MpvAudioBackend(AudioBackend):
         self._mpv.observe_property("metadata", self._observe_metadata)
         self._mpv.observe_property("audio-bitrate", self._observe_audio)
         self._mpv.observe_property("audio-params", self._observe_audio)
+        self._mpv.observe_property("audio-device-list", self._observe_devices)
         self._mpv.register_event_callback(self._on_event)
         # mpv 0.31+ can write what it has buffered to a file (for the visualiser).
         self._can_dump_cache = any(c.get("name") == "dump-cache" for c in self._mpv.command_list)
@@ -341,6 +359,37 @@ class MpvAudioBackend(AudioBackend):
             return False
         return target.is_file() and target.stat().st_size > 0
 
+    def output_devices(self) -> list[OutputDevice]:
+        return list(self._devices().values())
+
+    def set_output_device(self, device_id: str | None) -> None:
+        if self._closed:
+            return
+        target = AUTO_DEVICE
+        if device_id is not None:
+            target = next(
+                (name for name, d in self._devices().items() if d.id == device_id), AUTO_DEVICE
+            )
+        if self._mpv.audio_device != target:  # setting it at all restarts the output
+            self._mpv.audio_device = target
+
+    def _devices(self) -> dict[str, OutputDevice]:
+        """mpv's device names (``coreaudio/<uid>``) -> the devices, without "auto"."""
+        if self._closed:
+            return {}
+        try:
+            entries = self._mpv.audio_device_list or []
+        except (AttributeError, RuntimeError):
+            return {}
+        devices: dict[str, OutputDevice] = {}
+        for entry in entries:
+            name = entry.get("name") or ""
+            if name and name != AUTO_DEVICE:
+                device_id = device_id_of(name)
+                if all(d.id != device_id for d in devices.values()):
+                    devices[name] = OutputDevice(device_id, entry.get("description") or name)
+        return devices
+
     def close(self) -> None:
         self._closed = True
         # Events mpv reported just before closing may still be queued for the main thread;
@@ -395,6 +444,9 @@ class MpvAudioBackend(AudioBackend):
             self._bridge.station_name.emit(name)
         if title := icy.get("icy-title", "").strip():
             self._bridge.stream_title.emit(title)
+
+    def _observe_devices(self, _name: str, _value: object) -> None:
+        self._bridge.devices_changed.emit()  # read on the main thread, like the rest
 
     def _observe_audio(self, _name: str, _value: object) -> None:
         # The bitrate varies as VBR files and streams play (mpv updates it about once a

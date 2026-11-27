@@ -57,7 +57,7 @@ from pyamp.core.events import (
     SavedPlaylistsChanged,
     SmartPlaylistsChanged,
 )
-from pyamp.core.models import RepeatMode, ReplayGainMode
+from pyamp.core.models import OutputDevice, RepeatMode, ReplayGainMode
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
 from pyamp.dsp.spectrum import SpectrumService
@@ -296,6 +296,9 @@ class Application:
         self.settings.shuffle = self.player.shuffle
         self.settings.repeat = self.player.repeat.value
         self.settings.replay_gain = self.player.replay_gain.value
+        device = self.player.output_device
+        self.settings.output_device = device.id if device is not None else ""
+        self.settings.output_device_name = device.name if device is not None else ""
         eq = self.player.equalizer
         self.settings.equalizer_enabled = eq.enabled
         self.settings.equalizer_preamp = eq.preamp_db
@@ -363,6 +366,9 @@ class Application:
             log.warning("Ignoring malformed equaliser settings")
             equalizer = Equalizer()
         self.player.set_equalizer(equalizer)
+        if settings.output_device:
+            name = settings.output_device_name or settings.output_device
+            self.player.set_output_device(OutputDevice(settings.output_device, name))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

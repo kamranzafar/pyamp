@@ -46,6 +46,10 @@ class Settings:
     equalizer_preamp: float = 0.0
     equalizer_gains: list[float] = field(default_factory=lambda: [0.0] * 10)
     backend: str = "mpv"
+    #: The device to play through (its id as the backends list it), "" for the system
+    #: default; and its name, to show while it's disconnected.
+    output_device: str = ""
+    output_device_name: str = ""
     #: Which libmpv the mpv backend prefers: "auto", "system" or "bundled".
     libmpv: str = "auto"
     #: The saved playlist that was open last.

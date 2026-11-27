@@ -83,6 +83,9 @@ class _Recorder:
     def on_audio_info(self, bitrate: int, sample_rate: int) -> None:
         pass
 
+    def on_output_devices_changed(self) -> None:
+        pass
+
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
         pass
 

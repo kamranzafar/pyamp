@@ -36,6 +36,7 @@ from pyamp.core.events import (
     AudioInfoChanged,
     EqualizerChanged,
     EventBus,
+    OutputDeviceChanged,
     PlaybackError,
     PlaybackStateChanged,
     PlaylistChanged,
@@ -50,6 +51,7 @@ from pyamp.core.events import (
 )
 from pyamp.core.models import (
     Location,
+    OutputDevice,
     PlaybackState,
     RepeatMode,
     ReplayGainMode,
@@ -88,6 +90,8 @@ class Player:
         self._repeat = RepeatMode.OFF
         self._replay_gain = ReplayGainMode.OFF
         self._equalizer = Equalizer()
+        self._output_device: OutputDevice | None = None  # None: the system default
+        self._device_connected = True
         # Gapless backends: whether a track is loaded, and what is queued after it.
         self._active = False
         self._queued: tuple[int, Location] | None = None
@@ -170,6 +174,26 @@ class Player:
     def save_stream(self, target: Path, start: float, end: float) -> bool:
         """Save a buffered stretch of the playing stream to ``target``; any thread."""
         return self._backend.save_stream(target, start, end)
+
+    @property
+    def supports_output_devices(self) -> bool:
+        """Whether the backend can play through a chosen device."""
+        return self._backend.supports_output_devices
+
+    def output_devices(self) -> list[OutputDevice]:
+        """The devices there are to play through now (not counting the system default)."""
+        return self._backend.output_devices()
+
+    @property
+    def output_device(self) -> OutputDevice | None:
+        """The device chosen to play through (kept while it's disconnected); None for the
+        system default."""
+        return self._output_device
+
+    @property
+    def output_device_connected(self) -> bool:
+        """False while the chosen device isn't there and the system default plays instead."""
+        return self._device_connected
 
     @property
     def supports_equalizer(self) -> bool:
@@ -261,6 +285,27 @@ class Player:
         else:
             self._apply_track_gain(self._playlist.current_track)
         self._bus.publish(ReplayGainChanged(mode))
+
+    def set_output_device(self, device: OutputDevice | None) -> None:
+        """Play through ``device``, or the system default if None. The choice is kept
+        while the device is disconnected, and used again once it's back."""
+        self._output_device = device
+        self._apply_output_device()
+
+    def _apply_output_device(self) -> None:
+        chosen = self._output_device
+        supported = self._backend.supports_output_devices
+        connected = (
+            chosen is None
+            or not supported  # nothing to tell; the choice waits for a backend that can
+            or any(d.id == chosen.id for d in self.output_devices())
+        )
+        if supported:
+            self._backend.set_output_device(chosen.id if chosen is not None and connected else None)
+        if chosen is not None and connected != self._device_connected:
+            log.info("Output device %s %s", chosen.name, "is back" if connected else "went away")
+        self._device_connected = connected
+        self._bus.publish(OutputDeviceChanged(chosen, connected))
 
     def set_equalizer(self, equalizer: Equalizer) -> None:
         self._equalizer = equalizer
@@ -415,3 +460,6 @@ class Player:
 
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
         self._bus.publish(AudioFrame(samples, sample_rate))
+
+    def on_output_devices_changed(self) -> None:
+        self._apply_output_device()

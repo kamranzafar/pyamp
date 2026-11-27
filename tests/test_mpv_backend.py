@@ -41,7 +41,13 @@ from tests.conftest import BackendRecorder as Recorder
 from tests.radio import RadioStation
 
 try:
-    from pyamp.audio.mpv_backend import EQ_LABEL, MpvAudioBackend, equalizer_graph, tls_options
+    from pyamp.audio.mpv_backend import (
+        EQ_LABEL,
+        MpvAudioBackend,
+        device_id_of,
+        equalizer_graph,
+        tls_options,
+    )
 except OSError as exc:  # no libmpv on this machine
     pytest.skip(f"libmpv not available: {exc}", allow_module_level=True)
 
@@ -596,3 +602,20 @@ def test_https_elsewhere_uses_the_system_store(platform: str, tmp_path: Path) ->
 
 def test_no_ca_file_option_without_the_file(tmp_path: Path) -> None:
     assert tls_options("darwin", tmp_path / "missing.pem") == {}
+
+
+def test_lists_devices_and_follows_the_default(
+    backend: MpvAudioBackend, recorder: Recorder
+) -> None:
+    devices = backend.output_devices()  # the null output has none to offer
+    assert all(d.id and d.name for d in devices)
+    backend.set_output_device("no-such-device")  # unknown: stays on the default
+    assert backend._mpv.audio_device == "auto"
+    backend.set_output_device(None)
+    assert backend._mpv.audio_device == "auto"
+
+
+def test_mpv_device_names_lose_their_output_prefix() -> None:
+    assert device_id_of("coreaudio/BuiltInSpeakerDevice") == "BuiltInSpeakerDevice"
+    assert device_id_of("wasapi/{0.0.0.00000000}.{abc}") == "{0.0.0.00000000}.{abc}"
+    assert device_id_of("auto") == "auto"

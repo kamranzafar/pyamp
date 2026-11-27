@@ -76,6 +76,7 @@ from pyamp.ui.jump_dialog import JumpDialog
 from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.library_window import LibraryWindow
 from pyamp.ui.menu_bar import IS_MACOS, PLACE, MenuBarIcon
+from pyamp.ui.output_device_menu import OutputDeviceMenu
 from pyamp.ui.playlist_model import PlaylistModel, dropped_locations
 from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import Skin
@@ -272,6 +273,13 @@ class MainWindow(QMainWindow):
         replay_gain_menu = play_menu.addMenu("Replay&Gain")
         replay_gain_menu.addActions(list(self._actions.replay_gain.values()))
         self._add_menu_action(play_menu, "&Equaliser…", self.show_equalizer, "G")
+        self.output_device_menu = OutputDeviceMenu(
+            self._s.player,
+            self._s.bus,
+            lambda message: self.statusBar().showMessage(message, STATUS_TIMEOUT_MS),
+            self,
+        )
+        play_menu.addMenu(self.output_device_menu)
         self._build_backend_menu(play_menu)
 
         list_menu = menu_bar.addMenu("P&laylist")

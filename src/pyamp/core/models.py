@@ -156,6 +156,17 @@ class ReplayGain:
 
 
 @dataclass(frozen=True, slots=True)
+class OutputDevice:
+    """A device to play through (speakers, headphones, a DAC), as the backend lists it."""
+
+    #: Stable across restarts, and the same for both backends where the system allows
+    #: (CoreAudio's device UID on macOS).
+    id: str
+    #: For people, e.g. "MacBook Pro Speakers".
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
 class Track:
     """Something playable (a file or a stream) together with its descriptive metadata."""
 

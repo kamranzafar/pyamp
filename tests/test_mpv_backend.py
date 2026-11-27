@@ -46,6 +46,7 @@ try:
         MpvAudioBackend,
         device_id_of,
         equalizer_graph,
+        lists_devices,
         tls_options,
     )
 except OSError as exc:  # no libmpv on this machine
@@ -619,3 +620,29 @@ def test_mpv_device_names_lose_their_output_prefix() -> None:
     assert device_id_of("coreaudio/BuiltInSpeakerDevice") == "BuiltInSpeakerDevice"
     assert device_id_of("wasapi/{0.0.0.00000000}.{abc}") == "{0.0.0.00000000}.{abc}"
     assert device_id_of("auto") == "auto"
+
+
+def test_devices_are_listed_unless_pipewire_is_incomplete() -> None:
+    def broken(_env: object) -> bool:
+        return True
+
+    def fine(_env: object) -> bool:
+        return False
+
+    assert lists_devices("linux", {}, fine)
+    assert not lists_devices("linux", {}, broken)
+    assert lists_devices("darwin", {}, broken)  # only Linux has PipeWire
+    assert lists_devices("win32", {}, broken)
+
+
+def test_without_device_listing_only_the_default_is_offered(
+    qt_app: QCoreApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("pyamp.audio.mpv_backend.lists_devices", lambda: False)
+    backend = MpvAudioBackend(ao="null")
+    try:
+        assert backend.output_devices() == []
+        backend.set_output_device("some-device")
+        assert backend._mpv.audio_device == "auto"
+    finally:
+        backend.close()

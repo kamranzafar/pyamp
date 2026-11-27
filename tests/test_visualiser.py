@@ -257,11 +257,11 @@ def test_a_new_waveform_is_drawn_even_when_the_levels_hold_still(
     widget.resize(200, 40)
     widget.show()
     levels = [0.5] * BANDS
-    widget.set_levels(levels, np.sin(np.linspace(0, 4 * np.pi, 96)) * 0.4)
+    widget.set_levels(levels, (np.sin(np.linspace(0, 4 * np.pi, 96)) * 0.4).tolist())
     for _ in range(30):
         widget._animate()  # the bars have risen and hold still from here
     before = widget.grab().toImage()
-    widget.set_levels(levels, np.cos(np.linspace(0, 4 * np.pi, 96)) * 0.4)
+    widget.set_levels(levels, (np.cos(np.linspace(0, 4 * np.pi, 96)) * 0.4).tolist())
     widget._animate()
     assert widget.grab().toImage() != before
     widget.set_levels([0.0] * BANDS)  # silence: no waveform

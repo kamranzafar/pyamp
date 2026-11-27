@@ -242,6 +242,47 @@ class Radial(Style):
 
 
 @register
+class Waves(Style):
+    """Sine waves, one per group of bands, each as tall as its group is loud.
+
+    Not the sound's real waveform (the visualiser only gets band levels): bass makes
+    long, slow waves and treble short, quick ones, drawn back to front and fading
+    out at both ends.
+    """
+
+    id = "waves"
+    label = "&Waves"
+    moves = True
+    #: (cycles across the strip, cycles per second) from the lowest group to the highest.
+    WAVES = ((1.0, 0.35), (2.0, 0.6), (3.5, 0.9), (6.0, 1.4))
+    STEP = 3.0  # pixels between the points of a wave
+    FRAME_S = 0.03
+
+    def paint(self, painter: QPainter, rect: QRectF, frame: Frame) -> None:
+        groups = np.array_split(frame.bars, len(self.WAVES))
+        xs = np.arange(0.0, rect.width() + self.STEP, self.STEP).clip(max=rect.width())
+        across = xs / max(rect.width(), 1.0)
+        taper = np.sin(np.pi * across)  # every wave meets the middle line at both ends
+        middle = rect.center().y()
+        seconds = frame.tick * self.FRAME_S
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for n, (group, (cycles, speed)) in enumerate(zip(groups, self.WAVES, strict=True)):
+            level = float(group.max()) if len(group) else 0.0
+            if level <= VISIBLE:
+                continue
+            phase = 2 * np.pi * (speed * seconds + n / len(self.WAVES))
+            ys = middle - level * (rect.height() / 2 - 1) * taper * np.sin(
+                2 * np.pi * cycles * across + phase
+            )
+            wave = QPainterPath(QPointF(rect.left() + xs[0], ys[0]))
+            for x, y in zip(xs[1:], ys[1:], strict=True):
+                wave.lineTo(QPointF(rect.left() + x, y))
+            color = self.palette.at(level)
+            color.setAlphaF(0.55 + 0.45 * level)
+            painter.strokePath(wave, QPen(color, 1.5))
+
+
+@register
 class Off(Style):
     """Nothing: the visualiser keeps its space, and the levels aren't worked out."""
 

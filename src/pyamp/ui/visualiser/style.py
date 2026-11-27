@@ -48,6 +48,9 @@ class Frame:
     #: Past ``bars``, oldest first: ``(Style.history, band count)``, or empty rows for a
     #: style that asked for none.
     history: NDArray[np.float64]
+    #: Counts the widget's animation frames (about 33 a second), for styles that move
+    #: on their own, like waves.
+    tick: int = 0
 
     @property
     def level(self) -> float:
@@ -108,6 +111,9 @@ class Style:
     label: ClassVar[str]
     #: How many past frames of bars it needs in :attr:`Frame.history` (0: none).
     history: ClassVar[int] = 0
+    #: True for a style that changes from frame to frame by itself (``Frame.tick``), so
+    #: it's redrawn while there's sound even when the levels hold still.
+    moves: ClassVar[bool] = False
     #: False for a style that shows nothing, so the levels aren't worked out at all.
     active: ClassVar[bool] = True
 

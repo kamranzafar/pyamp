@@ -73,6 +73,7 @@ class SpectrumWidget(QWidget):
         self._peaks = np.zeros(band_count)
         self._hold = np.zeros(band_count, dtype=int)
         self._history = np.zeros((0, band_count))
+        self._tick = 0
         self._style: Style = STYLES[DEFAULT_STYLE](self._palette)
         self.setMinimumHeight(32)
         self.setToolTip("Click to change the visualiser (also in View → Visualiser)")
@@ -141,6 +142,7 @@ class SpectrumWidget(QWidget):
         return QSize(len(self._bars) * 5, 40)
 
     def _animate(self) -> None:
+        self._tick += 1
         bars = np.maximum(self._target, self._bars - BAR_FALL).clip(0.0, 1.0)
         rising = bars >= self._peaks
         peaks = np.where(rising, bars, self._peaks)
@@ -151,7 +153,11 @@ class SpectrumWidget(QWidget):
             # away to silence.
             self._history = np.roll(self._history, -1, axis=0)
             self._history[-1] = bars
-        elif np.array_equal(bars, self._bars) and np.array_equal(peaks, self._peaks):
+        elif (
+            not (self._style.moves and bars.any())
+            and np.array_equal(bars, self._bars)
+            and np.array_equal(peaks, self._peaks)
+        ):
             if not (bars.any() or peaks.any()):
                 self._timer.stop()  # all fallen to zero: nothing to animate until new levels
             return  # nothing moved; skip the repaint
@@ -167,5 +173,5 @@ class SpectrumWidget(QWidget):
         self._style.paint(
             painter,
             QRectF(self.rect()),
-            Frame(bars=self._bars, peaks=self._peaks, history=self._history),
+            Frame(bars=self._bars, peaks=self._peaks, history=self._history, tick=self._tick),
         )

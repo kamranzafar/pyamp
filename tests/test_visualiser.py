@@ -83,6 +83,7 @@ def test_the_built_in_styles_in_menu_order() -> None:
         "spectrogram",
         "meter",
         "radial",
+        "waves",
         "off",
     ]
     assert DEFAULT_STYLE == "bars"
@@ -166,8 +167,8 @@ def test_clicking_moves_to_the_next_style(qt_app: QCoreApplication) -> None:
     widget.style_changed.connect(seen.append)
     _click(widget)
     _click(widget)
-    assert seen == ["off", "bars"]
-    assert widget.style_id == "bars"
+    assert seen == ["waves", "off"]
+    assert widget.style_id == "off"
 
 
 def test_off_stops_animating_and_ignores_levels(qt_app: QCoreApplication) -> None:
@@ -222,3 +223,26 @@ def test_off_pauses_the_analysis(app: Application) -> None:  # noqa: F811
     assert window.visualiser_needed
     app.bus.publish(frame)
     assert any(published[-1].levels)
+
+
+def test_waves_move_on_with_each_frame(qt_app: QCoreApplication) -> None:
+    waves = STYLES["waves"](Palette(DEFAULT_SKIN))
+    bars = np.full(BANDS, 0.8)
+    still = Frame(bars=bars, peaks=bars, history=np.zeros((0, BANDS)), tick=0)
+    later = Frame(bars=bars, peaks=bars, history=np.zeros((0, BANDS)), tick=10)
+    assert _paint(waves, still) == _paint(waves, still)
+    assert _paint(waves, still) != _paint(waves, later)
+
+
+def test_waves_keep_moving_while_the_levels_hold_still(qt_app: QCoreApplication) -> None:
+    widget = SpectrumWidget(BANDS, DEFAULT_SKIN, style="waves")
+    widget.resize(200, 40)
+    widget.show()
+    widget.set_levels([0.5] * BANDS)
+    for _ in range(30):
+        widget._animate()  # the bars have risen and hold still from here
+    before = widget.grab().toImage()
+    widget._animate()
+    assert widget.animating
+    assert widget.grab().toImage() != before
+    widget.close()

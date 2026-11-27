@@ -4,8 +4,9 @@
 #
 # Build PyAmp.app (with libmpv bundled) and a .dmg for this Mac's architecture.
 #
-#   packaging/macos/build.sh [--libmpv <folder>] [output-dir]      (default: dist/)
+#   packaging/macos/build.sh [--app-only] [--libmpv <folder>] [output-dir]   (default: dist/)
 #
+# --app-only builds just PyAmp.app, without the disk image (quicker, for trying it out).
 # The pinned libmpv download is cached in build/libmpv-cache/ and checked against
 # the SHA-256 in packaging/macos/libmpv.lock. --libmpv bundles the libmpv in that folder
 # instead (e.g. one just built by packaging/libmpv/build.sh, to test it in the app).
@@ -13,10 +14,24 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 LIBMPV_DIR=
-if [ "${1:-}" = --libmpv ]; then
-  LIBMPV_DIR=$(cd "${2:?--libmpv needs a folder}" && pwd)
-  shift 2
-fi
+APP_ONLY=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --libmpv)
+      LIBMPV_DIR=$(cd "${2:?--libmpv needs a folder}" && pwd)
+      shift 2
+      ;;
+    --app-only)
+      APP_ONLY=1
+      shift
+      ;;
+    -*)
+      echo "error: unknown option $1" >&2
+      exit 2
+      ;;
+    *) break ;;
+  esac
+done
 OUT=${1:-"$ROOT/dist"}
 ARCH=$(uname -m) # x86_64 or arm64
 WORK=$(mktemp -d)
@@ -70,10 +85,18 @@ find "$APP/Contents/Frameworks" -type f -print0 |
 # Ad-hoc signature: not notarised, but Apple Silicon won't run unsigned code at all.
 codesign --force --deep --sign - "$APP"
 
-# -- Disk image ----------------------------------------------------------------- #
-mkdir -p "$OUT" "$WORK/dmg"
+# Measured here: the copy in $OUT may be moved (e.g. to /Applications) straight away.
+APP_SIZE=$(du -sh "$APP" | cut -f1)
+mkdir -p "$OUT"
 rm -rf "$OUT/PyAmp.app"
 cp -R "$APP" "$OUT/PyAmp.app"
+if [ -n "$APP_ONLY" ]; then
+  echo "App: $OUT/PyAmp.app ($APP_SIZE)"
+  exit 0
+fi
+
+# -- Disk image ----------------------------------------------------------------- #
+mkdir -p "$WORK/dmg"
 cp -R "$APP" "$WORK/dmg/"
 ln -s /Applications "$WORK/dmg/Applications" # drag-to-install
 DMG="$OUT/PyAmp-$VERSION-macos-$ARCH.dmg"
@@ -93,5 +116,5 @@ for attempt in 1 2 3 4; do
   sleep 5
 done
 
-echo "App: $OUT/PyAmp.app ($(du -sh "$OUT/PyAmp.app" | cut -f1))"
+echo "App: $OUT/PyAmp.app ($APP_SIZE)"
 echo "DMG: $DMG ($(du -sh "$DMG" | cut -f1))"

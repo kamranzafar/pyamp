@@ -421,6 +421,7 @@ uv run ruff format .   # format
 uv run mypy            # strict type checking
 uv run pre-commit install  # run ruff and mypy on every commit
 packaging/macos/build.sh   # build dist/PyAmp.app and a .dmg (macOS)
+packaging/macos/build.sh --app-only  # just dist/PyAmp.app, no .dmg (quicker)
 pwsh packaging/windows/build.ps1  # build dist\PyAmp, a zip and a setup.exe (Windows; needs 7-Zip and Inno Setup)
 uv run python packaging/make_icons.py  # regenerate .icns/.ico/.png after editing the icon SVG
 uv run python docs/make_header.py      # regenerate the README header SVG

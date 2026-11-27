@@ -101,6 +101,7 @@ class QtAudioBackend(AudioBackend):
         self._gain = 1.0
         self._bitrate = 0  # of the playing audio: from metadata, and from the PCM tap
         self._sample_rate = 0
+        self._frames_wanted = True
         self._player.setAudioBufferOutput(self._tap)
         self._device_id: str | None = None  # None: follow the system default
         self._media_devices = QMediaDevices()  # its signal needs an instance kept alive
@@ -169,6 +170,10 @@ class QtAudioBackend(AudioBackend):
         if device != self._output.device():  # setting it at all restarts the output
             self._output.setDevice(device)
 
+    def set_audio_frames_wanted(self, wanted: bool) -> None:
+        # The tap stays: it also reports the sample rate.
+        self._frames_wanted = wanted
+
     def close(self) -> None:
         self._player.setSource(QUrl())
 
@@ -216,6 +221,8 @@ class QtAudioBackend(AudioBackend):
         rate = buffer.format().sampleRate()
         if rate != self._sample_rate:
             self._set_audio_info(sample_rate=rate)
+        if not self._frames_wanted:
+            return  # nothing would look at them
         samples = audio_buffer_to_mono(buffer)
         if samples is not None:
             self._listener.on_audio_frame(samples, rate)

@@ -189,6 +189,18 @@ def test_audio_buffers_feed_the_visualiser(backend: QtAudioBackend, recorder: Re
     assert [n for n in recorder.names() if n == "audio"] == ["audio"]
 
 
+def test_no_frames_are_made_while_nothing_wants_them(
+    backend: QtAudioBackend, recorder: Recorder
+) -> None:
+    backend.set_audio_frames_wanted(False)  # e.g. the visualiser is hidden
+    backend._on_audio_buffer(buffer(np.zeros(16, "<i2"), Fmt.Int16, 1, rate=44_100))
+    assert "audio" not in recorder.names()
+    assert recorder.values("audio_info") == [(0, 44_100)]  # still from the tap
+    backend.set_audio_frames_wanted(True)
+    backend._on_audio_buffer(buffer(np.zeros(16, "<i2"), Fmt.Int16, 1, rate=44_100))
+    assert "audio" in recorder.names()
+
+
 def test_sample_rate_comes_from_the_audio_and_resets_per_track(
     backend: QtAudioBackend, recorder: Recorder
 ) -> None:

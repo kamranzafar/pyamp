@@ -193,8 +193,8 @@ def check_track_analysis() -> str:
                 time.sleep(0.01)
     finally:
         analyser.shutdown()
-    if abs(len(timeline.rows) - FPS) > 2:
-        raise RuntimeError(f"expected about {FPS} rows for 1 s of audio, got {len(timeline.rows)}")
+    if abs(timeline.row_count - FPS) > 2:
+        raise RuntimeError(f"expected about {FPS} rows for 1 s of audio, got {timeline.row_count}")
     row = timeline.row_at(0.5)
     assert row is not None
     edges = np.geomspace(40.0, 16_000.0, len(row) + 1)
@@ -202,7 +202,7 @@ def check_track_analysis() -> str:
     loudest = int(np.argmax(row))
     if abs(loudest - expected) > 1:
         raise RuntimeError(f"1 kHz tone peaked in band {loudest}, expected about {expected}")
-    return f"{len(timeline.rows)} rows, 1 kHz in band {loudest}"
+    return f"{timeline.row_count} rows, 1 kHz in band {loudest}"
 
 
 def check_icons() -> str:

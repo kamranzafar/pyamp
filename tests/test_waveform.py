@@ -75,7 +75,7 @@ def test_the_timeline_keeps_waveforms_in_step_with_rows() -> None:
     row, wave = timeline.row_at(seconds), timeline.wave_at(seconds)
     assert row is not None and wave is not None
     assert row[0] == wave[0] == int(seconds * FPS)
-    assert len(timeline.rows) == len(timeline.waves)
+    assert timeline.wave_at((timeline.first_row + 0.5) / FPS) is not None  # kept alike
     timeline.put(4 * FPS + 2, np.zeros(4, np.float32))  # a gap, and a row with no waveform
     assert timeline.wave_at((4 * FPS + 1) / FPS) is None
     assert timeline.wave_at((4 * FPS + 2) / FPS) is None

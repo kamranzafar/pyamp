@@ -167,6 +167,10 @@ class Player:
         """Whether the backend reports the audio it plays (for the visualiser)."""
         return self._backend.provides_audio_frames
 
+    def set_audio_frames_wanted(self, wanted: bool) -> None:
+        """Whether the played audio's frames are used (see :class:`AudioFrame`)."""
+        self._backend.set_audio_frames_wanted(wanted)
+
     def buffered_range(self) -> tuple[float, float] | None:
         """The buffered stretch of the playing stream, in seconds (see the backend's)."""
         return self._backend.buffered_range()

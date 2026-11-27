@@ -272,6 +272,10 @@ class MpvAudioBackend(AudioBackend):
         self._lock = threading.Lock()
         self._pending_loads = 0  # files started via load() whose start-file hasn't arrived
         self._advancing = False  # the file being started came from the queue
+        #: What queue_next() last queued, and what's starting from the queue: remembered
+        #: here, as reading mpv's properties on its event thread can hang it at shutdown.
+        self._queued: Location | None = None
+        self._advancing_to: Location | None = None
         self._ended = False  # the last file reached its end (not stopped or failed)
         self._paused = False
         self._idle = True
@@ -312,11 +316,14 @@ class MpvAudioBackend(AudioBackend):
     def load(self, location: Location) -> None:
         with self._lock:
             self._pending_loads += 1
+            self._queued = None
         self._mpv.playlist_clear()
         self._mpv.loadfile(str(location), "replace")
 
     def queue_next(self, location: Location | None) -> None:
         self._mpv.playlist_clear()  # drops everything except the current entry
+        with self._lock:
+            self._queued = location  # before mpv can start it
         if location is not None:
             self._mpv.loadfile(str(location), "append")
 
@@ -492,12 +499,15 @@ class MpvAudioBackend(AudioBackend):
             with self._lock:
                 self._advancing = self._pending_loads == 0
                 self._pending_loads = max(0, self._pending_loads - 1)
+                if self._advancing:
+                    self._advancing_to, self._queued = self._queued, None
             self._ended = False
             self._last_position = -1.0
         elif event_id == mpv.MpvEventID.FILE_LOADED:
             if self._advancing:
                 self._advancing = False
-                self._bridge.advanced.emit(self._mpv.path)
+                if self._advancing_to is not None:
+                    self._bridge.advanced.emit(str(self._advancing_to))
         elif event_id == mpv.MpvEventID.END_FILE:
             reason = event.data.reason
             if reason == _END_EOF:
@@ -533,11 +543,19 @@ class MpvPcmDecoder:
         sample_rate: int,
         cancelled: Callable[[], bool] = lambda: False,
     ) -> bool:
-        """Write ``source`` to ``target`` as mono float32 at ``sample_rate``, as it goes
-        (the samples can be read while it's still writing); False if it can't be decoded
-        or ``cancelled`` says to stop, which is checked several times a second."""
+        """Write ``source`` to ``target`` (a file or a named pipe) as mono signed 16-bit
+        samples at ``sample_rate``, as it goes (they can be read while it's still
+        writing); False if it can't be decoded or ``cancelled`` says to stop, which is
+        checked several times a second."""
         decoder: Any = None
         ended = threading.Event()
+        reasons: list[Any] = []
+
+        def on_event(event: Any) -> None:
+            if event.event_id.value == _END_FILE:
+                reasons.append(event.data.reason)
+                ended.set()
+
         try:
             decoder = mpv.MPV(
                 video=False,
@@ -548,15 +566,13 @@ class MpvPcmDecoder:
                 ao="pcm",
                 ao_pcm_file=str(target),
                 ao_pcm_waveheader=False,
-                audio_format="float",
+                audio_format="s16",
                 audio_channels="mono",
                 audio_samplerate=sample_rate,
                 untimed=True,
                 replaygain="no",
             )
-            decoder.register_event_callback(
-                lambda event: ended.set() if event.event_id.value == _END_FILE else None
-            )
+            decoder.register_event_callback(on_event)
             decoder.play(str(source))
             deadline = time.monotonic() + self.TIMEOUT_S
             while not ended.wait(_CANCEL_CHECK_S):
@@ -568,4 +584,4 @@ class MpvPcmDecoder:
         finally:
             if decoder is not None:
                 decoder.terminate()
-        return target.is_file() and target.stat().st_size > 0
+        return bool(reasons) and reasons[0] == _END_EOF

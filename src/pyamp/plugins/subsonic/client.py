@@ -40,6 +40,7 @@ from urllib.parse import urlencode, urlsplit
 from pyamp import APP_NAME, __version__
 from pyamp.core.models import Location, StreamUrl, Track
 from pyamp.library.artwork import MAX_ARTWORK_BYTES
+from pyamp.library.remote import open_url
 
 #: Token logins need API 1.13; 1.16.1 is what current servers speak.
 API_VERSION = "1.16.1"
@@ -149,8 +150,8 @@ class SubsonicClient:
 
     def cover_art(self, cover_id: str, size: int = COVER_SIZE) -> bytes:
         """The picture with the id ``cover_id`` (a song's ``coverArt``), as image bytes."""
-        with urllib.request.urlopen(
-            self._request("getCoverArt", id=cover_id, size=size), timeout=self._timeout
+        with open_url(
+            self._request("getCoverArt", id=cover_id, size=size), self._timeout
         ) as response:
             image = response.headers.get_content_type().startswith("image/")
             data: bytes = response.read(MAX_ARTWORK_BYTES + 1)
@@ -188,7 +189,7 @@ class SubsonicClient:
 
     def _call(self, method: str, **params: object) -> Json:
         request = self._request(method, **params)
-        with urllib.request.urlopen(request, timeout=self._timeout) as response:
+        with open_url(request, self._timeout) as response:
             data = response.read(MAX_BYTES + 1)
         if len(data) > MAX_BYTES:
             raise SubsonicError("The server's reply was too large")

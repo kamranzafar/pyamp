@@ -228,6 +228,9 @@ class Application:
             DEFAULT_SKIN,
         )
         self.window.visualiser_wanted.connect(self._set_visualiser_active)
+        # The window only says when this changes; the analysis starts out active, so match
+        # it now (e.g. the visualiser was left off: then nothing is analysed at all).
+        self._set_visualiser_active(self.window.visualiser_needed)
         # The saved playlists, after this computer in the library; their commands use the
         # window's dialogs.
         self.playlists_source = PlaylistsSource(
@@ -321,6 +324,7 @@ class Application:
     def _set_visualiser_active(self, seen: bool) -> None:
         """The visualiser only works while it can be seen and isn't off (saves battery)."""
         self.spectrum.set_active(seen)
+        self.player.set_audio_frames_wanted(seen)
         if self.analysed_spectrum is not None:
             self.analysed_spectrum.set_active(seen)
 

@@ -40,6 +40,7 @@ from urllib.parse import quote, urlencode
 
 from pyamp import APP_NAME, __version__
 from pyamp.core.models import StreamUrl, Track
+from pyamp.library.remote import open_url
 
 log = logging.getLogger(__name__)
 
@@ -264,7 +265,7 @@ def _fetch(url: str, timeout: float, max_bytes: int) -> bytes:
         url,
         headers={"User-Agent": f"{APP_NAME}/{__version__}", "Accept": "application/json, image/*"},
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with open_url(request, timeout) as response:
         data = bytes(response.read(max_bytes + 1))
     if len(data) > max_bytes:
         raise ValueError(f"more than {max_bytes} bytes")

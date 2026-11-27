@@ -569,24 +569,25 @@ def test_the_hidden_decoder_feeds_the_analysis(
     import numpy as np  # noqa: PLC0415
 
     from pyamp.audio.mpv_backend import MpvPcmDecoder  # noqa: PLC0415
-    from pyamp.audio.track_analysis import TrackAnalyser  # noqa: PLC0415
+    from pyamp.audio.track_analysis import FPS, TrackAnalyser  # noqa: PLC0415
     from tests.radio import tone_wav  # noqa: PLC0415
 
     song = tmp_path / "song.wav"
     song.write_bytes(tone_wav(5.0))  # 22.05 kHz: resampled to the analysis rate
-    raw = tmp_path / "song.f32"
+    raw = tmp_path / "song.pcm"
     assert MpvPcmDecoder().decode(song, raw, 44100)
-    assert np.fromfile(raw, np.float32).size == pytest.approx(5 * 44100, rel=0.01)
+    assert np.fromfile(raw, np.int16).size == pytest.approx(5 * 44100, rel=0.01)
     broken = tmp_path / "broken.mp3"
     broken.write_bytes(b"not audio" * 100)
-    assert not MpvPcmDecoder().decode(broken, tmp_path / "broken.f32", 44100)
+    assert not MpvPcmDecoder().decode(broken, tmp_path / "broken.pcm", 44100)
 
     analyser = TrackAnalyser()
     timeline = analyser.analyse(song)
     wait_until(timeline.finished.is_set)
     analyser.shutdown()
     assert timeline.seconds == pytest.approx(5.0, abs=0.1)
-    assert max(float(row.max()) for row in timeline.rows if row is not None) > 0.5  # the tone
+    rows = (timeline.row_at((n + 0.5) / FPS) for n in range(timeline.row_count))
+    assert max(float(row.max()) for row in rows if row is not None) > 0.5  # the tone
     assert "Input #0" not in capfd.readouterr().err  # nothing printed about the file
 
 

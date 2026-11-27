@@ -36,6 +36,7 @@ from __future__ import annotations
 import functools
 import locale
 import logging
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -63,6 +64,19 @@ _CANCEL_CHECK_S = 0.1
 
 #: How much of a stream mpv reads ahead (and half that it keeps behind).
 STREAM_BUFFER_BYTES = 32 * 1024 * 1024
+
+#: The certificate authorities macOS ships, kept current by its updates. FFmpeg checks
+#: https certificates, and with Mbed TLS (PyAmp's macOS libmpv) it needs them as a file;
+#: Windows' Schannel and Linux distributions' builds use the system's own store.
+MACOS_CA_FILE = Path("/etc/ssl/cert.pem")
+
+
+def tls_options(platform: str = sys.platform, ca_file: Path = MACOS_CA_FILE) -> dict[str, str]:
+    """mpv options so https streams can be verified on ``platform`` ({} if none needed)."""
+    if platform == "darwin" and ca_file.is_file():
+        return {"tls_ca_file": str(ca_file)}
+    return {}
+
 
 #: python-mpv, bound to the best libmpv available (see libmpv_loader).
 mpv: Any
@@ -227,7 +241,7 @@ class MpvAudioBackend(AudioBackend):
         # python-mpv then crashes). python-mpv sets it on import, but creating the Qt
         # application resets it to the user's locale, so set it again here.
         locale.setlocale(locale.LC_NUMERIC, "C")
-        self._mpv: Any = mpv.MPV(**{**_DEFAULT_OPTIONS, **options})
+        self._mpv: Any = mpv.MPV(**{**_DEFAULT_OPTIONS, **tls_options(), **options})
         self._mpv.observe_property("pause", self._observe_pause)
         self._mpv.observe_property("idle-active", self._observe_idle)
         self._mpv.observe_property("time-pos", self._observe_position)

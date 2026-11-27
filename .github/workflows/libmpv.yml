@@ -1,22 +1,22 @@
-name: libmpv (Windows, audio only)
+name: libmpv (audio only)
 
-# Builds PyAmp's own audio-only libmpv-2.dll (packaging/windows/libmpv/build.sh), then
-# packages PyAmp with it and self-tests the app on Windows. Publishing the DLL as a
-# release for packaging/windows/libmpv.lock is a separate, manual step.
+# Builds PyAmp's own audio-only libmpv (packaging/libmpv/build.sh) for Windows and macOS,
+# then packages PyAmp with each and self-tests the app. Publishing them as a release for
+# packaging/{windows,macos}/libmpv.lock is a separate, manual step.
 
 on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "packaging/windows/libmpv/**"
-      - ".github/workflows/libmpv-windows.yml"
+      - "packaging/libmpv/**"
+      - ".github/workflows/libmpv.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  windows:
     name: Build libmpv-2.dll (mingw-w64 on Linux)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -35,12 +35,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/libmpv-cache
-          key: libmpv-sources-${{ hashFiles('packaging/windows/libmpv/sources.lock') }}
+          key: libmpv-sources-${{ hashFiles('packaging/libmpv/sources.lock') }}
 
       - name: Build
         run: |
           export PYAMP_LIBMPV_CACHE=$HOME/libmpv-cache
-          packaging/windows/libmpv/build.sh libmpv-out
+          packaging/libmpv/build.sh windows-x86_64 libmpv-out
           echo "libmpv-2.dll: $(du -h libmpv-out/libmpv-2.dll | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v7
@@ -51,7 +51,7 @@ jobs:
 
   app:
     name: PyAmp with it, self-tested (Windows)
-    needs: build
+    needs: windows
     runs-on: windows-latest
     timeout-minutes: 30
     defaults:
@@ -98,4 +98,65 @@ jobs:
         with:
           name: PyAmp-windows-audio-libmpv
           path: dist/*.exe
+          if-no-files-found: error
+
+  macos:
+    name: Build libmpv.dylib and self-test PyAmp with it (macOS ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+
+      - name: Install the build tools
+        run: |
+          brew install meson ninja nasm pkg-config
+          command -v cmake
+
+      - name: Cache source downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/libmpv-cache
+          key: libmpv-sources-${{ hashFiles('packaging/libmpv/sources.lock') }}
+
+      - name: Build
+        run: |
+          export PYAMP_LIBMPV_CACHE=$HOME/libmpv-cache
+          packaging/libmpv/build.sh macos-${{ matrix.arch }} libmpv-out
+          echo "libmpv.dylib (${{ matrix.arch }}): $(du -h libmpv-out/libmpv.dylib | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: libmpv-macos-${{ matrix.arch }}
+          path: libmpv-out/
+          if-no-files-found: error
+
+      - run: uv sync --locked --group packaging
+
+      - name: Build PyAmp.app and .dmg with this libmpv
+        run: packaging/macos/build.sh --libmpv libmpv-out dist
+
+      - name: Self-test the built app
+        env:
+          PYAMP_SELFTEST_TRACEBACK: "1"
+        run: |
+          app=dist/PyAmp.app/Contents/MacOS/PyAmp
+          "$app" --version | tee version.txt
+          grep -q "(bundled)" version.txt || { echo "::error::app did not use its bundled libmpv"; exit 1; }
+          "$app" --self-test
+          codesign --verify --deep --strict dist/PyAmp.app
+          echo "PyAmp.app: $(du -sh dist/PyAmp.app | cut -f1), DMG: $(du -h dist/*.dmg | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: PyAmp-macos-${{ matrix.arch }}-audio-libmpv
+          path: dist/*.dmg
           if-no-files-found: error

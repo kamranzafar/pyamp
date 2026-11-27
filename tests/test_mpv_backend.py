@@ -41,7 +41,7 @@ from tests.conftest import BackendRecorder as Recorder
 from tests.radio import RadioStation
 
 try:
-    from pyamp.audio.mpv_backend import EQ_LABEL, MpvAudioBackend, equalizer_graph
+    from pyamp.audio.mpv_backend import EQ_LABEL, MpvAudioBackend, equalizer_graph, tls_options
 except OSError as exc:  # no libmpv on this machine
     pytest.skip(f"libmpv not available: {exc}", allow_module_level=True)
 
@@ -581,3 +581,18 @@ def test_the_hidden_decoder_feeds_the_analysis(
     assert timeline.seconds == pytest.approx(5.0, abs=0.1)
     assert max(float(row.max()) for row in timeline.rows if row is not None) > 0.5  # the tone
     assert "Input #0" not in capfd.readouterr().err  # nothing printed about the file
+
+
+def test_https_uses_the_macos_ca_file(tmp_path: Path) -> None:
+    ca_file = tmp_path / "cert.pem"
+    ca_file.write_text("-----BEGIN CERTIFICATE-----\n")
+    assert tls_options("darwin", ca_file) == {"tls_ca_file": str(ca_file)}
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_https_elsewhere_uses_the_system_store(platform: str, tmp_path: Path) -> None:
+    assert tls_options(platform, tmp_path / "cert.pem") == {}
+
+
+def test_no_ca_file_option_without_the_file(tmp_path: Path) -> None:
+    assert tls_options("darwin", tmp_path / "missing.pem") == {}

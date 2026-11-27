@@ -1,5 +1,5 @@
 # libmpv bundled into PyAmp for Windows: PyAmp's own audio-only build (one libmpv-2.dll
-# with FFmpeg and its libraries linked in), made by packaging/windows/libmpv/build.sh and
+# with FFmpeg and its libraries linked in), made by packaging/libmpv/build.sh and
 # published with its exact sources on the libmpv-windows-audio-<date> pre-release.
 # Format: <arch> <sha256> <url>. build.ps1 refuses a download whose hash doesn't match.
 x86_64 b2c1e142158e300cf79f5dbe915220db7e9675d1b78dce6115d859e317ef446b https://github.com/kamranzafar/pyamp/releases/download/libmpv-windows-audio-20261126/libmpv-audio-x86_64-20261126.zip

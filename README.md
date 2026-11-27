@@ -241,9 +241,11 @@ the user folder) is set by `--libmpv` (remembered, like `--backend`):
 A copy that is missing or fails to load is skipped in favour of the next one;
 `PYAMP_LIBMPV` always wins. `uv run pyamp --version` shows which libmpv is used and
 the preference. If a libmpv's ffmpeg lacks the filters the equaliser needs, PyAmp
-says so (and suggests `--libmpv bundled`) instead of failing silently. On macOS, [media-kit's builds](https://github.com/media-kit/libmpv-darwin-build/releases)
-work: take `libmpv-libs_…_macos-<arch>-audio-encodersgpl` (the other flavours lack the
-filters the equaliser needs). They expect libass from the system (`brew install libass`).
+says so (and suggests `--libmpv bundled`) instead of failing silently. On macOS and
+Windows, the libmpv the apps bundle works on its own: take
+`libmpv-audio-macos-<arch>-….tar.gz` or `libmpv-audio-x86_64-….zip` from the newest
+[`libmpv-*-audio-*` pre-release](../../releases) and put its `libmpv.dylib` or
+`libmpv-2.dll` in the folder.
 
 ### ReplayGain
 
@@ -411,13 +413,17 @@ the zip and the installer (`pyamp.iss`). On Windows the app folder has two progr
 since a windowed program can't print. Licences of bundled components are listed in
 `packaging/THIRD_PARTY_NOTICES.md`, which ships with the app.
 
-The Windows libmpv is PyAmp's own audio-only build (18.7 MB instead of the 122 MB of a
-general-purpose one): `packaging/windows/libmpv/build.sh` cross-compiles it on Linux
-from the sources pinned in `sources.lock`, and the `libmpv (Windows, audio only)`
-workflow builds it, packages the app with it and self-tests it on Windows
-(`build.ps1 -Libmpv <dll>`). To update it, change the pins, let the workflow pass,
-publish its DLL with its sources as a `libmpv-windows-audio-<date>` pre-release and pin
-that in `packaging/windows/libmpv.lock`.
+libmpv is PyAmp's own audio-only build: one library with FFmpeg and its libraries linked
+in, without video outputs, GPU APIs or video codecs (Windows: 18.7 MB instead of the
+122 MB of a general-purpose `libmpv-2.dll`; macOS: 14.6 MB instead of a 35 MB folder).
+`packaging/libmpv/build.sh <target>` builds it from the sources pinned in
+`packaging/libmpv/sources.lock`: cross-compiled on Linux for `windows-x86_64`, natively
+on a Mac for `macos-arm64` and `macos-x86_64`. The `libmpv (audio only)` workflow builds
+all three, packages the app with each (`build.ps1 -Libmpv <dll>`, `build.sh --libmpv
+<folder>`) and self-tests it. To update them, change the pins, let the workflow pass,
+publish its libraries with their sources as a pre-release
+(`libmpv-windows-audio-<date>`, `libmpv-macos-audio-<date>`) and pin those in
+`packaging/windows/libmpv.lock` and `packaging/macos/libmpv.lock`.
 
 ### Making a release
 
@@ -612,12 +618,15 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
 
 - **Code signing** for the Windows and macOS builds, so SmartScreen and Gatekeeper
   don't warn.
-- **Smaller macOS download**: an audio-only libmpv for macOS too, built the way the
-  Windows one is (the macOS app bundles a general-purpose one with video codecs).
 - **Output device**: a **Playback → Output Device** menu to play through a chosen
   device (a DAC, one pair of speakers) while the rest of the system keeps its default;
   remembered, and back to the system default if that device goes away. Bluetooth and
   AirPlay speakers already work by choosing them as the system's output.
+- **Visualiser styles** to pick from, besides today's bars: **dots** (only the falling
+  peak caps), **mirrored** bars, a **line** or filled area, a scrolling **spectrogram**,
+  a **level meter** and **radial** bars, or **off**. Clicking the visualiser cycles
+  through them, and the choice is remembered. All of them draw the band levels the
+  visualiser already gets, so they work the same with both backends.
 
 Not planned, to keep PyAmp lightweight:
 

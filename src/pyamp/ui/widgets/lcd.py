@@ -127,7 +127,7 @@ class LcdPanel(QFrame):
         bus.subscribe(PlaybackStateChanged, self._on_state)
         bus.subscribe(PositionChanged, self._on_position)
         bus.subscribe(AudioInfoChanged, lambda e: self._audio_info.setText(audio_info_text(e)))
-        bus.subscribe(SpectrumUpdated, lambda e: self._spectrum.set_levels(e.levels))
+        bus.subscribe(SpectrumUpdated, lambda e: self._spectrum.set_levels(e.levels, e.waveform))
         bus.subscribe(PlaybackError, lambda e: self._title.set_text(f"Error: {e.message}"))
         self._render_time()
 

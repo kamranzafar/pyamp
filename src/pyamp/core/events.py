@@ -236,3 +236,6 @@ class SpectrumUpdated:
     """Normalised (0..1) band levels, lowest frequency first."""
 
     levels: tuple[float, ...]
+    #: The sound's recent waveform (values in -1..1, oldest first), for the oscilloscope;
+    #: empty for silence.
+    waveform: tuple[float, ...] = ()

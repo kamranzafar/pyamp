@@ -63,6 +63,7 @@ from pyamp.core.events import (
 )
 from pyamp.core.models import PlaybackState, StreamUrl
 from pyamp.dsp.spectrum import SpectrumAnalyzer
+from pyamp.dsp.waveform import waveforms
 
 log = logging.getLogger(__name__)
 
@@ -122,6 +123,8 @@ class LevelTimeline:
     def __init__(self, path: Path | None = None, *, keep_seconds: float | None = None) -> None:
         self.path = path
         self.rows: list[NDArray[np.float32] | None] = []
+        #: The waveform for each row (for the oscilloscope), kept in step with ``rows``.
+        self.waves: list[NDArray[np.float32] | None] = []
         #: The row number of ``rows[0]`` (rows before it were dropped).
         self.first_row = 0
         self.finished = threading.Event()
@@ -136,24 +139,43 @@ class LevelTimeline:
         return (self.first_row + len(self.rows)) / FPS
 
     def row_at(self, seconds: float) -> NDArray[np.float32] | None:
-        index = int(seconds * FPS) - self.first_row
-        rows = self.rows
-        return rows[index] if 0 <= index < len(rows) else None
+        return self._at(self.rows, seconds)
 
-    def put(self, row_number: int, levels: NDArray[np.float32]) -> None:
-        """Set the row for ``row_number`` (worker thread)."""
+    def wave_at(self, seconds: float) -> NDArray[np.float32] | None:
+        return self._at(self.waves, seconds)
+
+    def _at(
+        self, values: list[NDArray[np.float32] | None], seconds: float
+    ) -> NDArray[np.float32] | None:
+        index = int(seconds * FPS) - self.first_row
+        return values[index] if 0 <= index < len(values) else None
+
+    def put(
+        self,
+        row_number: int,
+        levels: NDArray[np.float32],
+        wave: NDArray[np.float32] | None = None,
+    ) -> None:
+        """Set the row (and its waveform) for ``row_number`` (worker thread)."""
         index = row_number - self.first_row
         if index < 0:
             return  # older than what's kept
-        if index >= len(self.rows):
-            self.rows.extend([None] * (index - len(self.rows)))  # a gap: no bars there
-            self.rows.append(levels)
+        rows, waves = self.rows, self.waves
+        if index >= len(rows):
+            rows.extend([None] * (index - len(rows)))  # a gap: no bars there
+            waves.extend([None] * (index - len(waves)))
+            # The waveform first: a reader that finds the row then finds its waveform too.
+            waves.append(wave)
+            rows.append(levels)
         else:
-            self.rows[index] = levels
-        if self._keep_rows is not None and len(self.rows) > self._keep_rows * 2:
-            drop = len(self.rows) - self._keep_rows
+            waves[index] = wave
+            rows[index] = levels
+        if self._keep_rows is not None and len(rows) > self._keep_rows * 2:
+            drop = len(rows) - self._keep_rows
             self.first_row += drop
-            self.rows = self.rows[drop:]  # a new list: a reader keeps the one it has
+            # New lists: a reader keeps the ones it has.
+            self.waves = waves[drop:]
+            self.rows = rows[drop:]
 
 
 class PcmDecoder(Protocol):
@@ -308,9 +330,10 @@ class _GrowingFile:
         self._partial = data[whole:]
         samples = np.concatenate([self._leftover, np.frombuffer(data[:whole], np.float32)])
         levels = self._analyzer.analyze_blocks(samples, ANALYSIS_RATE, _HOP)
+        waves = waveforms(samples, _HOP, len(levels))
         self._leftover = samples[len(levels) * _HOP :]
-        for values in levels:
-            self._timeline.put(self._row, values)
+        for values, wave in zip(levels, waves, strict=True):
+            self._timeline.put(self._row, values, wave)
             self._row += 1
         self.rows += len(levels)
         return True
@@ -456,12 +479,20 @@ class AnalysedSpectrum(QObject):
     def tick(self) -> None:
         if not self._playing:
             return
-        row = self._timeline.row_at(self.position()) if self._timeline is not None else None
-        if row is None:  # no levels for this moment (e.g. a stream still buffering)
+        timeline = self._timeline
+        seconds = self.position()
+        row = timeline.row_at(seconds) if timeline is not None else None
+        if timeline is None or row is None:  # no levels now (e.g. a stream still buffering)
             self._drop_bars()
             return
         levels = np.clip(row + self._offsets, 0.0, 1.0)
-        self._bus.publish(SpectrumUpdated(tuple(float(v) for v in levels)))
+        wave = timeline.wave_at(seconds)
+        self._bus.publish(
+            SpectrumUpdated(
+                tuple(float(v) for v in levels),
+                tuple(float(v) for v in wave) if wave is not None else (),
+            )
+        )
         self._showing = True
 
     def _drop_bars(self) -> None:

@@ -279,13 +279,14 @@ The strip under the time shows the music's spectrum. Click it to move on to the 
 style, or pick one from **View → Visualiser**: **Bars** (Winamp's, with falling peak
 caps), **Dots** (only the caps), **Mirrored**, **Line**, a scrolling **Spectrogram**, a
 **Level Meter**, **Radial**, **Waves** (sine waves whose height follows the bass, mids
-and treble; not the sound's real waveform), or **Off**. The choice is remembered.
-Every style draws the same 20 band levels, so they all work with both backends.
-**Off** also stops working the levels out.
+and treble; not the sound's real waveform), an **Oscilloscope** (the real waveform), or
+**Off**. The choice is remembered. All of them work with both backends: the 20 band
+levels and the waveform come from the audio being played (Qt) or from the second
+decoding of the file (mpv). **Off** also stops working them out.
 
 A style is one class in `ui/visualiser/styles.py`: subclass `Style`, give it an `id`
-and a `label`, draw the `Frame` (bars, peak caps, past bars if it asks for a
-`history`, and a frame count for styles that move by themselves) in `paint`, and
+and a `label`, draw the `Frame` (bars, peak caps, the waveform, past bars if it asks
+for a `history`, and a frame count for styles that move by themselves) in `paint`, and
 `@register` it. The menu, clicking and the saved setting pick it up from there.
 
 ### Output device

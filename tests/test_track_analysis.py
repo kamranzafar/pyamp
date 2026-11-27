@@ -148,6 +148,12 @@ def test_analysis_finds_the_tones_at_the_right_times(
         row = timeline.row_at(seconds)
         assert row is not None
         assert abs(int(np.argmax(row)) - band_of(hz)) <= 1, (seconds, hz, row.round(2))
+    # The oscilloscope's waveforms come with the rows: the slow tone at its full size
+    # (12000 of 32768), the fast one smoothed away.
+    slow, fast = timeline.wave_at(0.5), timeline.wave_at(2.5)
+    assert slow is not None and fast is not None
+    assert 0.3 < np.abs(slow).max() < 0.4
+    assert np.abs(fast).max() < 0.1
 
 
 class StallingWavDecoder(WavDecoder):

@@ -28,7 +28,7 @@ View menu, clicking the visualiser and the saved setting all read :data:`STYLES`
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 import numpy as np
@@ -51,6 +51,8 @@ class Frame:
     #: Counts the widget's animation frames (about 33 a second), for styles that move
     #: on their own, like waves.
     tick: int = 0
+    #: The sound's latest waveform, values in [-1, 1], oldest first; empty for silence.
+    waveform: NDArray[np.float64] = field(default_factory=lambda: np.zeros(0))
 
     @property
     def level(self) -> float:

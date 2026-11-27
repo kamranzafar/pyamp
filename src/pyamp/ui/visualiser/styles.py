@@ -283,6 +283,34 @@ class Waves(Style):
 
 
 @register
+class Oscilloscope(Style):
+    """The sound's waveform, as on an oscilloscope: the last moment of it, left to right.
+
+    Louder swings reach further from the middle line and take the gradient's louder
+    colours. Unlike the other styles it draws the sound itself, not its band levels.
+    """
+
+    id = "oscilloscope"
+    label = "&Oscilloscope"
+    GAIN = 2.0  # music rarely swings near full scale; this fills the strip better
+
+    def paint(self, painter: QPainter, rect: QRectF, frame: Frame) -> None:
+        wave = frame.waveform
+        if len(wave) < 2 or np.abs(wave).max() <= VISIBLE / 2:
+            return
+        middle = rect.center().y()
+        half = rect.height() / 2 - 1
+        ys = middle - np.clip(wave * self.GAIN, -1.0, 1.0) * half
+        xs = rect.left() + np.linspace(0.0, rect.width(), len(wave))
+        trace = QPainterPath(QPointF(xs[0], ys[0]))
+        for x, y in zip(xs[1:], ys[1:], strict=True):
+            trace.lineTo(QPointF(x, y))
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        gradient = self.palette.gradient(QPointF(0, middle), QPointF(0, rect.top()), reflect=True)
+        painter.strokePath(trace, QPen(gradient, 1.5))
+
+
+@register
 class Off(Style):
     """Nothing: the visualiser keeps its space, and the levels aren't worked out."""
 

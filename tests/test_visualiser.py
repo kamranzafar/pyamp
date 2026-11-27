@@ -52,7 +52,8 @@ BANDS = 20
 
 def _frame(level: float, history: int = 0) -> Frame:
     bars = np.linspace(0.1, level, BANDS)
-    return Frame(bars=bars, peaks=bars + 0.05, history=np.tile(bars, (history, 1)))
+    wave = level * np.sin(np.linspace(0, 6 * np.pi, 96))
+    return Frame(bars=bars, peaks=bars + 0.05, history=np.tile(bars, (history, 1)), waveform=wave)
 
 
 def _paint(style: Style, frame: Frame) -> QImage:
@@ -84,6 +85,7 @@ def test_the_built_in_styles_in_menu_order() -> None:
         "meter",
         "radial",
         "waves",
+        "oscilloscope",
         "off",
     ]
     assert DEFAULT_STYLE == "bars"
@@ -167,8 +169,8 @@ def test_clicking_moves_to_the_next_style(qt_app: QCoreApplication) -> None:
     widget.style_changed.connect(seen.append)
     _click(widget)
     _click(widget)
-    assert seen == ["waves", "off"]
-    assert widget.style_id == "off"
+    assert seen == ["waves", "oscilloscope"]
+    assert widget.style_id == "oscilloscope"
 
 
 def test_off_stops_animating_and_ignores_levels(qt_app: QCoreApplication) -> None:
@@ -245,4 +247,23 @@ def test_waves_keep_moving_while_the_levels_hold_still(qt_app: QCoreApplication)
     widget._animate()
     assert widget.animating
     assert widget.grab().toImage() != before
+    widget.close()
+
+
+def test_a_new_waveform_is_drawn_even_when_the_levels_hold_still(
+    qt_app: QCoreApplication,
+) -> None:
+    widget = SpectrumWidget(BANDS, DEFAULT_SKIN, style="oscilloscope")
+    widget.resize(200, 40)
+    widget.show()
+    levels = [0.5] * BANDS
+    widget.set_levels(levels, np.sin(np.linspace(0, 4 * np.pi, 96)) * 0.4)
+    for _ in range(30):
+        widget._animate()  # the bars have risen and hold still from here
+    before = widget.grab().toImage()
+    widget.set_levels(levels, np.cos(np.linspace(0, 4 * np.pi, 96)) * 0.4)
+    widget._animate()
+    assert widget.grab().toImage() != before
+    widget.set_levels([0.0] * BANDS)  # silence: no waveform
+    assert not widget._wave.any()
     widget.close()

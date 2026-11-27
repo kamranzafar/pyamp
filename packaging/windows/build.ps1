@@ -4,11 +4,14 @@
 # Build PyAmp for Windows (x86_64) with libmpv bundled: the app folder, a portable zip
 # and an installer (Inno Setup).
 #
-#   pwsh packaging/windows/build.ps1 [-Out dist]
+#   pwsh packaging/windows/build.ps1 [-Out dist] [-Libmpv path\to\libmpv-2.dll]
+#
+# -Libmpv bundles that DLL instead of the pinned download (e.g. one just built by
+# packaging/windows/libmpv/build.sh, to test it in the app).
 #
 # The pinned libmpv download is cached in build\libmpv-cache\ and checked against the
 # SHA-256 in packaging\windows\libmpv.lock. Needs 7-Zip (7z) and Inno Setup 6 (ISCC).
-param([string]$Out = "dist")
+param([string]$Out = "dist", [string]$Libmpv = "")
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 
@@ -26,27 +29,31 @@ function Find-Tool([string]$Name, [string[]]$Candidates) {
 
 try {
     # -- libmpv ---------------------------------------------------------------- #
-    $entry = Get-Content "$Root\packaging\windows\libmpv.lock" |
-        Where-Object { $_ -match '^x86_64\s' } | Select-Object -First 1
-    if (-not $entry) { throw "no x86_64 libmpv pinned in packaging\windows\libmpv.lock" }
-    $null, $sha, $url = $entry -split '\s+'
-    $cache = "$Root\build\libmpv-cache"
-    New-Item -ItemType Directory -Force $cache | Out-Null
-    $archive = Join-Path $cache ([IO.Path]::GetFileName($url))
-    if (-not (Test-Path $archive)) {
-        Write-Host "Downloading $([IO.Path]::GetFileName($url))"
-        Invoke-WebRequest $url -OutFile "$archive.part"
-        Move-Item "$archive.part" $archive
-    }
-    $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
-    if ($actual -ne $sha) {
-        Remove-Item $archive
-        throw "checksum mismatch for $archive (deleted; run again to download it again)"
-    }
-    $sevenZip = Find-Tool "7z" @("$env:ProgramFiles\7-Zip\7z.exe")
-    & $sevenZip x $archive "-o$Work\archive" -y | Out-Null
     New-Item -ItemType Directory -Force "$Work\libmpv" | Out-Null
-    Copy-Item "$Work\archive\libmpv-2.dll" "$Work\libmpv\"
+    if ($Libmpv) {
+        Copy-Item (Resolve-Path $Libmpv).Path "$Work\libmpv\libmpv-2.dll"
+    } else {
+        $entry = Get-Content "$Root\packaging\windows\libmpv.lock" |
+            Where-Object { $_ -match '^x86_64\s' } | Select-Object -First 1
+        if (-not $entry) { throw "no x86_64 libmpv pinned in packaging\windows\libmpv.lock" }
+        $null, $sha, $url = $entry -split '\s+'
+        $cache = "$Root\build\libmpv-cache"
+        New-Item -ItemType Directory -Force $cache | Out-Null
+        $archive = Join-Path $cache ([IO.Path]::GetFileName($url))
+        if (-not (Test-Path $archive)) {
+            Write-Host "Downloading $([IO.Path]::GetFileName($url))"
+            Invoke-WebRequest $url -OutFile "$archive.part"
+            Move-Item "$archive.part" $archive
+        }
+        $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+        if ($actual -ne $sha) {
+            Remove-Item $archive
+            throw "checksum mismatch for $archive (deleted; run again to download it again)"
+        }
+        $sevenZip = Find-Tool "7z" @("$env:ProgramFiles\7-Zip\7z.exe")
+        & $sevenZip x $archive "-o$Work\archive" -y | Out-Null
+        Copy-Item "$Work\archive\libmpv-2.dll" "$Work\libmpv\"
+    }
 
     # -- App -------------------------------------------------------------------- #
     Push-Location $Root

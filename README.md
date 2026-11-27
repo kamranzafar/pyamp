@@ -288,6 +288,16 @@ and a `label`, draw the `Frame` (bars, peak caps, past bars if it asks for a
 `history`, and a frame count for styles that move by themselves) in `paint`, and
 `@register` it. The menu, clicking and the saved setting pick it up from there.
 
+### Output device
+
+PyAmp plays through the system's default output, following it when it changes, unless
+you pick a device in **Playback → Output Device**: a DAC, headphones, one pair of
+speakers, while the rest of the system keeps its default. The choice is remembered. If
+that device is disconnected, PyAmp says so and plays through the system default until
+it's back, then moves back to it. Bluetooth and AirPlay speakers work either way, as
+devices of their own or as the system's output. On macOS both backends name devices
+the same way, so the choice also stays when you change backend.
+
 ### Streams and internet radio
 
 **File → Add URL to Playlist…** (`Ctrl+U`) adds an `http://` or `https://` stream to
@@ -634,10 +644,6 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
 
 - **Code signing** for the Windows and macOS builds, so SmartScreen and Gatekeeper
   don't warn.
-- **Output device**: a **Playback → Output Device** menu to play through a chosen
-  device (a DAC, one pair of speakers) while the rest of the system keeps its default;
-  remembered, and back to the system default if that device goes away. Bluetooth and
-  AirPlay speakers already work by choosing them as the system's output.
 
 Not planned, to keep PyAmp lightweight:
 

@@ -596,3 +596,14 @@ def test_https_elsewhere_uses_the_system_store(platform: str, tmp_path: Path) ->
 
 def test_no_ca_file_option_without_the_file(tmp_path: Path) -> None:
     assert tls_options("darwin", tmp_path / "missing.pem") == {}
+
+
+def test_lists_devices_and_follows_the_default(
+    backend: MpvAudioBackend, recorder: Recorder
+) -> None:
+    devices = backend.output_devices()  # the null output has none to offer
+    assert all(d.id and d.name for d in devices)
+    backend.set_output_device("no-such-device")  # unknown: stays on the default
+    assert backend._mpv.audio_device == "auto"
+    backend.set_output_device(None)
+    assert backend._mpv.audio_device == "auto"

@@ -34,8 +34,10 @@ from PySide6.QtCore import QUrl
 from PySide6.QtMultimedia import (
     QAudioBuffer,
     QAudioBufferOutput,
+    QAudioDevice,
     QAudioFormat,
     QAudioOutput,
+    QMediaDevices,
     QMediaMetaData,
     QMediaPlayer,
     QtAudio,
@@ -43,7 +45,13 @@ from PySide6.QtMultimedia import (
 
 from pyamp.audio.backend import AudioBackend
 from pyamp.audio.qt_audio_env import avoid_incomplete_pipewire
-from pyamp.core.models import Location, PlaybackState, StreamUrl
+from pyamp.core.models import Location, OutputDevice, PlaybackState, StreamUrl
+
+
+def _device_id(device: QAudioDevice) -> str:
+    """The device's id as text: CoreAudio's UID on macOS, as mpv names it too."""
+    return bytes(device.id().data()).decode("utf-8", "replace")
+
 
 _STATE_MAP = {
     QMediaPlayer.PlaybackState.StoppedState: PlaybackState.STOPPED,
@@ -78,6 +86,7 @@ def audio_buffer_to_mono(buffer: QAudioBuffer) -> NDArray[np.float32] | None:
 class QtAudioBackend(AudioBackend):
     name: ClassVar[str] = "qt"
     provides_audio_frames: ClassVar[bool] = True  # QAudioBufferOutput taps the PCM
+    supports_output_devices: ClassVar[bool] = True
 
     def __init__(self) -> None:
         super().__init__()
@@ -93,6 +102,9 @@ class QtAudioBackend(AudioBackend):
         self._bitrate = 0  # of the playing audio: from metadata, and from the PCM tap
         self._sample_rate = 0
         self._player.setAudioBufferOutput(self._tap)
+        self._device_id: str | None = None  # None: follow the system default
+        self._media_devices = QMediaDevices()  # its signal needs an instance kept alive
+        self._media_devices.audioOutputsChanged.connect(self._on_outputs_changed)
 
         self._player.playbackStateChanged.connect(self._on_playback_state)
         self._player.positionChanged.connect(self._on_position)
@@ -145,10 +157,27 @@ class QtAudioBackend(AudioBackend):
         # QAudioOutput can't go above 1.0, so ReplayGain can attenuate but not boost here.
         self._output.setVolume(min(self._linear_volume * self._gain, 1.0))
 
+    def output_devices(self) -> list[OutputDevice]:
+        return [OutputDevice(_device_id(d), d.description()) for d in QMediaDevices.audioOutputs()]
+
+    def set_output_device(self, device_id: str | None) -> None:
+        self._device_id = device_id
+        device = next(
+            (d for d in QMediaDevices.audioOutputs() if _device_id(d) == device_id),
+            QMediaDevices.defaultAudioOutput(),
+        )
+        if device != self._output.device():  # setting it at all restarts the output
+            self._output.setDevice(device)
+
     def close(self) -> None:
         self._player.setSource(QUrl())
 
     # -- Qt signal handlers ------------------------------------------------- #
+
+    def _on_outputs_changed(self) -> None:
+        # QAudioOutput stays on the device it was given, so when following the system
+        # default, move to the new default (the player does that via set_output_device).
+        self._listener.on_output_devices_changed()
 
     def _on_playback_state(self, state: QMediaPlayer.PlaybackState) -> None:
         if state is QMediaPlayer.PlaybackState.StoppedState:

@@ -36,7 +36,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from pyamp.core.equalizer import Equalizer
-from pyamp.core.models import Location, PlaybackState, ReplayGainMode
+from pyamp.core.models import Location, OutputDevice, PlaybackState, ReplayGainMode
 
 
 class BackendListener(Protocol):
@@ -66,6 +66,10 @@ class BackendListener(Protocol):
         as 0, 0 once nothing is playing. Optional.
         """
         ...
+
+    def on_output_devices_changed(self) -> None:
+        """A device was connected or disconnected (see :meth:`AudioBackend.output_devices`)."""
+        return None
 
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
         """Mono float32 PCM in [-1, 1] that is currently being played (optional)."""
@@ -102,6 +106,9 @@ class _NullListener:
     def on_audio_info(self, bitrate: int, sample_rate: int) -> None:
         pass
 
+    def on_output_devices_changed(self) -> None:
+        pass
+
     def on_audio_frame(self, samples: NDArray[np.float32], sample_rate: int) -> None:
         pass
 
@@ -126,6 +133,9 @@ class AudioBackend(ABC):
     #: Whether the backend reports the PCM it plays (:meth:`BackendListener.on_audio_frame`).
     #: If not, the visualiser is fed by analysing the file separately (``track_analysis``).
     provides_audio_frames: ClassVar[bool] = False
+
+    #: Whether :meth:`output_devices` and :meth:`set_output_device` work.
+    supports_output_devices: ClassVar[bool] = False
 
     def __init__(self) -> None:
         self._listener: BackendListener = _NullListener()
@@ -177,6 +187,18 @@ class AudioBackend(ABC):
 
     def set_equalizer(self, equalizer: Equalizer) -> None:
         """Filter the output through ``equalizer``. Only for :attr:`supports_equalizer`."""
+        return None
+
+    def output_devices(self) -> list[OutputDevice]:
+        """The devices it can play through now, not counting the system default.
+
+        Reports changes with :meth:`BackendListener.on_output_devices_changed`.
+        """
+        return []
+
+    def set_output_device(self, device_id: str | None) -> None:
+        """Play through the device with ``device_id`` (from :meth:`output_devices`), or
+        through the system's default output if None, following it when it changes."""
         return None
 
     def buffered_range(self) -> tuple[float, float] | None:

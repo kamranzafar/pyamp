@@ -5,28 +5,28 @@ option) any later version; see `LICENSE`. Release builds bundle the components
 below, each under its own licence. Where a licence requires it (GPL, LGPL), the
 corresponding source is available at the links given.
 
-## Audio engine (macOS: `Contents/Frameworks/libmpv/`)
+## Audio engine (macOS: `Contents/Frameworks/libmpv/libmpv.dylib`)
 
-Prebuilt by [media-kit/libmpv-darwin-build](https://github.com/media-kit/libmpv-darwin-build)
-release **v0.7.3**, flavour `video-encodersgpl`. Build recipe and exact component
-versions: <https://github.com/media-kit/libmpv-darwin-build/tree/v0.7.3>.
+PyAmp's own audio-only build: one library with mpv, FFmpeg and their libraries linked
+in, built by `packaging/libmpv/build.sh` from the sources pinned in
+`packaging/libmpv/sources.lock` (with a one-line change to mpv's build files so its
+CoreAudio output builds without Cocoa; see the script). The builds for arm64 and x86_64,
+their exact sources and the commit that built them are at
+<https://github.com/kamranzafar/pyamp/releases/tag/libmpv-macos-audio-20261127>.
 
 | Component | Licence | Source |
 |---|---|---|
-| mpv (libmpv) | GPL-2.0-or-later | <https://github.com/mpv-player/mpv> |
-| FFmpeg (built with `--enable-gpl`) | GPL-2.0-or-later | <https://ffmpeg.org/download.html> |
-| x264 | GPL-2.0-or-later | <https://code.videolan.org/videolan/x264> |
-| libass | ISC | <https://github.com/libass/libass> |
-| FreeType | FreeType License (FTL) | <https://freetype.org> |
-| HarfBuzz | MIT ("Old MIT") | <https://github.com/harfbuzz/harfbuzz> |
-| GNU FriBidi | LGPL-2.1-or-later | <https://github.com/fribidi/fribidi> |
-| uchardet | MPL-1.1 / GPL-2.0-or-later / LGPL-2.1-or-later | <https://www.freedesktop.org/wiki/Software/uchardet/> |
-| libpng | libpng License | <http://www.libpng.org/pub/png/libpng.html> |
-| libvpx | BSD-3-Clause | <https://chromium.googlesource.com/webm/libvpx> |
-| dav1d | BSD-2-Clause | <https://code.videolan.org/videolan/dav1d> |
-| libogg, libvorbis | BSD-3-Clause | <https://xiph.org> |
-| Mbed TLS | Apache-2.0 | <https://github.com/Mbed-TLS/mbedtls> |
-| libxml2 | MIT | <https://gitlab.gnome.org/GNOME/libxml2> |
+| mpv 0.42.0 (libmpv) | GPL-2.0-or-later | <https://github.com/mpv-player/mpv> |
+| FFmpeg 9.1 (built with `--enable-version3`, for Mbed TLS) | LGPL-3.0-or-later | <https://ffmpeg.org/download.html> |
+| Mbed TLS 3.6.8 | Apache-2.0 | <https://github.com/Mbed-TLS/mbedtls> |
+| libplacebo 7.387.0 | LGPL-2.1-or-later | <https://code.videolan.org/videolan/libplacebo> |
+| libass 0.17.5 | ISC | <https://github.com/libass/libass> |
+| FreeType 2.15.0 | FreeType License (FTL) | <https://freetype.org> |
+| HarfBuzz 15.2.0 | MIT ("Old MIT") | <https://github.com/harfbuzz/harfbuzz> |
+| GNU FriBidi 1.0.18 | LGPL-2.1-or-later | <https://github.com/fribidi/fribidi> |
+
+The combination is distributed under the GPL (version 3, because of Mbed TLS's Apache
+licence), compatible with PyAmp's GPL-3.0-or-later.
 
 ## Audio engine (Windows: `_internal\libmpv\libmpv-2.dll`)
 

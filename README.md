@@ -241,9 +241,11 @@ the user folder) is set by `--libmpv` (remembered, like `--backend`):
 A copy that is missing or fails to load is skipped in favour of the next one;
 `PYAMP_LIBMPV` always wins. `uv run pyamp --version` shows which libmpv is used and
 the preference. If a libmpv's ffmpeg lacks the filters the equaliser needs, PyAmp
-says so (and suggests `--libmpv bundled`) instead of failing silently. On macOS, [media-kit's builds](https://github.com/media-kit/libmpv-darwin-build/releases)
-work: take `libmpv-libs_…_macos-<arch>-audio-encodersgpl` (the other flavours lack the
-filters the equaliser needs). They expect libass from the system (`brew install libass`).
+says so (and suggests `--libmpv bundled`) instead of failing silently. On macOS and
+Windows, the libmpv the apps bundle works on its own: take
+`libmpv-audio-macos-<arch>-….tar.gz` or `libmpv-audio-x86_64-….zip` from the newest
+[`libmpv-*-audio-*` pre-release](../../releases) and put its `libmpv.dylib` or
+`libmpv-2.dll` in the folder.
 
 ### ReplayGain
 
@@ -616,8 +618,6 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
 
 - **Code signing** for the Windows and macOS builds, so SmartScreen and Gatekeeper
   don't warn.
-- **Smaller macOS download**: an audio-only libmpv for macOS too, built the way the
-  Windows one is (the macOS app bundles a general-purpose one with video codecs).
 - **Output device**: a **Playback → Output Device** menu to play through a chosen
   device (a DAC, one pair of speakers) while the rest of the system keeps its default;
   remembered, and back to the system default if that device goes away. Bluetooth and

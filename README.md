@@ -273,6 +273,21 @@ for each change, which can cause a tiny audible blip), and the settings are
 remembered. Boosting bands can clip loud tracks; lower the preamp if you hear
 distortion.
 
+### Visualiser
+
+The strip under the time shows the music's spectrum. Click it to move on to the next
+style, or pick one from **View → Visualiser**: **Bars** (Winamp's, with falling peak
+caps), **Dots** (only the caps), **Mirrored**, **Line**, a scrolling **Spectrogram**, a
+**Level Meter**, **Radial**, **Waves** (sine waves whose height follows the bass, mids
+and treble; not the sound's real waveform), or **Off**. The choice is remembered.
+Every style draws the same 20 band levels, so they all work with both backends.
+**Off** also stops working the levels out.
+
+A style is one class in `ui/visualiser/styles.py`: subclass `Style`, give it an `id`
+and a `label`, draw the `Frame` (bars, peak caps, past bars if it asks for a
+`history`, and a frame count for styles that move by themselves) in `paint`, and
+`@register` it. The menu, clicking and the saved setting pick it up from there.
+
 ### Streams and internet radio
 
 **File → Add URL to Playlist…** (`Ctrl+U`) adds an `http://` or `https://` stream to
@@ -535,8 +550,9 @@ Auto-saves of the open playlist are written by `ui/playlist_session.py` on a sin
 writer thread, from a snapshot of the (immutable) tracks; anything else that touches
 the playlist files (switching, renaming, deleting, quitting) waits for it first.
 
-The visualiser only works while the window can be seen: hiding or minimising it pauses
-the FFT and, on the `mpv` backend, the second decoding of the playing file.
+The visualiser only works while the window can be seen and isn't **Off**: hiding or
+minimising the window, or choosing **Off**, pauses the FFT and, on the `mpv` backend,
+the second decoding of the playing file.
 
 The media library is scanned the same way by `ui/library_scan.py`: one scan at a time
 on its own worker thread. The index (`library/catalog.py`) is one SQLite connection
@@ -622,11 +638,6 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
   device (a DAC, one pair of speakers) while the rest of the system keeps its default;
   remembered, and back to the system default if that device goes away. Bluetooth and
   AirPlay speakers already work by choosing them as the system's output.
-- **Visualiser styles** to pick from, besides today's bars: **dots** (only the falling
-  peak caps), **mirrored** bars, a **line** or filled area, a scrolling **spectrogram**,
-  a **level meter** and **radial** bars, or **off**. Clicking the visualiser cycles
-  through them, and the choice is remembered. All of them draw the band levels the
-  visualiser already gets, so they work the same with both backends.
 
 Not planned, to keep PyAmp lightweight:
 

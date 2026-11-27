@@ -222,7 +222,7 @@ class Application:
             ),
             DEFAULT_SKIN,
         )
-        self.window.visibility_changed.connect(self._set_visualiser_active)
+        self.window.visualiser_wanted.connect(self._set_visualiser_active)
         # The saved playlists, after this computer in the library; their commands use the
         # window's dialogs.
         self.playlists_source = PlaylistsSource(
@@ -311,7 +311,7 @@ class Application:
         self.player.shutdown()
 
     def _set_visualiser_active(self, seen: bool) -> None:
-        """The visualiser only works while the window can be seen (saves battery)."""
+        """The visualiser only works while it can be seen and isn't off (saves battery)."""
         self.spectrum.set_active(seen)
         if self.analysed_spectrum is not None:
             self.analysed_spectrum.set_active(seen)

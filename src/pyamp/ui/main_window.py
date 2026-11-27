@@ -80,6 +80,7 @@ from pyamp.ui.playlist_model import PlaylistModel, dropped_locations
 from pyamp.ui.playlist_session import PlaylistSession
 from pyamp.ui.skin import Skin
 from pyamp.ui.track_drag import dragged_tracks
+from pyamp.ui.visualiser import STYLES
 from pyamp.ui.widgets.lcd import LcdPanel
 from pyamp.ui.widgets.playlist_selector import PlaylistSelector
 from pyamp.ui.widgets.playlist_view import PlaylistView
@@ -125,15 +126,16 @@ class UiServices:
 
 
 class MainWindow(QMainWindow):
-    #: Whether the window can be seen (shown and not minimised); the visualiser pauses
-    #: its work while it can't.
-    visibility_changed = Signal(bool)
+    #: Whether the visualiser needs levels: the window can be seen (shown and not
+    #: minimised) and its style isn't "Off". The levels aren't worked out while not.
+    visualiser_wanted = Signal(bool)
     #: Asks to save a stream as a radio station: ``(url, name)``. Set by the app.
     save_to_radio: Callable[[str, str], object] | None = None
 
     def __init__(self, services: UiServices, skin: Skin) -> None:
         super().__init__()
         self._seen = False
+        self._visualiser_wanted = False
         self._s = services
         self._skin = skin
         self._equalizer_window: EqualizerWindow | None = None
@@ -152,6 +154,7 @@ class MainWindow(QMainWindow):
             skin,
             services.spectrum_bands,
             show_remaining=services.settings.show_remaining_time,
+            visualiser_style=services.settings.visualiser_style,
         )
         self._seek = SeekSlider(services.bus)
         self._seek.seek_requested.connect(services.player.seek)
@@ -356,6 +359,8 @@ class MainWindow(QMainWindow):
         return self._about_dialog
 
     def _build_view_menu(self, view_menu: QMenu) -> None:
+        self._build_visualiser_menu(view_menu.addMenu("&Visualiser"))
+        view_menu.addSeparator()
         self.show_icon_action = QAction(f"Show Icon in {PLACE}", self)
         self.show_icon_action.setCheckable(True)
         self.show_icon_action.setChecked(self.menu_bar_icon.visible)
@@ -374,6 +379,32 @@ class MainWindow(QMainWindow):
             self.show_icon_action.setEnabled(False)
             self.show_icon_action.setToolTip(f"This desktop has no {PLACE.lower()}")
         self._sync_view_menu()
+
+    def _build_visualiser_menu(self, menu: QMenu) -> None:
+        """One entry per registered style, so a new style shows up here by itself."""
+        group = QActionGroup(self)
+        current = self._lcd.visualiser.style_id
+        self.visualiser_actions: dict[str, QAction] = {}
+        for style in STYLES.values():
+            if not style.active:
+                menu.addSeparator()  # "Off" stands apart from the styles
+            action = QAction(style.label, group)
+            action.setCheckable(True)
+            action.setChecked(style.id == current)
+            action.triggered.connect(
+                lambda _=False, style=style.id: self._lcd.visualiser.set_style(style)
+            )
+            menu.addAction(action)
+            self.visualiser_actions[style.id] = action
+        menu.addSeparator()
+        hint = menu.addAction("Click the Visualiser to Change It")
+        hint.setEnabled(False)
+        self._lcd.visualiser.style_changed.connect(self._on_visualiser_style)
+
+    def _on_visualiser_style(self, style: str) -> None:
+        self._s.settings.visualiser_style = style  # saved on quit
+        self.visualiser_actions[style].setChecked(True)
+        self._sync_seen()
 
     def _build_backend_menu(self, parent: QMenu) -> None:
         """Choose the audio backend; it's set up as PyAmp starts, so it applies then."""
@@ -804,11 +835,16 @@ class MainWindow(QMainWindow):
     def seen(self) -> bool:
         return self._seen
 
+    @property
+    def visualiser_needed(self) -> bool:
+        return self._visualiser_wanted
+
     def _sync_seen(self) -> None:
-        seen = self.isVisible() and not self.isMinimized()
-        if seen != self._seen:
-            self._seen = seen
-            self.visibility_changed.emit(seen)
+        self._seen = self.isVisible() and not self.isMinimized()
+        wanted = self._seen and self._lcd.visualiser.active
+        if wanted != self._visualiser_wanted:
+            self._visualiser_wanted = wanted
+            self.visualiser_wanted.emit(wanted)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)

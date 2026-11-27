@@ -622,6 +622,11 @@ PyAmp aims to stay small: a fast player for local files, not a media centre.
   device (a DAC, one pair of speakers) while the rest of the system keeps its default;
   remembered, and back to the system default if that device goes away. Bluetooth and
   AirPlay speakers already work by choosing them as the system's output.
+- **Visualiser styles** to pick from, besides today's bars: **dots** (only the falling
+  peak caps), **mirrored** bars, a **line** or filled area, a scrolling **spectrogram**,
+  a **level meter** and **radial** bars, or **off**. Clicking the visualiser cycles
+  through them, and the choice is remembered. All of them draw the band levels the
+  visualiser already gets, so they work the same with both backends.
 
 Not planned, to keep PyAmp lightweight:
 

@@ -76,6 +76,7 @@ class LcdPanel(QFrame):
         band_count: int,
         *,
         show_remaining: bool = False,
+        visualiser_style: str = "bars",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -112,7 +113,7 @@ class LcdPanel(QFrame):
         self._audio_info.setFont(small)
         self._audio_info.setStyleSheet(lcd_style)
         self._audio_info.setToolTip("Bitrate and sample rate of what's playing")
-        self._spectrum = SpectrumWidget(band_count, skin)
+        self._spectrum = SpectrumWidget(band_count, skin, style=visualiser_style)
         self._lay_out()
 
         # Winamp blinks the time display while paused.
@@ -142,6 +143,10 @@ class LcdPanel(QFrame):
         layout.addWidget(self._audio_info, 1, 2)
         layout.addWidget(self._spectrum, 2, 0, 1, 3)
         layout.setColumnStretch(2, 1)
+
+    @property
+    def visualiser(self) -> SpectrumWidget:
+        return self._spectrum
 
     @property
     def show_remaining(self) -> bool:

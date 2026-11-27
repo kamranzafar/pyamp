@@ -52,6 +52,8 @@ class Settings:
     active_playlist: str = ""
     last_directory: str = ""
     show_remaining_time: bool = False
+    #: How the visualiser draws: an id from ``pyamp.ui.visualiser.STYLES``, or "off".
+    visualiser_style: str = "bars"
     #: Show PyAmp's icon in the menu bar (macOS) or system tray.
     show_in_menu_bar: bool = True
     #: Closing the window only hides it and the music keeps playing, until Quit (the

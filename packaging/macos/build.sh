@@ -4,38 +4,49 @@
 #
 # Build PyAmp.app (with libmpv bundled) and a .dmg for this Mac's architecture.
 #
-#   packaging/macos/build.sh [output-dir]      (default: dist/)
+#   packaging/macos/build.sh [--libmpv <folder>] [output-dir]      (default: dist/)
 #
 # The pinned libmpv download is cached in build/libmpv-cache/ and checked against
-# the SHA-256 in packaging/macos/libmpv.lock.
+# the SHA-256 in packaging/macos/libmpv.lock. --libmpv bundles the libmpv in that folder
+# instead (e.g. one just built by packaging/libmpv/build.sh, to test it in the app).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+LIBMPV_DIR=
+if [ "${1:-}" = --libmpv ]; then
+  LIBMPV_DIR=$(cd "${2:?--libmpv needs a folder}" && pwd)
+  shift 2
+fi
 OUT=${1:-"$ROOT/dist"}
 ARCH=$(uname -m) # x86_64 or arm64
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 # -- libmpv ------------------------------------------------------------------- #
-read -r SHA URL < <(awk -v arch="$ARCH" '$1 == arch { print $2, $3 }' "$ROOT/packaging/macos/libmpv.lock") || true
-if [ -z "${URL:-}" ]; then
-  echo "error: no libmpv pinned for $ARCH in packaging/macos/libmpv.lock" >&2
-  exit 1
+if [ -n "$LIBMPV_DIR" ]; then
+  mkdir -p "$WORK/libmpv"
+  cp "$LIBMPV_DIR"/*.dylib "$WORK/libmpv/"
+else
+  read -r SHA URL < <(awk -v arch="$ARCH" '$1 == arch { print $2, $3 }' "$ROOT/packaging/macos/libmpv.lock") || true
+  if [ -z "${URL:-}" ]; then
+    echo "error: no libmpv pinned for $ARCH in packaging/macos/libmpv.lock" >&2
+    exit 1
+  fi
+  CACHE="$ROOT/build/libmpv-cache"
+  TARBALL="$CACHE/$(basename "$URL")"
+  mkdir -p "$CACHE"
+  if [ ! -f "$TARBALL" ]; then
+    echo "Downloading $(basename "$URL")"
+    curl -fsSL "$URL" -o "$TARBALL.part" && mv "$TARBALL.part" "$TARBALL"
+  fi
+  echo "$SHA  $TARBALL" | shasum -a 256 -c - >/dev/null || {
+    echo "error: checksum mismatch for $TARBALL (deleted; re-run to download again)" >&2
+    rm -f "$TARBALL"
+    exit 1
+  }
+  mkdir -p "$WORK/libmpv"
+  tar -xzf "$TARBALL" -C "$WORK/libmpv" --strip-components=1
 fi
-CACHE="$ROOT/build/libmpv-cache"
-TARBALL="$CACHE/$(basename "$URL")"
-mkdir -p "$CACHE"
-if [ ! -f "$TARBALL" ]; then
-  echo "Downloading $(basename "$URL")"
-  curl -fsSL "$URL" -o "$TARBALL.part" && mv "$TARBALL.part" "$TARBALL"
-fi
-echo "$SHA  $TARBALL" | shasum -a 256 -c - >/dev/null || {
-  echo "error: checksum mismatch for $TARBALL (deleted; re-run to download again)" >&2
-  rm -f "$TARBALL"
-  exit 1
-}
-mkdir -p "$WORK/libmpv"
-tar -xzf "$TARBALL" -C "$WORK/libmpv" --strip-components=1
 
 # -- App ---------------------------------------------------------------------- #
 VERSION=$(cd "$ROOT" && uv run --group packaging python -c "import pyamp; print(pyamp.__version__)")

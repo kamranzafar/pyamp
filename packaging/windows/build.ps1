@@ -7,7 +7,7 @@
 #   pwsh packaging/windows/build.ps1 [-Out dist] [-Libmpv path\to\libmpv-2.dll]
 #
 # -Libmpv bundles that DLL instead of the pinned download (e.g. one just built by
-# packaging/windows/libmpv/build.sh, to test it in the app).
+# packaging/libmpv/build.sh, to test it in the app).
 #
 # The pinned libmpv download is cached in build\libmpv-cache\ and checked against the
 # SHA-256 in packaging\windows\libmpv.lock. Needs 7-Zip (7z) and Inno Setup 6 (ISCC).

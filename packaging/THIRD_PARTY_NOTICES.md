@@ -31,8 +31,8 @@ versions: <https://github.com/media-kit/libmpv-darwin-build/tree/v0.7.3>.
 ## Audio engine (Windows: `_internal\libmpv\libmpv-2.dll`)
 
 PyAmp's own audio-only build: one DLL with mpv, FFmpeg and their libraries linked in,
-cross-compiled by `packaging/windows/libmpv/build.sh` from the sources pinned in
-`packaging/windows/libmpv/sources.lock`. The build, its exact sources and the commit
+cross-compiled by `packaging/libmpv/build.sh` from the sources pinned in
+`packaging/libmpv/sources.lock`. The build, its exact sources and the commit
 that built it are at
 <https://github.com/kamranzafar/pyamp/releases/tag/libmpv-windows-audio-20261126>.
 

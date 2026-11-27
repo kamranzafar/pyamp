@@ -411,13 +411,17 @@ the zip and the installer (`pyamp.iss`). On Windows the app folder has two progr
 since a windowed program can't print. Licences of bundled components are listed in
 `packaging/THIRD_PARTY_NOTICES.md`, which ships with the app.
 
-The Windows libmpv is PyAmp's own audio-only build (18.7 MB instead of the 122 MB of a
-general-purpose one): `packaging/windows/libmpv/build.sh` cross-compiles it on Linux
-from the sources pinned in `sources.lock`, and the `libmpv (Windows, audio only)`
-workflow builds it, packages the app with it and self-tests it on Windows
-(`build.ps1 -Libmpv <dll>`). To update it, change the pins, let the workflow pass,
-publish its DLL with its sources as a `libmpv-windows-audio-<date>` pre-release and pin
-that in `packaging/windows/libmpv.lock`.
+libmpv is PyAmp's own audio-only build: one library with FFmpeg and its libraries linked
+in, without video outputs, GPU APIs or video codecs (Windows: 18.7 MB instead of the
+122 MB of a general-purpose `libmpv-2.dll`; macOS: 14.6 MB instead of a 35 MB folder).
+`packaging/libmpv/build.sh <target>` builds it from the sources pinned in
+`packaging/libmpv/sources.lock`: cross-compiled on Linux for `windows-x86_64`, natively
+on a Mac for `macos-arm64` and `macos-x86_64`. The `libmpv (audio only)` workflow builds
+all three, packages the app with each (`build.ps1 -Libmpv <dll>`, `build.sh --libmpv
+<folder>`) and self-tests it. To update them, change the pins, let the workflow pass,
+publish its libraries with their sources as a pre-release
+(`libmpv-windows-audio-<date>`, `libmpv-macos-audio-<date>`) and pin those in
+`packaging/windows/libmpv.lock` and `packaging/macos/libmpv.lock`.
 
 ### Making a release
 

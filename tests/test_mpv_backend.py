@@ -605,12 +605,10 @@ def test_no_ca_file_option_without_the_file(tmp_path: Path) -> None:
     assert tls_options("darwin", tmp_path / "missing.pem") == {}
 
 
-def test_lists_devices_and_follows_the_default(
-    backend: MpvAudioBackend, recorder: Recorder
-) -> None:
-    devices = backend.output_devices()  # the null output has none to offer
-    assert all(d.id and d.name for d in devices)
-    backend.set_output_device("no-such-device")  # unknown: stays on the default
+def test_an_output_without_devices_lists_none(backend: MpvAudioBackend) -> None:
+    # ao="null": no device watchers are started (they have hung mpv on CI's audio setup).
+    assert backend.output_devices() == []
+    backend.set_output_device("no-such-device")  # nothing to switch to: the default
     assert backend._mpv.audio_device == "auto"
     backend.set_output_device(None)
     assert backend._mpv.audio_device == "auto"
@@ -629,20 +627,11 @@ def test_devices_are_listed_unless_pipewire_is_incomplete() -> None:
     def fine(_env: object) -> bool:
         return False
 
-    assert lists_devices("linux", {}, fine)
-    assert not lists_devices("linux", {}, broken)
-    assert lists_devices("darwin", {}, broken)  # only Linux has PipeWire
-    assert lists_devices("win32", {}, broken)
-
-
-def test_without_device_listing_only_the_default_is_offered(
-    qt_app: QCoreApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("pyamp.audio.mpv_backend.lists_devices", lambda: False)
-    backend = MpvAudioBackend(ao="null")
-    try:
-        assert backend.output_devices() == []
-        backend.set_output_device("some-device")
-        assert backend._mpv.audio_device == "auto"
-    finally:
-        backend.close()
+    assert lists_devices(None, "linux", {}, fine)
+    assert lists_devices("pulse", "linux", {}, fine)
+    assert not lists_devices(None, "linux", {}, broken)
+    assert lists_devices(None, "darwin", {}, broken)  # only Linux has PipeWire
+    assert lists_devices(None, "win32", {}, broken)
+    # Outputs without devices: nothing to list, and no device watchers started.
+    assert not lists_devices("null", "darwin", {}, fine)
+    assert not lists_devices("pcm", "win32", {}, fine)

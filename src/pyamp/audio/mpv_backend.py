@@ -151,17 +151,26 @@ _REPLAYGAIN = {
 }
 
 
+#: mpv outputs that don't play through a device: nothing to list or choose.
+DEVICELESS_OUTPUTS = ("null", "pcm")
+
+
 def lists_devices(
+    ao: str | None = None,
     platform: str = sys.platform,
     env: Mapping[str, str] = os.environ,
     incomplete: Callable[[Mapping[str, str]], bool] = pipewire_is_incomplete,
 ) -> bool:
-    """Whether it's safe to ask mpv for the output devices.
+    """Whether to ask mpv for the output devices, for its ``ao`` option.
 
-    Listing them starts mpv's device watchers for every audio system it knows. With an
-    incomplete PipeWire (libpipewire without its client.conf) that one can keep mpv
-    from shutting down, so PyAmp then sticks to the system default.
+    Listing them starts mpv's device watchers (PulseAudio, PipeWire, ...) on its core
+    thread. Outputs without devices (tests' "null") don't need them, and on CI's
+    virtual audio setup starting them has now and then hung mpv for good. With an
+    incomplete PipeWire (libpipewire without its client.conf) PyAmp also sticks to the
+    system default.
     """
+    if ao in DEVICELESS_OUTPUTS:
+        return False
     return not (platform.startswith("linux") and incomplete(env))
 
 
@@ -282,10 +291,10 @@ class MpvAudioBackend(AudioBackend):
         self._mpv.observe_property("metadata", self._observe_metadata)
         self._mpv.observe_property("audio-bitrate", self._observe_audio)
         self._mpv.observe_property("audio-params", self._observe_audio)
-        self._lists_devices = lists_devices()
+        self._lists_devices = lists_devices(options.get("ao"))
         if self._lists_devices:
             self._mpv.observe_property("audio-device-list", self._observe_devices)
-        else:
+        elif options.get("ao") not in DEVICELESS_OUTPUTS:
             log.warning(
                 "PipeWire's client library is installed without its configuration "
                 "(client.conf); playing through the system default output only"

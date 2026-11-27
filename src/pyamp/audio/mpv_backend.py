@@ -36,10 +36,11 @@ from __future__ import annotations
 import functools
 import locale
 import logging
+import os
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -52,6 +53,7 @@ from pyamp.audio.libmpv_loader import (
     import_mpv,
     missing_filters,
 )
+from pyamp.audio.qt_audio_env import pipewire_is_incomplete
 from pyamp.core.equalizer import BANDS_HZ, Equalizer
 from pyamp.core.models import Location, OutputDevice, PlaybackState, ReplayGainMode, parse_location
 
@@ -147,6 +149,29 @@ _REPLAYGAIN = {
     ReplayGainMode.TRACK: "track",
     ReplayGainMode.ALBUM: "album",
 }
+
+
+#: mpv outputs that don't play through a device: nothing to list or choose.
+DEVICELESS_OUTPUTS = ("null", "pcm")
+
+
+def lists_devices(
+    ao: str | None = None,
+    platform: str = sys.platform,
+    env: Mapping[str, str] = os.environ,
+    incomplete: Callable[[Mapping[str, str]], bool] = pipewire_is_incomplete,
+) -> bool:
+    """Whether to ask mpv for the output devices, for its ``ao`` option.
+
+    Listing them starts mpv's device watchers (PulseAudio, PipeWire, ...) on its core
+    thread. Outputs without devices (tests' "null") don't need them, and on CI's
+    virtual audio setup starting them has now and then hung mpv for good. With an
+    incomplete PipeWire (libpipewire without its client.conf) PyAmp also sticks to the
+    system default.
+    """
+    if ao in DEVICELESS_OUTPUTS:
+        return False
+    return not (platform.startswith("linux") and incomplete(env))
 
 
 #: mpv's name for "the system's default output, following it when it changes".
@@ -266,7 +291,14 @@ class MpvAudioBackend(AudioBackend):
         self._mpv.observe_property("metadata", self._observe_metadata)
         self._mpv.observe_property("audio-bitrate", self._observe_audio)
         self._mpv.observe_property("audio-params", self._observe_audio)
-        self._mpv.observe_property("audio-device-list", self._observe_devices)
+        self._lists_devices = lists_devices(options.get("ao"))
+        if self._lists_devices:
+            self._mpv.observe_property("audio-device-list", self._observe_devices)
+        elif options.get("ao") not in DEVICELESS_OUTPUTS:
+            log.warning(
+                "PipeWire's client library is installed without its configuration "
+                "(client.conf); playing through the system default output only"
+            )
         self._mpv.register_event_callback(self._on_event)
         # mpv 0.31+ can write what it has buffered to a file (for the visualiser).
         self._can_dump_cache = any(c.get("name") == "dump-cache" for c in self._mpv.command_list)
@@ -375,7 +407,7 @@ class MpvAudioBackend(AudioBackend):
 
     def _devices(self) -> dict[str, OutputDevice]:
         """mpv's device names (``coreaudio/<uid>``) -> the devices, without "auto"."""
-        if self._closed:
+        if self._closed or not self._lists_devices:
             return {}
         try:
             entries = self._mpv.audio_device_list or []

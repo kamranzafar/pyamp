@@ -39,6 +39,7 @@ from numpy.typing import NDArray
 
 from pyamp.core.events import AudioFrame, EventBus, PlaybackStateChanged, SpectrumUpdated
 from pyamp.core.models import PlaybackState
+from pyamp.dsp.waveform import WAVE_SECONDS, waveform
 
 
 class SpectrumAnalyzer:
@@ -165,7 +166,8 @@ class SpectrumService:
         if not self._active:
             return
         levels = self._analyzer.analyze(event.samples, event.sample_rate)
-        self._bus.publish(SpectrumUpdated(tuple(levels.tolist())))
+        recent = event.samples[-max(round(event.sample_rate * WAVE_SECONDS), 1) :]
+        self._bus.publish(SpectrumUpdated(tuple(levels.tolist()), tuple(waveform(recent).tolist())))
 
     def _on_state(self, event: PlaybackStateChanged) -> None:
         if event.state is not PlaybackState.PLAYING:

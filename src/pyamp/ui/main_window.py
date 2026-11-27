@@ -270,9 +270,9 @@ class MainWindow(QMainWindow):
         play_menu.addActions([self._actions.seek_back, self._actions.seek_forward])
         play_menu.addSeparator()
         play_menu.addActions([self._actions.shuffle, self._actions.repeat])
+        self._add_menu_action(play_menu, "&Equaliser…", self.show_equalizer, "G")
         replay_gain_menu = play_menu.addMenu("Replay&Gain")
         replay_gain_menu.addActions(list(self._actions.replay_gain.values()))
-        self._add_menu_action(play_menu, "&Equaliser…", self.show_equalizer, "G")
         self.output_device_menu = OutputDeviceMenu(
             self._s.player,
             self._s.bus,

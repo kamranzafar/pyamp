@@ -25,6 +25,8 @@ from __future__ import annotations
 from PySide6.QtCore import QCoreApplication
 
 from pyamp.app import Application
+from pyamp.audio.device_report import device_report
+from pyamp.audio.registry import BackendUnavailableError
 from pyamp.config import SettingsStore
 from pyamp.core.events import EventBus, OutputDeviceChanged
 from pyamp.core.models import OutputDevice
@@ -149,3 +151,34 @@ def test_the_choice_is_remembered(app: Application) -> None:  # noqa: F811
     app.shutdown()
     saved = SettingsStore(app._store.directory).load()
     assert (saved.output_device, saved.output_device_name) == ("dac-uid", "USB DAC")
+
+
+def _backend_with(*devices: OutputDevice) -> FakeBackend:
+    backend = FakeBackend()
+    backend.devices = list(devices)
+    return backend
+
+
+def test_the_device_report_says_when_backends_agree() -> None:
+    backends = {"a": _backend_with(DAC, SPEAKERS), "b": _backend_with(SPEAKERS, DAC)}
+    report = device_report(["a", "b"], backends.__getitem__)
+    assert "a: 2 device(s)" in report
+    assert "  USB DAC\n    id: dac-uid" in report
+    assert report.endswith("stays chosen across backends.")
+
+
+def test_the_device_report_lists_ids_only_one_backend_has() -> None:
+    other = OutputDevice("{0.0.0.00000000}.{dac}", "USB DAC")
+    backends = {"mpv": _backend_with(DAC), "qt": _backend_with(other)}
+    report = device_report(["mpv", "qt"], backends.__getitem__)
+    assert "dac-uid  (not listed by qt)" in report
+    assert "{0.0.0.00000000}.{dac}  (not listed by mpv)" in report
+
+
+def test_the_device_report_copes_with_missing_backends() -> None:
+    def create(name: str) -> FakeBackend:
+        raise BackendUnavailableError(name, "no libmpv")
+
+    report = device_report(["mpv"], create)
+    assert "mpv: not available (no libmpv)" in report
+    assert "nothing to compare" in report

@@ -279,13 +279,14 @@ The strip under the time shows the music's spectrum. Click it to move on to the 
 style, or pick one from **View → Visualiser**: **Bars** (Winamp's, with falling peak
 caps), **Dots** (only the caps), **Mirrored**, **Line**, a scrolling **Spectrogram**, a
 **Level Meter**, **Radial**, **Waves** (sine waves whose height follows the bass, mids
-and treble; not the sound's real waveform), or **Off**. The choice is remembered.
-Every style draws the same 20 band levels, so they all work with both backends.
-**Off** also stops working the levels out.
+and treble; not the sound's real waveform), an **Oscilloscope** (the real waveform), or
+**Off**. The choice is remembered. All of them work with both backends: the 20 band
+levels and the waveform come from the audio being played (Qt) or from the second
+decoding of the file (mpv). **Off** also stops working them out.
 
 A style is one class in `ui/visualiser/styles.py`: subclass `Style`, give it an `id`
-and a `label`, draw the `Frame` (bars, peak caps, past bars if it asks for a
-`history`, and a frame count for styles that move by themselves) in `paint`, and
+and a `label`, draw the `Frame` (bars, peak caps, the waveform, past bars if it asks
+for a `history`, and a frame count for styles that move by themselves) in `paint`, and
 `@register` it. The menu, clicking and the saved setting pick it up from there.
 
 ### Output device
@@ -296,7 +297,9 @@ speakers, while the rest of the system keeps its default. The choice is remember
 that device is disconnected, PyAmp says so and plays through the system default until
 it's back, then moves back to it. Bluetooth and AirPlay speakers work either way, as
 devices of their own or as the system's output. On macOS both backends name devices
-the same way, so the choice also stays when you change backend.
+the same way, so the choice also stays when you change backend. To see each backend's
+devices and whether they agree, run `pyamp --list-output-devices` (on Windows,
+`pyamp-console.exe --list-output-devices` in PyAmp's folder).
 
 ### Streams and internet radio
 
@@ -423,6 +426,7 @@ uv run pre-commit install  # run ruff and mypy on every commit
 packaging/macos/build.sh   # build dist/PyAmp.app and a .dmg (macOS)
 packaging/macos/build.sh --app-only  # just dist/PyAmp.app, no .dmg (quicker)
 pwsh packaging/windows/build.ps1  # build dist\PyAmp, a zip and a setup.exe (Windows; needs 7-Zip and Inno Setup)
+pwsh packaging/windows/build.ps1 -AppOnly  # just dist\PyAmp (quicker)
 uv run python packaging/make_icons.py  # regenerate .icns/.ico/.png after editing the icon SVG
 uv run python docs/make_header.py      # regenerate the README header SVG
 ```

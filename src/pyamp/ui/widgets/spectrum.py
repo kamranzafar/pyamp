@@ -74,6 +74,8 @@ class SpectrumWidget(QWidget):
         self._hold = np.zeros(band_count, dtype=int)
         self._history = np.zeros((0, band_count))
         self._tick = 0
+        self._wave = np.zeros(0)
+        self._wave_is_new = False  # arrived since the last frame was drawn
         self._style: Style = STYLES[DEFAULT_STYLE](self._palette)
         self.setMinimumHeight(32)
         self.setToolTip("Click to change the visualiser (also in View → Visualiser)")
@@ -104,6 +106,7 @@ class SpectrumWidget(QWidget):
         if not self._style.active:
             self._timer.stop()
             self._target[:] = self._bars[:] = self._peaks[:] = 0.0
+            self._wave = np.zeros(0)
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -113,11 +116,13 @@ class SpectrumWidget(QWidget):
             return
         super().mousePressEvent(event)
 
-    def set_levels(self, levels: Sequence[float]) -> None:
+    def set_levels(self, levels: Sequence[float], waveform: Sequence[float] = ()) -> None:
         if not self._style.active:
             return
         self._target = np.asarray(levels, dtype=float)
-        if self.isVisible() and not self._timer.isActive() and self._target.any():
+        self._wave = np.asarray(waveform, dtype=float)
+        self._wave_is_new = True
+        if self.isVisible() and not self._timer.isActive() and self._moving():
             self._timer.start()
 
     @property
@@ -126,7 +131,11 @@ class SpectrumWidget(QWidget):
 
     def _moving(self) -> bool:
         return bool(
-            self._target.any() or self._bars.any() or self._peaks.any() or self._history.any()
+            self._target.any()
+            or self._bars.any()
+            or self._peaks.any()
+            or self._history.any()
+            or self._wave.any()
         )
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -143,6 +152,7 @@ class SpectrumWidget(QWidget):
 
     def _animate(self) -> None:
         self._tick += 1
+        wave_is_new, self._wave_is_new = self._wave_is_new, False
         bars = np.maximum(self._target, self._bars - BAR_FALL).clip(0.0, 1.0)
         rising = bars >= self._peaks
         peaks = np.where(rising, bars, self._peaks)
@@ -155,10 +165,11 @@ class SpectrumWidget(QWidget):
             self._history[-1] = bars
         elif (
             not (self._style.moves and bars.any())
+            and not wave_is_new
             and np.array_equal(bars, self._bars)
             and np.array_equal(peaks, self._peaks)
         ):
-            if not (bars.any() or peaks.any()):
+            if not self._moving():
                 self._timer.stop()  # all fallen to zero: nothing to animate until new levels
             return  # nothing moved; skip the repaint
         self._bars, self._peaks = bars, peaks
@@ -173,5 +184,11 @@ class SpectrumWidget(QWidget):
         self._style.paint(
             painter,
             QRectF(self.rect()),
-            Frame(bars=self._bars, peaks=self._peaks, history=self._history, tick=self._tick),
+            Frame(
+                bars=self._bars,
+                peaks=self._peaks,
+                history=self._history,
+                tick=self._tick,
+                waveform=self._wave,
+            ),
         )

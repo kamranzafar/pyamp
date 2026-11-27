@@ -46,6 +46,7 @@ try:
         MpvAudioBackend,
         device_id_of,
         equalizer_graph,
+        lists_devices,
         tls_options,
     )
 except OSError as exc:  # no libmpv on this machine
@@ -604,12 +605,10 @@ def test_no_ca_file_option_without_the_file(tmp_path: Path) -> None:
     assert tls_options("darwin", tmp_path / "missing.pem") == {}
 
 
-def test_lists_devices_and_follows_the_default(
-    backend: MpvAudioBackend, recorder: Recorder
-) -> None:
-    devices = backend.output_devices()  # the null output has none to offer
-    assert all(d.id and d.name for d in devices)
-    backend.set_output_device("no-such-device")  # unknown: stays on the default
+def test_an_output_without_devices_lists_none(backend: MpvAudioBackend) -> None:
+    # ao="null": no device watchers are started (they have hung mpv on CI's audio setup).
+    assert backend.output_devices() == []
+    backend.set_output_device("no-such-device")  # nothing to switch to: the default
     assert backend._mpv.audio_device == "auto"
     backend.set_output_device(None)
     assert backend._mpv.audio_device == "auto"
@@ -619,3 +618,20 @@ def test_mpv_device_names_lose_their_output_prefix() -> None:
     assert device_id_of("coreaudio/BuiltInSpeakerDevice") == "BuiltInSpeakerDevice"
     assert device_id_of("wasapi/{0.0.0.00000000}.{abc}") == "{0.0.0.00000000}.{abc}"
     assert device_id_of("auto") == "auto"
+
+
+def test_devices_are_listed_unless_pipewire_is_incomplete() -> None:
+    def broken(_env: object) -> bool:
+        return True
+
+    def fine(_env: object) -> bool:
+        return False
+
+    assert lists_devices(None, "linux", {}, fine)
+    assert lists_devices("pulse", "linux", {}, fine)
+    assert not lists_devices(None, "linux", {}, broken)
+    assert lists_devices(None, "darwin", {}, broken)  # only Linux has PipeWire
+    assert lists_devices(None, "win32", {}, broken)
+    # Outputs without devices: nothing to list, and no device watchers started.
+    assert not lists_devices("null", "darwin", {}, fine)
+    assert not lists_devices("pcm", "win32", {}, fine)

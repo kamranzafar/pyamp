@@ -90,7 +90,8 @@ class _Recorder:
         pass
 
 
-def _ensure_qt_app() -> None:
+def ensure_qt_app() -> None:
+    """A Qt application without windows, for checks run from the command line."""
     from PySide6.QtCore import QCoreApplication  # noqa: PLC0415
     from PySide6.QtWidgets import QApplication  # noqa: PLC0415
 
@@ -231,7 +232,7 @@ def run_self_test(
     checks: Sequence[tuple[str, Check]] = CHECKS, out: Callable[[str], object] = print
 ) -> bool:
     """Run every check, report each one, and return whether all passed."""
-    _ensure_qt_app()
+    ensure_qt_app()
     passed = True
     for name, check in checks:
         try:

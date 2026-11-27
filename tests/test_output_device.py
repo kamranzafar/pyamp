@@ -25,7 +25,6 @@ from __future__ import annotations
 from PySide6.QtCore import QCoreApplication
 
 from pyamp.app import Application
-from pyamp.audio.mpv_backend import device_id_of
 from pyamp.config import SettingsStore
 from pyamp.core.events import EventBus, OutputDeviceChanged
 from pyamp.core.models import OutputDevice
@@ -105,12 +104,6 @@ def test_backends_without_devices_keep_the_choice_quietly(bus: EventBus) -> None
     assert player.output_device == DAC
     assert player.output_device_connected  # nothing to warn about
     assert backend.device_id is None  # never asked
-
-
-def test_mpv_device_names_lose_their_output_prefix() -> None:
-    assert device_id_of("coreaudio/BuiltInSpeakerDevice") == "BuiltInSpeakerDevice"
-    assert device_id_of("wasapi/{0.0.0.00000000}.{abc}") == "{0.0.0.00000000}.{abc}"
-    assert device_id_of("auto") == "auto"
 
 
 def test_the_menu_lists_and_chooses_devices(

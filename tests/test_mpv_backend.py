@@ -41,7 +41,13 @@ from tests.conftest import BackendRecorder as Recorder
 from tests.radio import RadioStation
 
 try:
-    from pyamp.audio.mpv_backend import EQ_LABEL, MpvAudioBackend, equalizer_graph, tls_options
+    from pyamp.audio.mpv_backend import (
+        EQ_LABEL,
+        MpvAudioBackend,
+        device_id_of,
+        equalizer_graph,
+        tls_options,
+    )
 except OSError as exc:  # no libmpv on this machine
     pytest.skip(f"libmpv not available: {exc}", allow_module_level=True)
 
@@ -607,3 +613,9 @@ def test_lists_devices_and_follows_the_default(
     assert backend._mpv.audio_device == "auto"
     backend.set_output_device(None)
     assert backend._mpv.audio_device == "auto"
+
+
+def test_mpv_device_names_lose_their_output_prefix() -> None:
+    assert device_id_of("coreaudio/BuiltInSpeakerDevice") == "BuiltInSpeakerDevice"
+    assert device_id_of("wasapi/{0.0.0.00000000}.{abc}") == "{0.0.0.00000000}.{abc}"
+    assert device_id_of("auto") == "auto"

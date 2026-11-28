@@ -62,12 +62,18 @@ class RadioStation:
     """Serves ``/live`` (ICY stream, ``title`` as its current song) and ``/plain.wav``."""
 
     def __init__(
-        self, title: str = "Test Artist - Test Song", seconds: float = 4.0, *, paced: bool = False
+        self,
+        title: str = "Test Artist - Test Song",
+        seconds: float = 4.0,
+        *,
+        paced: bool = False,
+        audio: bytes | None = None,
     ) -> None:
-        """``paced``: send ``/live`` at playing speed (a little ahead), like a real station."""
+        """``paced``: send ``/live`` at playing speed (a little ahead), like a real station.
+        ``audio``: a WAV file to send (mono, 16-bit, 22050 Hz), instead of a tone."""
         self.title = title
         self.requests: list[str] = []  # the paths asked for, in order
-        audio = tone_wav(seconds)
+        sound = audio if audio is not None else tone_wav(seconds)
         station = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -78,9 +84,9 @@ class RadioStation:
                 if self.path == "/plain.wav":
                     self.send_response(200)
                     self.send_header("Content-Type", "audio/wav")
-                    self.send_header("Content-Length", str(len(audio)))
+                    self.send_header("Content-Length", str(len(sound)))
                     self.end_headers()
-                    self.wfile.write(audio)
+                    self.wfile.write(sound)
                     return
                 if self.path != "/live":
                     self.send_error(404)
@@ -94,10 +100,10 @@ class RadioStation:
                 self.end_headers()
                 began = time.monotonic()
                 try:
-                    for start in range(0, len(audio), METAINT):
+                    for start in range(0, len(sound), METAINT):
                         while paced and start / BYTES_PER_S - (time.monotonic() - began) > 2:
                             time.sleep(0.02)  # stay about two seconds ahead of playback
-                        self.wfile.write(audio[start : start + METAINT])
+                        self.wfile.write(sound[start : start + METAINT])
                         if icy:
                             self.wfile.write(_metadata_block(station.title))
                 except (BrokenPipeError, ConnectionResetError):

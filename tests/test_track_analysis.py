@@ -35,6 +35,7 @@ from pyamp.audio import registry, track_analysis
 from pyamp.audio.track_analysis import (
     FPS,
     AnalysedSpectrum,
+    LevelTarget,
     LevelTimeline,
     TrackAnalyser,
     equalizer_offsets,
@@ -217,7 +218,7 @@ def test_scratch_files_are_cleaned_up(analyser: TrackAnalyser, tmp_path: Path) -
     timeline = analyser.analyse(write_tones(tmp_path / "tidy.wav", (440,)))
     wait_until(timeline.finished.is_set)
     scratch = analyser._scratch
-    assert list(scratch.iterdir()) == []  # the decoded samples went once analysed
+    assert scratch is not None and list(scratch.iterdir()) == []  # the samples went
     analyser.shutdown()
     assert not scratch.exists()
 
@@ -246,16 +247,21 @@ def test_without_libmpv_there_is_simply_no_analysis(
 
 
 class FakeAnalyser:
+    """Records what it's asked to decode, and "decodes" every file to the levels of
+    ``timeline``, into each target's own timeline."""
+
     def __init__(self, timeline: LevelTimeline) -> None:
         self.timeline = timeline
         self.requested: list[Path] = []
 
-    def analyse(self, path: Path) -> LevelTimeline:
-        self.requested.append(path)
-        return self.timeline
+    def level_target(self, timeline: LevelTimeline) -> LevelTarget:
+        return LevelTarget(timeline, BANDS)
 
-    def cancel_all(self) -> None:
-        self.requested.append(Path("cancelled"))
+    def decode(self, path: Path, targets: list[LevelTarget]) -> None:
+        self.requested.append(path)
+        rows = [self.timeline.row_at((n + 0.5) / FPS) for n in range(self.timeline.row_count)]
+        for target in targets:
+            target.timeline.put_block(0, np.stack([r for r in rows if r is not None]))
 
 
 class Clock:
@@ -335,7 +341,8 @@ def test_new_track_is_analysed(
     service = AnalysedSpectrum(bus, analyser, BANDS)  # type: ignore[arg-type]
     bus.publish(TrackChanged(Track.from_path(Path("/m/next.mp3")), 1))
     assert analyser.requested == [Path("/m/next.mp3")]
-    assert service.timeline is ramp
+    assert service.timeline is not None and service.timeline.path == Path("/m/next.mp3")
+    assert service.timeline.row_count == ramp.row_count
     bus.publish(TrackChanged(None, None))
     assert service.timeline is None
     service.shutdown()
@@ -351,16 +358,18 @@ def test_paused_while_nobody_can_see_it(
     bus.publish(TrackChanged(Track.from_path(Path("/m/one.mp3")), 0))
     bus.publish(PlaybackStateChanged(PlaybackState.PLAYING))
 
+    first = service.timeline
     service.set_active(False)  # the window was hidden
-    assert analyser.requested == [Path("/m/one.mp3"), Path("cancelled")]
+    assert first is not None and first.cancelled.is_set()
+    assert analyser.requested == [Path("/m/one.mp3")]
     bus.publish(TrackChanged(Track.from_path(Path("/m/two.mp3")), 1))
     service.tick()
     assert published == []
-    assert analyser.requested[-1] == Path("cancelled")  # the new track isn't decoded
+    assert analyser.requested == [Path("/m/one.mp3")]  # the new track isn't decoded
 
     service.set_active(True)  # shown again: analyse the track that's playing now
     assert analyser.requested[-1] == Path("/m/two.mp3")
-    assert service.timeline is ramp
+    assert service.timeline is not None and service.timeline.path == Path("/m/two.mp3")
     service.shutdown()
 
 
@@ -438,9 +447,10 @@ class PieceAnalyser(FakeAnalyser):
         super().__init__(timeline)
         self.pieces: list[tuple[Path, float]] = []
 
-    def analyse_piece(self, piece: Path, timeline: LevelTimeline, start: float) -> None:
+    def decode_piece(self, piece: Path, targets: list[LevelTarget], start: float) -> None:
         self.pieces.append((piece, start))
-        timeline.put(round(start * FPS), np.full(BANDS, 0.5, dtype=np.float32))
+        for target in targets:
+            target.timeline.put(round(start * FPS), np.full(BANDS, 0.5, dtype=np.float32))
         piece.unlink()
 
 
@@ -497,10 +507,10 @@ def test_the_first_piece_is_looked_for_soon_then_less_often(
     service, analyser, _clock = live
     monkeypatch.setattr(track_analysis, "LIVE_PIECE_MS", 1500)
     play(bus, RADIO)
-    assert service._stream_check.interval() == track_analysis.STREAM_CHECK_MS  # bars soon
+    assert service.feed._stream_check.interval() == track_analysis.STREAM_CHECK_MS  # bars soon
     saver.range = (0.0, 3.0)
     wait_until(lambda: len(analyser.pieces) == 1)
-    assert service._stream_check.interval() == 1500  # then fewer, longer pieces
+    assert service.feed._stream_check.interval() == 1500  # then fewer, longer pieces
 
 
 @pytest.mark.parametrize("track", [RADIO, SONG], ids=["station", "song"])
@@ -656,7 +666,7 @@ def test_seeking_in_a_song_finds_its_bars_or_looks_for_them_at_once(
     wait_until(lambda: len(analyser.pieces) == 2)  # (0, 30), (30, 40)
     timeline = service.timeline
     monkeypatch.setattr(track_analysis, "LIVE_PIECE_MS", 60_000)
-    service._stream_check.setInterval(60_000)  # no check comes
+    service.feed._stream_check.setInterval(60_000)  # no check comes
     bus.publish(PositionChanged(100, 0))
     bus.publish(PositionChanged(35_000, 0))  # a seek into what's analysed: nothing to do
     QCoreApplication.processEvents()
@@ -874,4 +884,4 @@ def test_a_slow_analysis_is_cancelled_without_hanging(
     wait_until(lambda: first.finished.is_set() and second.finished.is_set(), timeout=10)
     assert first.row_count < 30 * FPS
     assert second.row_count > 0
-    assert list(analyser._scratch.iterdir()) == []
+    assert analyser._scratch is not None and list(analyser._scratch.iterdir()) == []

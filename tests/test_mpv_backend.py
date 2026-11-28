@@ -441,6 +441,67 @@ def test_the_visualiser_shows_a_streamed_song_while_it_plays(qt_app: QCoreApplic
         player.shutdown()
 
 
+def test_the_chords_and_the_visualiser_share_a_streamed_song(
+    qt_app: QCoreApplication, tmp_path: Path
+) -> None:
+    """End to end, as with Subsonic: one fetch, and each piece mpv saves decoded once, for
+    the bars and the chords alike."""
+    import io  # noqa: PLC0415
+
+    from pyamp.audio.mpv_backend import MpvPcmDecoder  # noqa: PLC0415
+    from pyamp.audio.track_analysis import (  # noqa: PLC0415
+        AnalysedSpectrum,
+        AudioFeed,
+        TrackAnalyser,
+    )
+    from pyamp.plugins.chords.cache import ChordCache  # noqa: PLC0415
+    from pyamp.plugins.chords.tracker import ChordTracker  # noqa: PLC0415
+    from tests.test_chords import PROGRESSION, names, song  # noqa: PLC0415
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(22050)
+        w.writeframes(song(PROGRESSION, rate=22050).tobytes())
+
+    class Counting(MpvPcmDecoder):
+        def __init__(self) -> None:
+            self.decoded: list[Path] = []
+
+        def decode(self, source: Path, *args: Any, **kwargs: Any) -> bool:
+            self.decoded.append(source)
+            return super().decode(source, *args, **kwargs)
+
+    bus = EventBus()
+    playlist = Playlist(bus)
+    player = Player(MpvAudioBackend(ao="null"), playlist, bus)
+    decoder = Counting()
+    analyser = TrackAnalyser(decoder=decoder)
+    feed = AudioFeed(bus, analyser, streams=player)
+    spectrum = AnalysedSpectrum(bus, analyser, 20, feed=feed)
+    tracker = ChordTracker(feed, ChordCache(tmp_path / "chords"))
+    tracker.start()
+    try:
+        with RadioStation(audio=buffer.getvalue()) as server:
+            url = StreamUrl(f"{server.url}/plain.wav")
+            playlist.add([Track.for_stream(url, "Song", 16_000)])
+            player.play_index(0)
+            wait_until(lambda: tracker.state == "done", timeout=30)
+            assert server.requests == ["/plain.wav"]  # fetched once
+            assert tracker.chart is not None
+            assert names(tracker.chart) == ["G", "D", "Em", "C", "Am", "D7", "G", "Cmaj7"]
+            assert spectrum.timeline is not None and spectrum.timeline.seconds > 15
+            pieces = [p for p in decoder.decoded if p.suffix == ".mkv"]
+            assert pieces and len(pieces) == len(set(pieces))  # each piece decoded once
+    finally:
+        tracker.stop()
+        spectrum.shutdown()
+        feed.shutdown()
+        analyser.shutdown()
+        player.shutdown()
+
+
 def test_the_visualiser_follows_live_radio(qt_app: QCoreApplication) -> None:
     """End to end: a station that sends at playing speed, with no end; the bars move."""
     from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser  # noqa: PLC0415

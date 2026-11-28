@@ -46,7 +46,7 @@ from pyamp.audio.registry import (
     available_backends,
     create_backend,
 )
-from pyamp.audio.track_analysis import AnalysedSpectrum, TrackAnalyser
+from pyamp.audio.track_analysis import AnalysedSpectrum, AudioFeed, TrackAnalyser
 from pyamp.config import Settings, SettingsStore
 from pyamp.core.equalizer import Equalizer
 from pyamp.core.events import (
@@ -170,14 +170,19 @@ class Application:
         self.playlist = Playlist(self.bus)
         self.player = Player(self._create_backend(args.backend), self.playlist, self.bus)
         self.spectrum = SpectrumService(self.bus)
+        # The playing track's audio, decoded once for whatever analyses it (the visualiser,
+        # plugins such as Chords). Streams too where the backend saves what it buffers (mpv).
+        has_frames = self.player.provides_audio_frames
+        self.track_analyser = TrackAnalyser(self.spectrum.band_count)
+        self.audio_feed = AudioFeed(
+            self.bus, self.track_analyser, streams=None if has_frames else self.player
+        )
         # Backends that can't report the audio they play (mpv) get their visualiser
-        # levels from analysing the file separately.
-        self.track_analyser: TrackAnalyser | None = None
+        # levels from that analysis.
         self.analysed_spectrum: AnalysedSpectrum | None = None
-        if not self.player.provides_audio_frames:
-            self.track_analyser = TrackAnalyser(self.spectrum.band_count)
+        if not has_frames:
             self.analysed_spectrum = AnalysedSpectrum(
-                self.bus, self.track_analyser, self.spectrum.band_count, streams=self.player
+                self.bus, self.track_analyser, self.spectrum.band_count, feed=self.audio_feed
             )
         self.playlist_formats = PlaylistFormatRegistry.default()
         self.loader = BackgroundTrackLoader(
@@ -200,6 +205,7 @@ class Application:
                 window_handle=self._window_handle,
                 ui=lambda: getattr(self, "window", None),
                 sources=self.sources,
+                feed=self.audio_feed,
             )
         )
         self.playlists = PlaylistSession(
@@ -316,9 +322,10 @@ class Application:
         except OSError:
             log.exception("Could not save session")
         self.plugins.shutdown()
-        if self.analysed_spectrum is not None and self.track_analyser is not None:
+        if self.analysed_spectrum is not None:
             self.analysed_spectrum.shutdown()
-            self.track_analyser.shutdown()
+        self.audio_feed.shutdown()
+        self.track_analyser.shutdown()
         self.player.shutdown()
 
     def _set_visualiser_active(self, seen: bool) -> None:

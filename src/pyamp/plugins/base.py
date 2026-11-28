@@ -26,6 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
+from pyamp.audio.track_analysis import AudioFeed
 from pyamp.core.events import EventBus
 from pyamp.core.player import Player
 from pyamp.core.playlist import Playlist
@@ -65,6 +66,8 @@ class PluginContext:
     ui: Callable[[], PluginUi | None] = field(default=lambda: None)
     #: Where the library window finds music; plugins may add sources (None: no library).
     sources: MediaSources | None = None
+    #: The playing track's audio, decoded once for all that analyse it (None: no analysis).
+    feed: AudioFeed | None = None
 
 
 @runtime_checkable

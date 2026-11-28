@@ -6,7 +6,7 @@
 # if it doesn't exist yet. Nothing is public until someone reviews the draft and
 # publishes it.
 #
-#   packaging/publish_release.sh v0.1.0 dist/PyAmp-0.1.0-macos-arm64.dmg ...
+#   packaging/publish_release.sh v1.0.0 dist/PyAmp-1.0.0-macos-arm64.dmg ...
 #
 # Run by the package workflows (macOS and Windows) on version tags, one after the other
 # (they share a concurrency group): the first creates the draft, the next adds to it.
@@ -21,7 +21,7 @@ tag=$1
 shift
 
 # The files are named after the app's version (pyproject.toml / pyamp.__version__); a
-# tag that doesn't match it would publish e.g. "v0.2.0" with 0.1.0 builds.
+# tag that doesn't match it would publish e.g. "v1.1.0" with 1.0.0 builds.
 for file in "$@"; do
   case "$(basename "$file")" in
     *"-${tag#v}-"*) ;;

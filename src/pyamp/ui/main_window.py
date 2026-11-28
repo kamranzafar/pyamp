@@ -98,6 +98,7 @@ STATUS_INDENT = 4
 #: The saved playlist the library plays into, so it never changes the user's others.
 LIBRARY_PLAYLIST = "Library"
 LIBRARY_MENU = "&Library"  # plugins with a library (Subsonic) add to it too
+VIEW_MENU = "&View"
 
 #: How the Playback → Audio Backend menu names backends (others by their own name).
 BACKEND_LABELS = {"qt": "Qt Multimedia", "mpv": "mpv"}
@@ -311,7 +312,8 @@ class MainWindow(QMainWindow):
 
         self._build_library_menu(menu_bar.addMenu(LIBRARY_MENU))
 
-        self._build_view_menu(menu_bar.addMenu("&View"))
+        self._build_view_menu(view_menu := menu_bar.addMenu(VIEW_MENU))
+        self._plugin_menus[VIEW_MENU] = view_menu  # plugins with windows (Chords) add to it
 
         help_menu = self._help_menu = menu_bar.addMenu("&Help")
         self.about_action = self._add_menu_action(help_menu, f"&About {APP_NAME}", self.show_about)

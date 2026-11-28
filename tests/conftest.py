@@ -183,6 +183,17 @@ def isolated_radio_stations(
     monkeypatch.setattr("pyamp.library.radio_stations.default_file", lambda: path)
 
 
+@pytest.fixture(autouse=True)
+def isolated_chord_cache(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No test may touch the user's real cache of chords, nor the Chords settings."""
+    folder = tmp_path_factory.mktemp("chords")
+    monkeypatch.setattr("pyamp.plugins.chords.cache.default_directory", lambda: folder)
+    settings = tmp_path_factory.mktemp("chord-settings")
+    monkeypatch.setattr("pyamp.plugins.chords.settings.default_directory", lambda: settings)
+
+
 @pytest.fixture
 def bus() -> EventBus:
     return EventBus()

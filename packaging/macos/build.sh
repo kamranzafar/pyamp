@@ -10,6 +10,14 @@
 # The pinned libmpv download is cached in build/libmpv-cache/ and checked against
 # the SHA-256 in packaging/macos/libmpv.lock. --libmpv bundles the libmpv in that folder
 # instead (e.g. one just built by packaging/libmpv/build.sh, to test it in the app).
+#
+# The app is signed ad hoc unless PYAMP_SIGN_IDENTITY names a Developer ID Application
+# identity in the keychain, e.g. "Developer ID Application: Jane Doe (AB12CD34EF)".
+# With that and an App Store Connect API key (PYAMP_NOTARY_KEY: the .p8 file,
+# PYAMP_NOTARY_KEY_ID, PYAMP_NOTARY_ISSUER), or the name of a keychain profile saved with
+# `xcrun notarytool store-credentials` (PYAMP_NOTARY_PROFILE), the app and the .dmg are
+# also notarised and stapled (not with --app-only), waiting up to PYAMP_NOTARY_TIMEOUT
+# (default 2h) for each.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -34,6 +42,27 @@ while [ $# -gt 0 ]; do
 done
 OUT=${1:-"$ROOT/dist"}
 ARCH=$(uname -m) # x86_64 or arm64
+SIGN_IDENTITY=${PYAMP_SIGN_IDENTITY:-}
+NOTARISE=
+NOTARY_AUTH=()
+if [ -n "${PYAMP_NOTARY_PROFILE:-}" ]; then
+  NOTARY_AUTH=(--keychain-profile "$PYAMP_NOTARY_PROFILE")
+elif [ -n "${PYAMP_NOTARY_KEY:-}${PYAMP_NOTARY_KEY_ID:-}${PYAMP_NOTARY_ISSUER:-}" ]; then
+  if [ -z "${PYAMP_NOTARY_KEY:-}" ] || [ -z "${PYAMP_NOTARY_KEY_ID:-}" ] ||
+    [ -z "${PYAMP_NOTARY_ISSUER:-}" ]; then
+    echo "error: notarising needs PYAMP_NOTARY_KEY, PYAMP_NOTARY_KEY_ID and" \
+      "PYAMP_NOTARY_ISSUER (or PYAMP_NOTARY_PROFILE)" >&2
+    exit 2
+  fi
+  NOTARY_AUTH=(--key "$PYAMP_NOTARY_KEY" --key-id "$PYAMP_NOTARY_KEY_ID" --issuer "$PYAMP_NOTARY_ISSUER")
+fi
+if [ ${#NOTARY_AUTH[@]} -gt 0 ]; then
+  if [ -z "$SIGN_IDENTITY" ]; then
+    echo "error: notarising needs PYAMP_SIGN_IDENTITY" >&2
+    exit 2
+  fi
+  NOTARISE=1
+fi
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
@@ -82,8 +111,27 @@ find "$APP/Contents/Frameworks" -type f -print0 |
       strip -x "$file" 2>/dev/null || echo "warning: could not strip $file" >&2
     fi
   done
-# Ad-hoc signature: not notarised, but Apple Silicon won't run unsigned code at all.
-codesign --force --deep --sign - "$APP"
+if [ -n "$SIGN_IDENTITY" ]; then
+  # Developer ID: sign inside out (libraries, then frameworks, then the app) with the
+  # hardened runtime and a secure timestamp, as notarisation requires.
+  echo "Signing with $SIGN_IDENTITY"
+  sign() { codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$@"; }
+  find "$APP/Contents" -type f -print0 |
+    while IFS= read -r -d '' file; do
+      if [ "$file" != "$APP/Contents/MacOS/PyAmp" ] && file -b "$file" | grep -q '^Mach-O'; then
+        printf '%s\0' "$file"
+      fi
+    done | xargs -0 -n 50 -P 4 codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY"
+  # Deepest first, so a framework inside another is signed before the one around it.
+  find "$APP/Contents" -type d -name '*.framework' |
+    awk '{ print gsub("/", "/"), $0 }' | sort -rn | cut -d' ' -f2- |
+    while IFS= read -r framework; do sign "$framework"; done
+  sign --entitlements "$ROOT/packaging/macos/entitlements.plist" "$APP"
+  codesign --verify --deep --strict "$APP"
+else
+  # Ad-hoc signature: not notarised, but Apple Silicon won't run unsigned code at all.
+  codesign --force --deep --sign - "$APP"
+fi
 
 # Measured here: the copy in $OUT may be moved (e.g. to /Applications) straight away.
 APP_SIZE=$(du -sh "$APP" | cut -f1)
@@ -93,6 +141,34 @@ cp -R "$APP" "$OUT/PyAmp.app"
 if [ -n "$APP_ONLY" ]; then
   echo "App: $OUT/PyAmp.app ($APP_SIZE)"
   exit 0
+fi
+
+notarise() {
+  echo "Notarising $(basename "$1") (usually minutes; a new account's first ones can take hours)"
+  local result
+  result=$(xcrun notarytool submit "$1" "${NOTARY_AUTH[@]}" \
+    --wait --timeout "${PYAMP_NOTARY_TIMEOUT:-2h}" --output-format json) || true
+  echo "$result"
+  if ! grep -q '"status" *: *"Accepted"' <<<"$result"; then
+    local id
+    id=$(sed -nE 's/.*"id" *: *"([^"]+)".*/\1/p' <<<"$result" | head -1)
+    if [ -n "$id" ]; then
+      xcrun notarytool log "$id" "${NOTARY_AUTH[@]}" >&2 || true
+    fi
+    echo "error: notarisation of $(basename "$1") failed" >&2
+    exit 1
+  fi
+}
+
+# -- Notarisation ----------------------------------------------------------------- #
+# The app gets a ticket of its own (stapled to it) so it opens offline once copied out
+# of the disk image; the disk image gets one too, checked when it's opened.
+if [ -n "$NOTARISE" ]; then
+  ditto -c -k --keepParent "$APP" "$WORK/PyAmp.zip"
+  notarise "$WORK/PyAmp.zip"
+  xcrun stapler staple "$APP"
+  rm -rf "$OUT/PyAmp.app"
+  cp -R "$APP" "$OUT/PyAmp.app"
 fi
 
 # -- Disk image ----------------------------------------------------------------- #
@@ -115,6 +191,13 @@ for attempt in 1 2 3 4; do
   rm -f "$DMG"
   sleep 5
 done
+if [ -n "$SIGN_IDENTITY" ]; then
+  codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
+fi
+if [ -n "$NOTARISE" ]; then
+  notarise "$DMG"
+  xcrun stapler staple "$DMG"
+fi
 
 echo "App: $OUT/PyAmp.app ($APP_SIZE)"
 echo "DMG: $DMG ($(du -sh "$DMG" | cut -f1))"

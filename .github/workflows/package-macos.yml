@@ -19,6 +19,13 @@ jobs:
   app:
     name: PyAmp.app (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    env:
+      # Signed with the Developer ID certificate whenever the secrets are there (not in
+      # pull requests from forks); notarised for releases and manual runs only, as
+      # Apple's check takes minutes.
+      HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+      NOTARISE: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
     strategy:
       fail-fast: false
       matrix:
@@ -37,8 +44,63 @@ jobs:
         run: |
           if brew list mpv >/dev/null 2>&1; then brew uninstall --ignore-dependencies mpv; fi
 
+      - name: Import the Developer ID certificate
+        if: env.HAS_CERTIFICATE == 'true'
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          # A keychain of its own, with a random password, removed at the end of the job.
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(openssl rand -hex 24)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          base64 --decode <<<"$CERTIFICATE_P12" >"$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+          # The intermediate that issued the certificate, which the .p12 doesn't include.
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer \
+            -o "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain"
+          # Let codesign use the key without a prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" \
+            "$keychain" >/dev/null
+          # shellcheck disable=SC2046 # one keychain path per word
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$keychain" |
+            sed -nE 's/.*"(Developer ID Application: [^"]+)".*/\1/p' | head -1)
+          if [ -z "$identity" ]; then
+            security find-identity -p codesigning "$keychain"
+            echo "::error::no valid Developer ID Application identity in MACOS_CERTIFICATE_P12"
+            exit 1
+          fi
+          echo "Signing as $identity"
+          echo "PYAMP_SIGN_IDENTITY=$identity" >>"$GITHUB_ENV"
+
       - name: Build PyAmp.app and .dmg
-        run: packaging/macos/build.sh dist
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          if [ "$RELEASE" = true ] && [ -z "${PYAMP_SIGN_IDENTITY:-}" ]; then
+            echo "::error::releases must be signed: MACOS_CERTIFICATE_P12 is not set"
+            exit 1
+          fi
+          if [ -n "${PYAMP_SIGN_IDENTITY:-}" ] && [ "$NOTARISE" = true ]; then
+            key="$RUNNER_TEMP/AuthKey.p8"
+            # The .p8 as it is, or base64-encoded.
+            if grep -q "BEGIN PRIVATE KEY" <<<"$APPLE_API_KEY_P8"; then
+              printf '%s\n' "$APPLE_API_KEY_P8" >"$key"
+            else
+              base64 --decode <<<"$APPLE_API_KEY_P8" >"$key"
+            fi
+            export PYAMP_NOTARY_KEY="$key" PYAMP_NOTARY_KEY_ID="$APPLE_API_KEY_ID" \
+              PYAMP_NOTARY_ISSUER="$APPLE_API_ISSUER_ID"
+          fi
+          packaging/macos/build.sh dist
 
       - name: Self-test the built app
         env:
@@ -49,6 +111,15 @@ jobs:
           grep -q "(bundled)" version.txt || { echo "::error::app did not use its bundled libmpv"; exit 1; }
           "$app" --self-test
           codesign --verify --deep --strict dist/PyAmp.app
+          codesign -dv dist/PyAmp.app 2>&1 | grep -E "^(Authority|TeamIdentifier|Runtime)" || true
+          if [ -n "${PYAMP_SIGN_IDENTITY:-}" ] && [ "$NOTARISE" = true ]; then
+            # What a downloaded copy goes through: Gatekeeper, with the stapled tickets.
+            spctl --assess --type execute -vv dist/PyAmp.app
+            dmg=$(ls dist/*.dmg)
+            spctl --assess --type install -vv "$dmg"
+            xcrun stapler validate dist/PyAmp.app
+            xcrun stapler validate "$dmg"
+          fi
           icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" dist/PyAmp.app/Contents/Info.plist)
           test -f "dist/PyAmp.app/Contents/Resources/$icon" || { echo "::error::app icon missing"; exit 1; }
           echo "app icon: $icon"
@@ -57,6 +128,12 @@ jobs:
           for unused in lib/QtQuick.framework lib/QtQml.framework plugins/platforminputcontexts; do
             if [ -e "$qt/$unused" ]; then echo "::error::$unused should have been left out"; exit 1; fi
           done
+
+      - name: Remove the signing keychain and key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
 
       - name: Upload
         uses: actions/upload-artifact@v7

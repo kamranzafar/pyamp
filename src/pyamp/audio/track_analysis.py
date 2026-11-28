@@ -47,7 +47,7 @@ import shutil
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -65,7 +65,7 @@ from pyamp.core.events import (
     SpectrumUpdated,
     TrackChanged,
 )
-from pyamp.core.models import PlaybackState, StreamUrl
+from pyamp.core.models import PlaybackState, StreamUrl, Track
 from pyamp.dsp.spectrum import SpectrumAnalyzer
 from pyamp.dsp.waveform import WAVE_POINTS, waveforms
 
@@ -280,14 +280,92 @@ class PcmDecoder(Protocol):
     ) -> bool: ...
 
 
+class SampleTarget(Protocol):
+    """Where a track's decoded samples go, to be analysed into a timeline (the visualiser's
+    levels, the Chords plugin's notes). One decode feeds every target that wants it.
+
+    :meth:`begin`, the function it returns and :meth:`end` run on the analysis thread;
+    ``cancelled`` and ``kept_from`` are read on the main thread too.
+    """
+
+    @property
+    def cancelled(self) -> threading.Event:
+        """Set to stop: no more samples come (a queued piece is skipped)."""
+        ...
+
+    @property
+    def kept_from(self) -> float:
+        """Seconds into the track before which nothing is kept any more (a station's oldest
+        analysis is dropped); 0 if everything is kept."""
+        ...
+
+    def begin(self, start: float, piece: bool) -> Callable[[NDArray[np.float32]], None]:
+        """A stretch starting ``start`` seconds into the track (a file: 0; a stream's piece:
+        where it was saved from). Returns what takes its samples, in order (mono, at
+        :data:`ANALYSIS_RATE`, -1..1)."""
+        ...
+
+    def end(self, piece: bool) -> None:
+        """The stretch is over: decoded, failed or cancelled (also if it never began)."""
+        ...
+
+
+class LevelTarget:
+    """The visualiser's levels: samples analysed into a :class:`LevelTimeline`."""
+
+    def __init__(self, timeline: LevelTimeline, band_count: int) -> None:
+        self.timeline = timeline
+        self._band_count = band_count
+
+    @property
+    def cancelled(self) -> threading.Event:
+        return self.timeline.cancelled
+
+    @property
+    def kept_from(self) -> float:
+        return self.timeline.first_row / FPS
+
+    def begin(self, start: float, piece: bool) -> Callable[[NDArray[np.float32]], None]:
+        timeline = self.timeline
+        # A stream's pieces share one analyser, so the bars run on smoothly.
+        if not piece or timeline.analyzer is None:
+            timeline.analyzer = SpectrumAnalyzer(band_count=self._band_count)
+        return _LevelAnalysis(timeline, timeline.analyzer, round(start * FPS)).put
+
+    def end(self, piece: bool) -> None:
+        if not piece:
+            self.timeline.finished.set()
+
+
+class _LevelAnalysis:
+    """One stretch's samples, analysed into rows of levels (and waveforms) from ``row`` on."""
+
+    def __init__(self, timeline: LevelTimeline, analyzer: SpectrumAnalyzer, row: int) -> None:
+        self._timeline = timeline
+        self._analyzer = analyzer
+        self._row = row
+        self._leftover = np.zeros(0, dtype=np.float32)  # samples short of a whole row
+
+    def put(self, pcm: NDArray[np.float32]) -> None:
+        samples = np.concatenate([self._leftover, pcm])
+        levels = self._analyzer.analyze_blocks(samples, ANALYSIS_RATE, _HOP)
+        waves = waveforms(samples, _HOP, len(levels))
+        self._leftover = samples[len(levels) * _HOP :]
+        self._timeline.put_block(self._row, levels, waves)
+        self._row += len(levels)
+
+
 @dataclass(frozen=True, slots=True)
 class _Job:
     path: Path
-    timeline: LevelTimeline
-    #: Where in the timeline the file's first row goes.
-    first_row: int = 0
-    #: A piece of a live stream: a temporary file, deleted once decoded.
+    targets: tuple[SampleTarget, ...]
+    #: Seconds into the track the file's first sample is (a stream's piece).
+    start: float = 0.0
+    #: A piece of a stream: a temporary file, deleted once decoded.
     piece: bool = False
+
+    def wanted(self) -> bool:
+        return any(not target.cancelled.is_set() for target in self.targets)
 
 
 def _make_pipe(path: Path) -> bool:
@@ -299,23 +377,24 @@ def _make_pipe(path: Path) -> bool:
     try:
         os.mkfifo(path, 0o600)
     except OSError as exc:
-        log.debug("No named pipe for the visualiser's samples: %s", exc)
+        log.debug("No named pipe for the analysis's samples: %s", exc)
         return False
     return True
 
 
 class _Worker(QObject):
-    """Lives on the analysis thread: decodes and analyses one file (or piece) at a time.
+    """Lives on the analysis thread: decodes one file (or piece) at a time, for each of
+    the targets that want its samples.
 
     Each file is decoded to raw samples, through a named pipe where the system has them
     (else a file in a scratch folder), and analysed as they come: little memory and no
     disk, and cancelling is noticed between batches.
     """
 
-    def __init__(self, band_count: int, decoder: PcmDecoder, scratch: Path) -> None:
+    def __init__(self, decoder: Callable[[], PcmDecoder], scratch: Path) -> None:
         super().__init__()
-        self._band_count = band_count
-        self._decoder = decoder
+        self._make_decoder = decoder
+        self._decoder: PcmDecoder | None = None  # made when first needed (it loads libmpv)
         self._scratch = scratch
         self._queue: list[_Job] = []
         self._busy = False
@@ -330,10 +409,10 @@ class _Worker(QObject):
             while self._queue:
                 job = self._queue.pop(0)
                 try:
-                    if not job.timeline.cancelled.is_set():
+                    if job.wanted():
                         self._analyse(job)
                 except Exception:
-                    log.exception("Analysing %s for the visualiser failed", job.path.name)
+                    log.exception("Analysing %s failed", job.path.name)
                 finally:
                     self._done(job)
         finally:
@@ -341,8 +420,10 @@ class _Worker(QObject):
 
     def _analyse(self, job: _Job) -> None:
         """Decode on a helper thread, and analyse the samples as they're written: the
-        first bars are ready almost at once, not after the whole file is decoded."""
-        timeline = job.timeline
+        first results are ready almost at once, not after the whole file is decoded."""
+        if self._decoder is None:
+            self._decoder = self._make_decoder()
+        decoder = self._decoder
         self._scratch.mkdir(parents=True, exist_ok=True)  # e.g. cleared as stale meanwhile
         raw = self._scratch / "decoded.pcm"
         _remove(raw)
@@ -350,17 +431,20 @@ class _Worker(QObject):
         stop = threading.Event()  # also stops the decoder if the analysis fails
 
         def cancelled() -> bool:
-            return stop.is_set() or timeline.cancelled.is_set()
+            return stop.is_set() or not job.wanted()
 
         outcome: list[bool] = []
 
         def decode() -> None:
-            outcome.append(self._decoder.decode(job.path, raw, ANALYSIS_RATE, cancelled))
+            outcome.append(decoder.decode(job.path, raw, ANALYSIS_RATE, cancelled))
 
-        if not job.piece or timeline.analyzer is None:
-            timeline.analyzer = SpectrumAnalyzer(band_count=self._band_count)
+        sinks = [
+            (target, target.begin(job.start, job.piece))
+            for target in job.targets
+            if not target.cancelled.is_set()
+        ]
         # Opened before the decoder starts: a pipe's writer waits for a reader.
-        reader = _PcmReader(raw, timeline.analyzer, timeline, job.first_row, piped=piped)
+        reader = _PcmReader(raw, sinks, piped=piped)
         decoding = threading.Thread(target=decode, name="pyamp-decode", daemon=True)
         decoding.start()
 
@@ -375,17 +459,20 @@ class _Worker(QObject):
             reader.close()
             decoding.join(_DECODER_STOP_S)
             if decoding.is_alive():
-                log.warning("The visualiser's decoder for %s didn't stop", job.path.name)
+                log.warning("The analysis's decoder for %s didn't stop", job.path.name)
             _remove(raw)
-        if outcome and not outcome[0] and not reader.rows:
-            log.info("Can't analyse %s for the visualiser", job.path.name)
+        if outcome and not outcome[0] and not reader.samples:
+            log.info("Can't analyse %s", job.path.name)
 
     @staticmethod
     def _done(job: _Job) -> None:
         if job.piece:
-            _remove(job.path)  # the stream goes on: its timeline isn't finished
-        else:
-            job.timeline.finished.set()
+            _remove(job.path)
+        for target in job.targets:
+            try:
+                target.end(job.piece)
+            except Exception:
+                log.exception("Finishing the analysis of %s failed", job.path.name)
 
 
 class _NoDecoder:
@@ -401,42 +488,35 @@ def _default_decoder() -> PcmDecoder:
     try:
         from pyamp.audio.mpv_backend import MpvPcmDecoder  # noqa: PLC0415  (loads libmpv)
     except OSError as exc:
-        log.info("No visualiser analysis without libmpv: %s", exc)
+        log.info("No analysis without libmpv: %s", exc)
         return _NoDecoder()
     return MpvPcmDecoder()
 
 
+type _Sink = tuple[SampleTarget, Callable[[NDArray[np.float32]], None]]
+
+
 class _PcmReader:
     """Reads 16-bit samples as the decoder writes them, from a named pipe or from a file
-    still being written, and analyses each stretch into the timeline (worker thread)."""
+    still being written, and hands each stretch to every target still wanting it (worker
+    thread)."""
 
-    def __init__(
-        self,
-        path: Path,
-        analyzer: SpectrumAnalyzer,
-        timeline: LevelTimeline,
-        row: int,
-        *,
-        piped: bool,
-    ) -> None:
+    def __init__(self, path: Path, sinks: list[_Sink], *, piped: bool) -> None:
         self._path = path
         self._piped = piped
-        self._analyzer = analyzer
-        self._timeline = timeline
-        self._row = row
+        self._sinks = sinks
         # A pipe opens at once without blocking (no writer needed); a file once it exists.
         self._fd: int | None = os.open(path, os.O_RDONLY | os.O_NONBLOCK) if piped else None
         self._waiting_for_data = False  # the last read found a writer but nothing written
         self._pending = bytearray()  # read, not yet analysed
-        self._leftover = np.zeros(0, dtype=np.float32)  # samples short of a whole row
-        self.rows = 0
+        self.samples = 0  # handed on so far
 
     def run(self, decoded: Callable[[], bool], stop: Callable[[], bool]) -> None:
         """Analyse until all the decoder wrote is read once it's ``decoded``, or ``stop``.
 
-        The first stretch is taken as soon as there's any (the first bars come at once);
-        then a second's worth at a time (the analysis is far ahead of playback by then),
-        or the rest once decoded: fewer, bigger batches cost less.
+        The first stretch is taken as soon as there's any (the first results come at
+        once); then a second's worth at a time (the analysis is far ahead of playback by
+        then), or the rest once decoded: fewer, bigger batches cost less.
         """
         started = time.monotonic()
         while not stop():
@@ -444,7 +524,7 @@ class _PcmReader:
             data = self._read()
             if data:
                 self._pending += data
-                if not self.rows or len(self._pending) >= MIN_BATCH_SAMPLES * 2:
+                if self.samples < _HOP or len(self._pending) >= MIN_BATCH_SAMPLES * 2:
                     self._analyse()
                     self._pace(started, stop)
                 continue
@@ -499,13 +579,18 @@ class _PcmReader:
             return
         pcm = np.frombuffer(bytes(self._pending[:whole]), dtype=np.int16)
         del self._pending[:whole]
-        samples = np.concatenate([self._leftover, pcm.astype(np.float32) / 32768])
-        levels = self._analyzer.analyze_blocks(samples, ANALYSIS_RATE, _HOP)
-        waves = waveforms(samples, _HOP, len(levels))
-        self._leftover = samples[len(levels) * _HOP :]
-        self._timeline.put_block(self._row, levels, waves)
-        self._row += len(levels)
-        self.rows += len(levels)
+        samples = pcm.astype(np.float32) / np.float32(32768)
+        for sink in list(self._sinks):
+            target, put = sink
+            if target.cancelled.is_set():
+                continue
+            try:
+                put(samples)
+            except Exception:
+                # One analysis failing mustn't stop the others getting their samples.
+                log.exception("Analysing %s's samples failed", self._path.name)
+                self._sinks.remove(sink)
+        self.samples += len(samples)
 
     def _pace(self, started: float, stop: Callable[[], bool]) -> None:
         """Past the first :data:`UNPACED_S`, analyse at most :data:`MAX_SPEED` times as fast
@@ -514,7 +599,7 @@ class _PcmReader:
         if not self._piped:
             return
         allowed = UNPACED_S + (time.monotonic() - started) * MAX_SPEED
-        ahead = self.rows / FPS - allowed
+        ahead = self.samples / ANALYSIS_RATE - allowed
         deadline = time.monotonic() + ahead / MAX_SPEED
         while time.monotonic() < deadline and not stop():
             time.sleep(min(_WAIT_FOR_PACE_S, deadline - time.monotonic()))
@@ -576,7 +661,8 @@ def _running(pid: int) -> bool:
 
 
 class TrackAnalyser(QObject):
-    """Analyses files on a low-priority background thread."""
+    """Decodes files, and pieces of streams, on a low-priority background thread: each
+    once, for every :class:`SampleTarget` that wants its samples."""
 
     _enqueue = Signal(object)
 
@@ -587,47 +673,73 @@ class TrackAnalyser(QObject):
         *,
         decoder: PcmDecoder | None = None,
     ) -> None:
-        """``decoder``: by default a hidden libmpv (the analysis is for the mpv backend)."""
+        """``decoder``: by default a hidden libmpv, loaded when first needed. The thread
+        and its scratch folder are only made once something is to be decoded."""
         super().__init__(parent)
-        if decoder is None:
-            decoder = _default_decoder()
         remove_stale_scratch()
+        self._band_count = band_count
+        given = decoder
+        self._make_decoder: Callable[[], PcmDecoder] = (
+            (lambda: given) if given else _default_decoder
+        )
+        self._thread: QThread | None = None
+        self._worker: _Worker | None = None
+        self._scratch: Path | None = None
+        self._timelines: dict[Path, LevelTimeline] = {}
+
+    def _start(self) -> None:
+        if self._thread is not None:
+            return
         self._scratch = scratch_folder("pyamp-analysis-")
         self._thread = QThread()
         self._thread.setObjectName("pyamp-track-analysis")
-        self._worker = _Worker(band_count, decoder, self._scratch)
+        self._worker = _Worker(self._make_decoder, self._scratch)
         self._worker.moveToThread(self._thread)
         self._enqueue.connect(self._worker.enqueue)
         self._thread.start(QThread.Priority.LowPriority)  # never compete with playback or the UI
-        self._timelines: dict[Path, LevelTimeline] = {}
+
+    def level_target(self, timeline: LevelTimeline) -> LevelTarget:
+        """Where samples go to be analysed into ``timeline``'s levels."""
+        return LevelTarget(timeline, self._band_count)
 
     def analyse(self, path: Path) -> LevelTimeline:
-        """The timeline for ``path``; starts analysing it, cancelling any other file."""
+        """The levels for ``path`` alone; starts analysing it, cancelling any other file
+        analysed this way."""
         for other in list(self._timelines):
             if other != path:
                 self._timelines.pop(other).cancelled.set()
         timeline = self._timelines.get(path)
         if timeline is None:
             timeline = self._timelines[path] = LevelTimeline(path)
-            self._enqueue.emit(_Job(path, timeline))
+            self.decode(path, [self.level_target(timeline)])
         return timeline
 
-    def analyse_piece(self, piece: Path, timeline: LevelTimeline, start: float) -> None:
-        """Decode ``piece`` (a stretch of a live stream starting ``start`` seconds in) into
-        ``timeline``, then delete it. Cancel by setting the timeline's ``cancelled``."""
-        self._enqueue.emit(_Job(piece, timeline, round(start * FPS), piece=True))
+    def decode(self, path: Path, targets: Sequence[SampleTarget]) -> None:
+        """Decode ``path`` once, for each of ``targets``. A target stops by setting its
+        ``cancelled``; the decoding stops once none is left."""
+        if targets:
+            self._start()
+            self._enqueue.emit(_Job(path, tuple(targets)))
+
+    def decode_piece(self, piece: Path, targets: Sequence[SampleTarget], start: float) -> None:
+        """Decode ``piece`` (a stretch of a stream starting ``start`` seconds in) for
+        ``targets``, then delete it."""
+        self._start()
+        self._enqueue.emit(_Job(piece, tuple(targets), start, piece=True))
 
     def cancel_all(self) -> None:
-        """Stop analysing (whatever was being analysed starts afresh next time)."""
+        """Stop analysing the files :meth:`analyse` was asked for."""
         for timeline in self._timelines.values():
             timeline.cancelled.set()
         self._timelines.clear()
 
     def shutdown(self) -> None:
         self.cancel_all()
-        self._thread.quit()
-        self._thread.wait(3000)
-        shutil.rmtree(self._scratch, ignore_errors=True)
+        if self._thread is not None:
+            self._thread.quit()
+            self._thread.wait(3000)
+        if self._scratch is not None:
+            shutil.rmtree(self._scratch, ignore_errors=True)
 
 
 def equalizer_offsets(
@@ -646,12 +758,281 @@ def equalizer_offsets(
     return (gains / -floor_db).astype(np.float32)
 
 
-class AnalysedSpectrum(QObject):
-    """Publishes analysed levels for the current position while playing."""
+@dataclass(frozen=True, slots=True)
+class FeedSource:
+    """What the feed follows: a file, decoded whole, or a stream it saves pieces of."""
 
-    #: A copy (or None if it failed) of seconds ``start`` to ``end`` of the stream
-    #: numbered ``number`` was saved: (number, copy, start, end).
-    _stream_saved = Signal(int, object, float, float)
+    location: Path | StreamUrl
+    track: Track
+    #: A station: no length, it never ends (so only its last minutes are kept).
+    endless: bool = False
+
+
+class FeedConsumer(Protocol):
+    """Something analysing the playing track's audio (the visualiser, the Chords plugin)."""
+
+    def follow(self, source: FeedSource | None) -> SampleTarget | None:
+        """The feed follows ``source`` now (None: nothing it can analyse). Returns where its
+        samples should go, or None if they aren't wanted (e.g. they're known already). The
+        consumer cancels whatever it was analysing before, if it doesn't want it now."""
+        ...
+
+
+class AudioFeed(QObject):
+    """Follows the track that's playing and decodes its audio once, for every consumer
+    that analyses it (while at least one does).
+
+    A file is decoded whole, once for all its consumers. A stream (a song from a server,
+    e.g. Subsonic, or live radio) is never fetched twice: the backend saves what it has
+    newly buffered, a piece at a time (up to :data:`PIECE_MAX_S`), just ahead of playback,
+    and each piece is decoded once and handed to every consumer at its own place. A
+    consumer that joins later gets its own decode of a file, and a stream's pieces from
+    just before the playback position on.
+    """
+
+    _stream_saved = Signal(int, object, float, float)  # stream number, copy, start, end
+
+    def __init__(
+        self,
+        bus: EventBus,
+        analyser: TrackAnalyser,
+        clock: Callable[[], float] = time.monotonic,
+        parent: QObject | None = None,
+        *,
+        streams: StreamSaver | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._analyser = analyser
+        self._clock = clock
+        self._consumers: list[FeedConsumer] = []
+        self._source: FeedSource | None = None
+        # A stream is analysed a piece at a time, as it's buffered, into each consumer's
+        # target (a file's targets go with its decode).
+        self._streams = streams
+        self._targets: list[tuple[FeedConsumer, SampleTarget]] = []
+        self._stream: StreamUrl | None = None
+        self._stream_number = 0  # bumped per track: a piece saved for an older one is dropped
+        self._endless = False  # a station: no length, and only its last minutes are kept
+        self._analysed: list[tuple[float, float]] = []  # the stretches saved, in order
+        self._pieces = 0  # numbers the pieces' files
+        self._heard = False  # whether the current track has started to play
+        self._saving = False
+        self._copies: Path | None = None  # a temporary folder, made when first needed
+        self._stream_check = QTimer(self)
+        self._stream_check.setInterval(STREAM_CHECK_MS)
+        self._stream_check.timeout.connect(self._check_stream)
+        self._stream_saved.connect(self._on_stream_saved)
+        self._playing = False
+        self._position_ms = 0
+        self._position_at = clock()
+        bus.subscribe(TrackChanged, self._on_track)
+        bus.subscribe(PlaybackStateChanged, self._on_state)
+        bus.subscribe(PositionChanged, self._on_position)
+
+    @property
+    def follows_streams(self) -> bool:
+        """Whether streams are analysed too (the backend can save what it buffers)."""
+        return self._streams is not None
+
+    def position(self) -> float:
+        """Playback position in seconds, interpolated between the backend's updates."""
+        elapsed = self._clock() - self._position_at if self._playing else 0.0
+        return self._position_ms / 1000 + elapsed
+
+    def join(self, consumer: FeedConsumer) -> None:
+        """Start analysing the playing track for ``consumer`` (and the next ones)."""
+        if any(c is consumer for c in self._consumers):
+            return
+        self._consumers.append(consumer)
+        source = self._source
+        target = consumer.follow(source)
+        if source is not None and target is not None:
+            if isinstance(source.location, Path):
+                self._analyser.decode(source.location, [target])
+            else:
+                self._targets.append((consumer, target))
+                self._analysed = []  # pieces start again near playback, for it too
+        self._watch_stream()
+
+    def leave(self, consumer: FeedConsumer) -> None:
+        """Stop analysing for ``consumer``; it cancels its own analysis. With nobody left,
+        nothing more is saved or decoded."""
+        self._consumers = [c for c in self._consumers if c is not consumer]
+        self._targets = [(c, t) for c, t in self._targets if c is not consumer]
+        if not self._consumers:
+            self._stream_check.stop()
+            self._analysed = []
+
+    def shutdown(self) -> None:
+        self._stream_check.stop()
+        self._stream_number += 1  # a copy still being saved is dropped
+        if self._copies is not None:
+            shutil.rmtree(self._copies, ignore_errors=True)
+
+    def _on_track(self, event: TrackChanged) -> None:
+        track = event.track
+        location = track.location if track else None
+        self._forget_stream()
+        self._source = None
+        if track is not None and isinstance(location, Path):
+            self._source = FeedSource(location, track)
+        elif track is not None and isinstance(location, StreamUrl) and self._streams:
+            self._stream = location
+            self._endless = not track.duration_ms  # radio has no length: it never ends
+            self._source = FeedSource(location, track, self._endless)
+        self._follow_all()
+        self._watch_stream()
+        self._position_ms, self._position_at = 0, self._clock()
+        self._heard = False
+
+    def _follow_all(self) -> None:
+        """Tell every consumer what's followed now; decode a file once for them all."""
+        source = self._source
+        targets = [
+            (consumer, target)
+            for consumer in list(self._consumers)
+            if (target := consumer.follow(source)) is not None
+        ]
+        if source is not None and isinstance(source.location, Path):
+            if targets:  # nobody wants it (or it's known already): not decoded at all
+                self._analyser.decode(source.location, [target for _, target in targets])
+        elif source is not None:
+            self._targets = targets
+
+    # -- Streams ---------------------------------------------------------------------------- #
+
+    def _live_targets(self) -> list[SampleTarget]:
+        return [target for _, target in self._targets if not target.cancelled.is_set()]
+
+    def _watch_stream(self) -> None:
+        if self._consumers and self._stream is not None:
+            # Soon at first, so the analysis starts quickly; then at LIVE_PIECE_MS (see
+            # _check_stream).
+            self._stream_check.start(STREAM_CHECK_MS)
+
+    def _check_stream(self) -> None:
+        """Save the stream's next stretch to analyse on a short-lived thread: writing it
+        mustn't hold up the window."""
+        streams = self._streams
+        if self._saving or streams is None or self._stream is None:
+            return
+        piece = self._next_piece(streams)
+        if piece is None:
+            return
+        start, end = piece
+        self._stream_check.setInterval(LIVE_PIECE_MS)  # the analysis is on its way
+        self._saving = True
+        number = self._stream_number
+        if self._copies is None:
+            self._copies = scratch_folder("pyamp-streams-")
+        self._copies.mkdir(parents=True, exist_ok=True)  # e.g. cleared as stale meanwhile
+        self._pieces += 1
+        target = self._copies / f"stream-{number}-{self._pieces}.mkv"
+
+        def save() -> None:
+            saved = streams.save_stream(target, start, end)
+            self._stream_saved.emit(number, target if saved else None, start, end)
+
+        threading.Thread(target=save, name="pyamp-stream-copy", daemon=True).start()
+
+    def _next_piece(self, streams: StreamSaver) -> tuple[float, float] | None:
+        """The stretch to save next: buffered but not yet analysed, from just before the
+        playback position on (what's playing, then what's coming)."""
+        buffered = streams.buffered_range()
+        targets = self._live_targets()
+        if buffered is None or not targets:
+            return None
+        start, end = buffered
+        position = self.position()
+        if not start - LIVE_SLACK_S <= position <= end + LIVE_SLACK_S:
+            # A song's times are its file's: it was sought where mpv hasn't fetched yet. A
+            # station's buffer may run on another clock: its analysis would be wrong.
+            if self._endless and self._playing:
+                log.info("The stream's timing doesn't match playback; it isn't analysed")
+                self._forget_stream()
+                self._source = None
+                for consumer in list(self._consumers):
+                    consumer.follow(None)
+            return None
+        kept_from = max(target.kept_from for target in targets)
+        if kept_from and position - 1 < kept_from:
+            # A station sought back past the analysis it keeps: it starts afresh there.
+            self._analysed = []
+            self._targets = []
+            self._follow_all()
+        begin, gap_end = self._unanalysed(max(start, position - 1))
+        end = min(end, gap_end, begin + PIECE_MAX_S)
+        if self._endless:
+            end = min(end, position + LIVE_AHEAD_S)
+        return (begin, end) if end - begin >= LIVE_MIN_PIECE_S else None
+
+    def _unanalysed(self, after: float) -> tuple[float, float]:
+        """The first stretch from ``after`` on that no piece has covered: (start, end)."""
+        begin = after
+        for start, end in self._analysed:
+            if start <= begin < end:
+                begin = end
+            elif begin < start:
+                return begin, start
+        return begin, float("inf")
+
+    def _mark_analysed(self, start: float, end: float) -> None:
+        spans = sorted([*self._analysed, (start, end)])
+        merged = [spans[0]]
+        for a, b in spans[1:]:
+            last_a, last_b = merged[-1]
+            if a <= last_b + 1e-3:  # touching or overlapping
+                merged[-1] = (last_a, max(last_b, b))
+            else:
+                merged.append((a, b))
+        self._analysed = merged
+
+    def _on_stream_saved(self, number: int, copy: Path | None, start: float, end: float) -> None:
+        self._saving = False
+        targets = self._live_targets()
+        if number != self._stream_number or copy is None or not targets:
+            _remove(copy)  # for an older track, or nobody wants it now; failed: tried again
+            return
+        self._analyser.decode_piece(copy, targets, start)
+        self._mark_analysed(start, end)
+        if end - start >= PIECE_MAX_S - 1e-3:
+            self._check_stream()  # more is buffered (a song): on to the next piece
+
+    def _forget_stream(self) -> None:
+        """Stop following the current stream (pieces saved for it meanwhile are dropped)."""
+        self._stream_number += 1
+        self._stream_check.stop()
+        self._stream = None
+        self._endless = False
+        self._targets = []
+        self._analysed = []
+
+    # -- Playback ----------------------------------------------------------------------------- #
+
+    def _on_state(self, event: PlaybackStateChanged) -> None:
+        # Freeze the interpolated position at the moment the state changes.
+        self._position_ms, self._position_at = round(self.position() * 1000), self._clock()
+        self._playing = event.state is PlaybackState.PLAYING
+
+    def _on_position(self, event: PositionChanged) -> None:
+        heading = self.position()
+        self._position_ms, self._position_at = event.position_ms, self._clock()
+        starts = event.position_ms > 0 and not self._heard
+        seek = self._heard and abs(event.position_ms / 1000 - heading) > SEEK_S
+        self._heard = self._heard or starts
+        # A stream plays once it has buffered a little, and a seek lands where it may not
+        # have been analysed: look now, rather than at the next check (up to
+        # LIVE_PIECE_MS later), so the analysis comes with the sound.
+        if (starts or seek) and self._consumers and self._stream is not None:
+            self._check_stream()
+
+
+class AnalysedSpectrum(QObject):
+    """Publishes analysed levels for the current position while playing.
+
+    Its levels come from the :class:`AudioFeed`'s decoding (its own, unless one is given
+    to share): a file's in one go, a stream's a piece at a time.
+    """
 
     def __init__(
         self,
@@ -662,34 +1043,17 @@ class AnalysedSpectrum(QObject):
         parent: QObject | None = None,
         *,
         streams: StreamSaver | None = None,
+        feed: AudioFeed | None = None,
     ) -> None:
         super().__init__(parent)
         self._bus = bus
         self._analyser = analyser
         self._band_count = band_count
-        self._clock = clock
+        self._owns_feed = feed is None
+        self.feed = feed or AudioFeed(bus, analyser, clock, self, streams=streams)
         self._timeline: LevelTimeline | None = None
-        self._location: Path | None = None  # the current file, analysed while active
-        # A stream (a station or a song from a server) is analysed a piece at a time, as
-        # it's buffered, into one timeline.
-        self._streams = streams
-        self._stream: StreamUrl | None = None
-        self._stream_number = 0  # bumped per track: a piece saved for an older one is dropped
-        self._endless = False  # a station: no length, and only its last minutes are kept
-        self._pieces_timeline: LevelTimeline | None = None
-        self._analysed: list[tuple[float, float]] = []  # the stretches saved, in order
-        self._pieces = 0  # numbers the pieces' files
-        self._heard = False  # whether the current track has started to play
-        self._saving = False
-        self._copies: Path | None = None  # a temporary folder, made when first needed
-        self._stream_check = QTimer(self)
-        self._stream_check.setInterval(STREAM_CHECK_MS)
-        self._stream_check.timeout.connect(self._check_stream)
-        self._stream_saved.connect(self._on_stream_saved)
         self._active = True
         self._playing = False
-        self._position_ms = 0
-        self._position_at = clock()
         self._offsets = np.zeros(band_count, dtype=np.float32)
         self._showing = False  # whether the bars show levels (not silence)
         self._timer = QTimer(self)
@@ -697,8 +1061,8 @@ class AnalysedSpectrum(QObject):
         self._timer.timeout.connect(self.tick)
         bus.subscribe(TrackChanged, self._on_track)
         bus.subscribe(PlaybackStateChanged, self._on_state)
-        bus.subscribe(PositionChanged, self._on_position)
         bus.subscribe(EqualizerChanged, self._on_equalizer)
+        self.feed.join(self)
 
     @property
     def timeline(self) -> LevelTimeline | None:
@@ -706,8 +1070,27 @@ class AnalysedSpectrum(QObject):
 
     def position(self) -> float:
         """Playback position in seconds, interpolated between the backend's updates."""
-        elapsed = self._clock() - self._position_at if self._playing else 0.0
-        return self._position_ms / 1000 + elapsed
+        return self.feed.position()
+
+    def follow(self, source: FeedSource | None) -> SampleTarget | None:
+        """The feed's track: a timeline for its levels (a file's is kept while it plays on)."""
+        if source is not None and isinstance(source.location, Path):
+            timeline = self._timeline
+            if (
+                timeline is not None
+                and timeline.path == source.location
+                and not timeline.cancelled.is_set()
+            ):
+                return None  # analysed already, or under way
+        self._forget_levels()
+        if source is None:
+            return None
+        if isinstance(source.location, Path):
+            timeline = LevelTimeline(source.location)
+        else:
+            timeline = LevelTimeline(keep_seconds=LIVE_KEEP_S if source.endless else None)
+        self._timeline = timeline
+        return self._analyser.level_target(timeline)
 
     def tick(self) -> None:
         if not self._playing:
@@ -738,6 +1121,11 @@ class AnalysedSpectrum(QObject):
             self._showing = False
             self._bus.publish(SpectrumUpdated((0.0,) * self._band_count))
 
+    def _forget_levels(self) -> None:
+        if self._timeline is not None:
+            self._timeline.cancelled.set()  # its decoding (or queued pieces) stop
+        self._timeline = None
+
     def set_active(self, active: bool) -> None:
         """Pause analysing and publishing (e.g. while nothing shows the visualiser).
 
@@ -748,175 +1136,29 @@ class AnalysedSpectrum(QObject):
             return
         self._active = active
         if active:
-            self._analyse_current()
-            self._watch_stream()
+            self.feed.join(self)
             if self._playing:
                 self._timer.start()
         else:
             self._timer.stop()
-            self._stream_check.stop()
-            self._analyser.cancel_all()
-            self._drop_pieces()
-            self._timeline = None
+            self.feed.leave(self)
+            self._forget_levels()
 
     def shutdown(self) -> None:
         self._timer.stop()
-        self._stream_check.stop()
-        self._stream_number += 1  # a copy still being saved is dropped
-        if self._copies is not None:
-            shutil.rmtree(self._copies, ignore_errors=True)
+        self.feed.leave(self)
+        if self._owns_feed:
+            self.feed.shutdown()
 
     def _on_track(self, event: TrackChanged) -> None:
-        track = event.track
-        location = track.location if track else None
-        self._location = location if isinstance(location, Path) else None
-        self._forget_stream()
-        if isinstance(location, StreamUrl) and track and self._streams:
-            self._stream = location
-            self._endless = not track.duration_ms  # radio has no length: it never ends
-        self._analyse_current()
-        self._watch_stream()
-        self._position_ms, self._position_at = 0, self._clock()
-        self._heard = False
         self._drop_bars()  # the next track's levels start from nothing
 
-    def _analyse_current(self) -> None:
-        if self._active and self._stream is not None:
-            if self._pieces_timeline is None:
-                keep = LIVE_KEEP_S if self._endless else None
-                self._pieces_timeline = LevelTimeline(keep_seconds=keep)
-            self._timeline = self._pieces_timeline  # filled in as pieces are saved
-            return
-        location = self._location if self._active else None
-        self._timeline = self._analyser.analyse(location) if location is not None else None
-
-    # -- Streams ---------------------------------------------------------------------------- #
-
-    def _watch_stream(self) -> None:
-        if self._active and self._stream is not None:
-            # Soon at first, so the bars start quickly; then at LIVE_PIECE_MS (see
-            # _check_stream).
-            self._stream_check.start(STREAM_CHECK_MS)
-
-    def _check_stream(self) -> None:
-        """Save the stream's next stretch to analyse on a short-lived thread: writing it
-        mustn't hold up the window."""
-        streams = self._streams
-        if self._saving or streams is None or self._stream is None:
-            return
-        piece = self._next_piece(streams)
-        if piece is None:
-            return
-        start, end = piece
-        self._stream_check.setInterval(LIVE_PIECE_MS)  # the bars are on their way
-        self._saving = True
-        number = self._stream_number
-        if self._copies is None:
-            self._copies = scratch_folder("pyamp-streams-")
-        self._copies.mkdir(parents=True, exist_ok=True)  # e.g. cleared as stale meanwhile
-        self._pieces += 1
-        target = self._copies / f"stream-{number}-{self._pieces}.mkv"
-
-        def save() -> None:
-            saved = streams.save_stream(target, start, end)
-            self._stream_saved.emit(number, target if saved else None, start, end)
-
-        threading.Thread(target=save, name="pyamp-stream-copy", daemon=True).start()
-
-    def _next_piece(self, streams: StreamSaver) -> tuple[float, float] | None:
-        """The stretch to save next: buffered but not yet analysed, from just before the
-        playback position on (what's playing, then what's coming)."""
-        buffered = streams.buffered_range()
-        timeline = self._pieces_timeline
-        if buffered is None or timeline is None:
-            return None
-        start, end = buffered
-        position = self.position()
-        if not start - LIVE_SLACK_S <= position <= end + LIVE_SLACK_S:
-            # A song's times are its file's: it was sought where mpv hasn't fetched yet. A
-            # station's buffer may run on another clock: its bars would be wrong.
-            if self._endless and self._playing:
-                log.info("The stream's timing doesn't match playback; no visualiser for it")
-                self._forget_stream()
-                self._timeline = None
-            return None
-        if timeline.first_row and position - 1 < timeline.first_row / FPS:
-            # A station sought back past the levels it keeps: they start afresh there.
-            self._drop_pieces()
-            self._analyse_current()
-        begin, gap_end = self._unanalysed(max(start, position - 1))
-        end = min(end, gap_end, begin + PIECE_MAX_S)
-        if self._endless:
-            end = min(end, position + LIVE_AHEAD_S)
-        return (begin, end) if end - begin >= LIVE_MIN_PIECE_S else None
-
-    def _unanalysed(self, after: float) -> tuple[float, float]:
-        """The first stretch from ``after`` on that no piece has covered: (start, end)."""
-        begin = after
-        for start, end in self._analysed:
-            if start <= begin < end:
-                begin = end
-            elif begin < start:
-                return begin, start
-        return begin, float("inf")
-
-    def _mark_analysed(self, start: float, end: float) -> None:
-        spans = sorted([*self._analysed, (start, end)])
-        merged = [spans[0]]
-        for a, b in spans[1:]:
-            last_a, last_b = merged[-1]
-            if a <= last_b + 1e-3:  # touching or overlapping
-                merged[-1] = (last_a, max(last_b, b))
-            else:
-                merged.append((a, b))
-        self._analysed = merged
-
-    def _on_stream_saved(self, number: int, copy: Path | None, start: float, end: float) -> None:
-        self._saving = False
-        timeline = self._pieces_timeline
-        if number != self._stream_number or copy is None or timeline is None:
-            _remove(copy)  # for an older track, or hidden meanwhile; failed: tried again
-            return
-        self._analyser.analyse_piece(copy, timeline, start)
-        self._mark_analysed(start, end)
-        if end - start >= PIECE_MAX_S - 1e-3:
-            self._check_stream()  # more is buffered (a song): on to the next piece
-
-    def _forget_stream(self) -> None:
-        """Stop following the current stream (pieces saved for it meanwhile are dropped)."""
-        self._stream_number += 1
-        self._stream_check.stop()
-        self._stream = None
-        self._endless = False
-        self._drop_pieces()
-
-    def _drop_pieces(self) -> None:
-        """Stop a stream's pieces being analysed; it starts afresh when needed."""
-        if self._pieces_timeline is not None:
-            self._pieces_timeline.cancelled.set()  # queued pieces are skipped (and deleted)
-        self._pieces_timeline = None
-        self._analysed = []
-
     def _on_state(self, event: PlaybackStateChanged) -> None:
-        # Freeze the interpolated position at the moment the state changes.
-        self._position_ms, self._position_at = round(self.position() * 1000), self._clock()
         self._playing = event.state is PlaybackState.PLAYING
         if self._playing and self._active:
             self._timer.start()
         else:
             self._timer.stop()  # SpectrumService already clears the bars
-
-    def _on_position(self, event: PositionChanged) -> None:
-        heading = self.position()
-        self._position_ms, self._position_at = event.position_ms, self._clock()
-        starts = event.position_ms > 0 and not self._heard
-        seek = self._heard and abs(event.position_ms / 1000 - heading) > SEEK_S
-        self._heard = self._heard or starts
-        # A stream plays once it has buffered a little, and a seek lands where it may not
-        # have been analysed: look now, rather than at the next check (up to
-        # LIVE_PIECE_MS later), so the bars come with the sound.
-        if (starts or seek) and self._active and self._stream is not None:
-            self._check_stream()
 
     def _on_equalizer(self, event: EqualizerChanged) -> None:
         self._offsets = equalizer_offsets(event.equalizer, self._band_count)

@@ -30,6 +30,7 @@ from email.message import Message
 from typing import Any
 
 from pyamp import APP_NAME, __version__
+from pyamp.tls import https_context
 
 #: Give up on a remote playlist after this long, or when it's this big (it should be tiny).
 TIMEOUT_S = 10.0
@@ -40,11 +41,12 @@ ERROR_BODY_BYTES = 64 * 1024
 
 @contextmanager
 def open_url(request: urllib.request.Request | str, timeout: float) -> Iterator[Any]:
-    """``urllib.request.urlopen``, except that an HTTP error's connection is closed at
-    once: urllib leaves its socket open until the error is garbage-collected. The error
-    raised in its place still has the start of its body to read."""
+    """``urllib.request.urlopen``, checking https certificates against the system's (see
+    :mod:`pyamp.tls`), except that an HTTP error's connection is closed at once: urllib
+    leaves its socket open until the error is garbage-collected. The error raised in its
+    place still has the start of its body to read."""
     try:
-        response = urllib.request.urlopen(request, timeout=timeout)
+        response = urllib.request.urlopen(request, timeout=timeout, context=https_context())
     except urllib.error.HTTPError as exc:
         try:
             body = exc.read(ERROR_BODY_BYTES)

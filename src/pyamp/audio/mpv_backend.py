@@ -56,6 +56,7 @@ from pyamp.audio.libmpv_loader import (
 from pyamp.audio.qt_audio_env import pipewire_is_incomplete
 from pyamp.core.equalizer import BANDS_HZ, Equalizer
 from pyamp.core.models import Location, OutputDevice, PlaybackState, ReplayGainMode, parse_location
+from pyamp.tls import MACOS_CA_FILE
 
 log = logging.getLogger(__name__)
 
@@ -67,10 +68,9 @@ _CANCEL_CHECK_S = 0.1
 #: How much of a stream mpv reads ahead (and half that it keeps behind).
 STREAM_BUFFER_BYTES = 32 * 1024 * 1024
 
-#: The certificate authorities macOS ships, kept current by its updates. FFmpeg checks
-#: https certificates, and with Mbed TLS (PyAmp's macOS libmpv) it needs them as a file;
-#: Windows' Schannel and Linux distributions' builds use the system's own store.
-MACOS_CA_FILE = Path("/etc/ssl/cert.pem")
+# FFmpeg checks https certificates, and with Mbed TLS (PyAmp's macOS libmpv) it needs
+# macOS's as a file (MACOS_CA_FILE); Windows' Schannel and Linux distributions' builds
+# use the system's own store.
 
 
 def tls_options(platform: str = sys.platform, ca_file: Path = MACOS_CA_FILE) -> dict[str, str]:

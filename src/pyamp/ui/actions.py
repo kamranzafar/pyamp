@@ -34,6 +34,8 @@ from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from pyamp.core.events import EventBus, PlayModeChanged, ReplayGainChanged
 from pyamp.core.models import RepeatMode, ReplayGainMode
 from pyamp.core.player import Player
+from pyamp.ui.glyphs import glyph_icon
+from pyamp.ui.skin import DEFAULT_SKIN, Skin
 
 SEEK_STEP_MS = 5000
 
@@ -47,7 +49,7 @@ _REPLAY_GAIN_LABELS = {
     ReplayGainMode.TRACK: "&Track",
     ReplayGainMode.ALBUM: "&Album",
 }
-_REPEAT_GLYPHS = {RepeatMode.OFF: "⟳", RepeatMode.ALL: "⟳", RepeatMode.ONE: "⟳1"}
+_REPEAT_GLYPHS = {RepeatMode.OFF: "repeat", RepeatMode.ALL: "repeat", RepeatMode.ONE: "repeat-one"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,26 +71,29 @@ class PlayerActions:
         return (self.previous, self.play, self.pause, self.stop, self.next)
 
 
-def _action(parent: QObject, glyph: str, tooltip: str, shortcut: str) -> QAction:
-    action = QAction(glyph, parent)
-    action.setToolTip(f"{tooltip} ({shortcut})")
+def _action(parent: QObject, glyph: str, label: str, shortcut: str, skin: Skin) -> QAction:
+    # Buttons show only the icon; menus show it beside the label.
+    action = QAction(glyph_icon(glyph, skin), label, parent)
+    action.setToolTip(f"{label} ({shortcut})")
     action.setShortcut(QKeySequence(shortcut))
     action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
     return action
 
 
-def create_player_actions(parent: QObject, player: Player, bus: EventBus) -> PlayerActions:
+def create_player_actions(
+    parent: QObject, player: Player, bus: EventBus, skin: Skin = DEFAULT_SKIN
+) -> PlayerActions:
     """Build the actions. Keyboard shortcuts follow classic Winamp (Z X C V B)."""
     actions = PlayerActions(
-        previous=_action(parent, "⏮", "Previous", "Z"),
-        play=_action(parent, "▶", "Play", "X"),
-        pause=_action(parent, "⏸", "Pause", "C"),
-        stop=_action(parent, "⏹", "Stop", "V"),
-        next=_action(parent, "⏭", "Next", "B"),
-        seek_back=_action(parent, "«", "Rewind 5 s", "Left"),
-        seek_forward=_action(parent, "»", "Fast-forward 5 s", "Right"),
-        shuffle=_action(parent, "⤮", "Shuffle", "S"),
-        repeat=_action(parent, "⟳", "Repeat", "R"),
+        previous=_action(parent, "previous", "Previous", "Z", skin),
+        play=_action(parent, "play", "Play", "X", skin),
+        pause=_action(parent, "pause", "Pause", "C", skin),
+        stop=_action(parent, "stop", "Stop", "V", skin),
+        next=_action(parent, "next", "Next", "B", skin),
+        seek_back=_action(parent, "rewind", "Rewind 5 s", "Left", skin),
+        seek_forward=_action(parent, "fast-forward", "Fast-forward 5 s", "Right", skin),
+        shuffle=_action(parent, "shuffle", "Shuffle", "S", skin),
+        repeat=_action(parent, "repeat", "Repeat", "R", skin),
         replay_gain=_replay_gain_actions(parent, player),
     )
     actions.previous.triggered.connect(player.previous)
@@ -111,7 +116,8 @@ def create_player_actions(parent: QObject, player: Player, bus: EventBus) -> Pla
             actions.shuffle.setChecked(event.shuffle)
             actions.shuffle.blockSignals(False)
         actions.repeat.setChecked(event.repeat is not RepeatMode.OFF)
-        actions.repeat.setText(_REPEAT_GLYPHS[event.repeat])
+        actions.repeat.setIcon(glyph_icon(_REPEAT_GLYPHS[event.repeat], skin))
+        actions.repeat.setText(_REPEAT_LABELS[event.repeat])
         actions.repeat.setToolTip(f"{_REPEAT_LABELS[event.repeat]} (R)")
 
     def sync_replay_gain(event: ReplayGainChanged) -> None:

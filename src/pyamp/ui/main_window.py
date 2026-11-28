@@ -26,7 +26,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -72,6 +72,7 @@ from pyamp.ui.about_dialog import AboutDialog
 from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
 from pyamp.ui.equalizer_window import EqualizerWindow
+from pyamp.ui.glyphs import glyph_icon
 from pyamp.ui.jump_dialog import JumpDialog
 from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.library_window import LibraryWindow
@@ -88,6 +89,8 @@ from pyamp.ui.widgets.playlist_view import PlaylistView
 from pyamp.ui.widgets.sliders import SeekSlider, VolumeSlider
 
 WINDOW_WIDTH = 460
+#: The transport buttons' icons: a little smaller than the usual 16 px.
+TRANSPORT_ICON_SIZE = QSize(13, 13)
 STATUS_TIMEOUT_MS = 5000
 #: Indents the playlist summary in the status bar to where Qt draws messages (a few
 #: pixels in), so neither sits against the window's edge and both line up.
@@ -149,7 +152,7 @@ class MainWindow(QMainWindow):
         self.resize(WINDOW_WIDTH, 520)
         self.setMinimumWidth(WINDOW_WIDTH)
 
-        self._actions = create_player_actions(self, services.player, services.bus)
+        self._actions = create_player_actions(self, services.player, services.bus, skin)
         self._lcd = LcdPanel(
             services.bus,
             skin,
@@ -233,10 +236,12 @@ class MainWindow(QMainWindow):
                 continue
             button = QToolButton()
             button.setDefaultAction(action)
+            button.setIconSize(TRANSPORT_ICON_SIZE)
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             row.addWidget(button)
         eject = QToolButton()
-        eject.setText("⏏")
+        eject.setIcon(glyph_icon("eject", self._skin))
+        eject.setIconSize(TRANSPORT_ICON_SIZE)
         eject.setToolTip("Add files to the playlist (Ctrl+O)")
         eject.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         eject.clicked.connect(self._add_files)

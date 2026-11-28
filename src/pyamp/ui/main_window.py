@@ -72,6 +72,7 @@ from pyamp.ui.about_dialog import AboutDialog
 from pyamp.ui.actions import PlayerActions, create_player_actions
 from pyamp.ui.background_loader import BackgroundTrackLoader, LoadJob
 from pyamp.ui.equalizer_window import EqualizerWindow
+from pyamp.ui.glyphs import glyph_icon
 from pyamp.ui.jump_dialog import JumpDialog
 from pyamp.ui.library_scan import BackgroundLibraryScanner
 from pyamp.ui.library_window import LibraryWindow
@@ -149,7 +150,7 @@ class MainWindow(QMainWindow):
         self.resize(WINDOW_WIDTH, 520)
         self.setMinimumWidth(WINDOW_WIDTH)
 
-        self._actions = create_player_actions(self, services.player, services.bus)
+        self._actions = create_player_actions(self, services.player, services.bus, skin)
         self._lcd = LcdPanel(
             services.bus,
             skin,
@@ -236,7 +237,7 @@ class MainWindow(QMainWindow):
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             row.addWidget(button)
         eject = QToolButton()
-        eject.setText("⏏")
+        eject.setIcon(glyph_icon("eject", self._skin))
         eject.setToolTip("Add files to the playlist (Ctrl+O)")
         eject.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         eject.clicked.connect(self._add_files)

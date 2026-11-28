@@ -22,8 +22,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QMouseEvent
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QMouseEvent, QPainter, QPaintEvent
 from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QWidget
 
 from pyamp.core.events import (
@@ -38,14 +38,15 @@ from pyamp.core.events import (
     TrackRetitled,
 )
 from pyamp.core.models import PlaybackState, format_duration
+from pyamp.ui.glyphs import paint_glyph
 from pyamp.ui.skin import Skin
 from pyamp.ui.widgets.marquee import MarqueeLabel
 from pyamp.ui.widgets.spectrum import SpectrumWidget
 
 _STATUS_GLYPHS = {
-    PlaybackState.PLAYING: "▶",
-    PlaybackState.PAUSED: "❚❚",
-    PlaybackState.STOPPED: "■",
+    PlaybackState.PLAYING: "play",
+    PlaybackState.PAUSED: "pause",
+    PlaybackState.STOPPED: "stop",
 }
 BLINK_MS = 500
 
@@ -66,6 +67,26 @@ class ClickableLabel(QLabel):
     def mousePressEvent(self, ev: QMouseEvent) -> None:
         self.clicked.emit()
         super().mousePressEvent(ev)
+
+
+class StatusMark(QWidget):
+    """The play / pause / stop mark at the LCD's top left."""
+
+    SIZE = 12
+
+    def __init__(self, colour: QColor, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._colour = colour
+        self.glyph = _STATUS_GLYPHS[PlaybackState.STOPPED]
+        self.setFixedSize(QSize(self.SIZE, self.SIZE))
+
+    def set_state(self, state: PlaybackState) -> None:
+        self.glyph = _STATUS_GLYPHS[state]
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        paint_glyph(painter, QRectF(self.rect()), self.glyph, self._colour)
 
 
 class LcdPanel(QFrame):
@@ -94,8 +115,8 @@ class LcdPanel(QFrame):
         big.setBold(True)
         lcd_style = f"color: {skin.lcd}; background: transparent;"
 
-        self._status = QLabel(_STATUS_GLYPHS[self._state])
-        self._status.setStyleSheet(lcd_style)
+        self._status = StatusMark(QColor(skin.lcd))
+        self._status.set_state(self._state)
         self._time = ClickableLabel()
         self._time.setFont(big)
         self._time.setStyleSheet(lcd_style)
@@ -137,7 +158,7 @@ class LcdPanel(QFrame):
         layout.setHorizontalSpacing(10)
         layout.setVerticalSpacing(2)
         # The big time spans the title and the small audio line under it.
-        layout.addWidget(self._status, 0, 0, 2, 1)
+        layout.addWidget(self._status, 0, 0, 2, 1, Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self._time, 0, 1, 2, 1)
         layout.addWidget(self._title, 0, 2)
         layout.addWidget(self._audio_info, 1, 2)
@@ -179,7 +200,7 @@ class LcdPanel(QFrame):
 
     def _on_state(self, event: PlaybackStateChanged) -> None:
         self._state = event.state
-        self._status.setText(_STATUS_GLYPHS[event.state])
+        self._status.set_state(event.state)
         if event.state is PlaybackState.PAUSED:
             self._blink.start()
         else:

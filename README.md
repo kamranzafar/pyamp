@@ -27,10 +27,8 @@ Intel Macs), open it and drag **PyAmp** to Applications. libmpv is bundled, so t
 `mpv` backend, the equaliser and gapless playback work without installing anything
 else.
 
-The app isn't notarised yet, so the first time macOS will refuse to open it. Open
-**System Settings → Privacy & Security**, scroll down to the message about PyAmp and
-click **Open Anyway** (on macOS 14 and earlier, right-clicking PyAmp → **Open** also
-works). If something doesn't work, run
+The app is signed and notarised by Apple, so it opens like any other downloaded app.
+If something doesn't work, run
 `/Applications/PyAmp.app/Contents/MacOS/PyAmp --self-test` and include the output
 in a bug report.
 
@@ -55,7 +53,7 @@ libmpv is bundled, so the `mpv` backend, the equaliser and gapless playback work
 without installing anything else. 64-bit Windows 10 or 11 (on ARM it runs under
 emulation).
 
-The builds aren't code-signed yet, so Windows SmartScreen will warn the first time
+The Windows builds aren't code-signed yet, so SmartScreen will warn the first time
 ("Windows protected your PC"): click **More info** → **Run anyway**. If something
 doesn't work, run `pyamp-console.exe --self-test` from PyAmp's folder (the
 installer puts it in `%LOCALAPPDATA%\Programs\PyAmp`) and include the output in a
@@ -443,6 +441,16 @@ the zip and the installer (`pyamp.iss`). On Windows the app folder has two progr
 since a windowed program can't print. Licences of bundled components are listed in
 `packaging/THIRD_PARTY_NOTICES.md`, which ships with the app.
 
+`build.sh` signs the app ad hoc unless `PYAMP_SIGN_IDENTITY` names a Developer ID
+Application identity in the keychain; then it signs with the hardened runtime
+(`packaging/macos/entitlements.plist`), and with an App Store Connect API key
+(`PYAMP_NOTARY_KEY`, `PYAMP_NOTARY_KEY_ID`, `PYAMP_NOTARY_ISSUER`) or a `notarytool`
+keychain profile (`PYAMP_NOTARY_PROFILE`) it notarises and staples the app and the
+disk image too. The *Package (macOS)* workflow signs every build when the repository's
+`MACOS_CERTIFICATE_P12` (base64) and `MACOS_CERTIFICATE_PASSWORD` secrets are set, and
+notarises releases and manual runs with `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID` and
+`APPLE_API_ISSUER_ID`. A release tag fails to build without the certificate.
+
 libmpv is PyAmp's own audio-only build: one library with FFmpeg and its libraries linked
 in, without video outputs, GPU APIs or video codecs (Windows: 18.7 MB instead of the
 122 MB of a general-purpose `libmpv-2.dll`; macOS: 14.6 MB instead of a 35 MB folder).
@@ -647,8 +655,7 @@ the network.
 
 PyAmp aims to stay small: a fast player for local files, not a media centre.
 
-- **Code signing** for the Windows and macOS builds, so SmartScreen and Gatekeeper
-  don't warn.
+- **Code signing** for the Windows builds, so SmartScreen doesn't warn.
 
 Not planned, to keep PyAmp lightweight:
 

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the Developer ID (hardened runtime) build; see build.sh.
+
+  disable-library-validation: PyAmp can load a libmpv that isn't bundled (one installed
+  system-wide, in PyAmp's user folder or named by PYAMP_LIBMPV), signed by someone else
+  or not at all. The hardened runtime refuses such libraries without this.
+
+  allow-unsigned-executable-memory: ctypes callbacks (libmpv calling back into PyAmp)
+  are made by libffi, which on Intel Macs needs memory that is writable and
+  executable. Without this the first callback hangs, retrying forever.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>
